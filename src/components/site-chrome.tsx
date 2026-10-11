@@ -13,8 +13,12 @@ import { cn } from "@/lib/utils";
 export function LogoTile({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
   const dims = size === "lg" ? "h-20 w-20 rounded-2xl" : size === "sm" ? "h-8 w-8 rounded-lg" : "h-10 w-10 rounded-xl";
   return (
-    <div className={cn(dims, "shrink-0 select-none overflow-hidden shadow-sm transition-transform hover:scale-105")}>
-      <img src="/mireli-logo.svg" alt="Mi-Reli" className="h-full w-full object-cover" />
+    <div className={cn(dims, "relative shrink-0 select-none overflow-hidden bg-white shadow-sm transition-transform hover:scale-105")}>
+      <img
+        src="/mireli-logo.jpeg"
+        alt="Mi-Reli logo"
+        className="absolute left-1/2 top-0 h-[150%] max-w-none -translate-x-1/2"
+      />
     </div>
   );
 }

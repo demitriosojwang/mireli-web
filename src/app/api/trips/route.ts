@@ -3,6 +3,8 @@ import { db } from "@/lib/db";
 import { runOperationalTick, CAB_LEAD_MINUTES } from "@/lib/engine";
 import { getConfig } from "@/lib/money";
 import { nairobiDayRange } from "@/lib/nairobi-time";
+import { evaluateDriverApplication } from "@/lib/driver/onboarding";
+import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 
 /** Bookable departures for a date + direction. */
 export async function GET(req: NextRequest) {
@@ -19,6 +21,21 @@ export async function GET(req: NextRequest) {
   await runOperationalTick();
   const now = new Date();
   const cfg = await getConfig();
+  const activeDrivers = await db.driver.findMany({
+    where: { status: "active" },
+    select: {
+      id: true,
+      status: true,
+      application: {
+        include: { documents: { where: { state: { not: "replaced" } } } },
+      },
+    },
+  });
+  const eligibleDriverIds = new Set(
+    activeDrivers
+      .filter((driver) => isLocalDemoEnabled() || evaluateDriverApplication(driver.application, driver.status).eligible)
+      .map((driver) => driver.id),
+  );
 
   const trips = await db.trip.findMany({
     where: {
@@ -34,9 +51,11 @@ export async function GET(req: NextRequest) {
       bookings: { where: { status: { in: ["awaiting_payment", "confirmed", "boarded", "completed"] } }, select: { seats: true } },
     },
   });
+  const availableTrips = trips.filter((trip) => !!trip.driverId && eligibleDriverIds.has(trip.driverId));
 
   return NextResponse.json({
-    trips: trips.map((t) => {
+    hasEligibleDrivers: eligibleDriverIds.size > 0,
+    trips: availableTrips.map((t) => {
       const relevantBooked = t.bookings.reduce((s, b) => s + b.seats, 0);
       const seatsLeft = Math.max(t.capacity - relevantBooked, 0);
       const stages = t.route.stages.map((s) => ({

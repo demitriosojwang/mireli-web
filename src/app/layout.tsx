@@ -10,7 +10,7 @@ export const metadata: Metadata = {
     "Mi-Reli shuttles SGR passengers between Mombasa Terminus (MTM) and the coast: shared-ride pickup and drop-off points across the North Coast (Bamburi, Nyali, Mtwapa, Malindi) and South Coast (Likoni, Diani) — every cab timed to a Madaraka Express departure or arrival. Pay with M-Pesa.",
   keywords: ["Mi-Reli", "Mombasa", "SGR", "Madaraka Express", "Mombasa Terminus", "feeder", "cab", "M-Pesa", "Nyali", "Bamburi", "Mtwapa", "Likoni", "Diani"],
   icons: {
-    icon: "/mireli-logo.svg",
+    icon: "/mireli-logo.jpeg",
   },
 };
 

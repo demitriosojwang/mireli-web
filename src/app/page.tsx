@@ -88,6 +88,7 @@ export default function Home() {
   });
   const [routes, setRoutes] = useState<RouteInfo[]>([]);
   const [trips, setTrips] = useState<BookableTrip[] | null>(null);
+  const [hasEligibleDrivers, setHasEligibleDrivers] = useState<boolean | null>(null);
   const [timetable, setTimetable] = useState<TrainRow[]>([]);
   const [myBookings, setMyBookings] = useState<BookingRow[]>([]);
   const [isRefreshing, setLoading] = useState(false);
@@ -111,10 +112,12 @@ export default function Home() {
   const loadTrips = useCallback(async (dir: string, d: string) => {
     setLoading(true);
     try {
-      const res = await api<{ trips: BookableTrip[] }>(`/api/trips?date=${d}&direction=${dir}`);
+      const res = await api<{ trips: BookableTrip[]; hasEligibleDrivers: boolean }>(`/api/trips?date=${d}&direction=${dir}`);
       setTrips(res.trips);
+      setHasEligibleDrivers(res.hasEligibleDrivers);
     } catch {
       setTrips([]);
+      setHasEligibleDrivers(null);
     } finally {
       setLoading(false);
       setLoadedQuery(`${dir}|${d}`);
@@ -149,14 +152,22 @@ export default function Home() {
   }, [isAuthed]);
 
   useEffect(() => {
-    if (showSplash || !isAuthed) return;
+    if (showSplash) return;
     let active = true;
-    api<{ trips: BookableTrip[] }>(`/api/trips?date=${date}&direction=${direction}`)
-      .then((res) => { if (active) setTrips(res.trips); })
-      .catch(() => { if (active) setTrips([]); })
+    api<{ trips: BookableTrip[]; hasEligibleDrivers: boolean }>(`/api/trips?date=${date}&direction=${direction}`)
+      .then((res) => {
+        if (!active) return;
+        setTrips(res.trips);
+        setHasEligibleDrivers(res.hasEligibleDrivers);
+      })
+      .catch(() => {
+        if (!active) return;
+        setTrips([]);
+        setHasEligibleDrivers(null);
+      })
       .finally(() => { if (active) setLoadedQuery(queryKey); });
     return () => { active = false; };
-  }, [showSplash, isAuthed, direction, date, queryKey]);
+  }, [showSplash, direction, date, queryKey]);
 
   function openBooking(trip: BookableTrip) {
     const fallbackStage =
@@ -192,11 +203,11 @@ export default function Home() {
           time: mtmTime,
           name: t.name,
           label: direction === "FROM_TERMINUS" ? "Arrives MTM" : "Departs MTM",
-          gone: trips !== null && !(trips || []).some((x) => x.train && `${x.train.name}-${x.train.mtmTime}` === key),
+          gone: trips !== null && hasEligibleDrivers === true && !(trips || []).some((x) => x.train && `${x.train.name}-${x.train.mtmTime}` === key),
         };
       })
       .sort((a, b) => a.time.localeCompare(b.time));
-  }, [timetable, direction, trips]);
+  }, [timetable, direction, trips, hasEligibleDrivers]);
 
   const selectedTrainGone = trainKey ? (trainOptions.find((o) => o.key === trainKey)?.gone ?? false) : false;
 
@@ -223,17 +234,20 @@ export default function Home() {
 
   // Trips after train + point filters
   const visibleTrips = useMemo(() => {
-    let list = trips || [];
+    let list = (trips || []).filter((trip) =>
+      trip.bookable && (charter ? trip.seatsLeft === trip.capacity : trip.seatsLeft > 0),
+    );
     if (trainKey) list = list.filter((t) => t.train && `${t.train.name}-${t.train.mtmTime}` === trainKey);
     if (pointId) list = list.filter((t) => t.stages.some((s) => s.id === pointId));
     return list;
-  }, [trips, trainKey, pointId]);
+  }, [trips, trainKey, pointId, charter]);
 
   // How many seats can actually be booked on the cabs currently listed?
   const seatCap = useMemo(() => {
-    if (loading || !visibleTrips.length) return 14;
+    if (loading) return 14;
+    if (!visibleTrips.length) return 1;
     const maxLeft = Math.max(...visibleTrips.map((t) => Math.max(t.seatsLeft, 0)));
-    return Math.max(1, Math.min(14, maxLeft || 14));
+    return Math.max(1, Math.min(14, maxLeft));
   }, [loading, visibleTrips]);
 
   const seats = Math.min(requestedSeats, seatCap);
@@ -334,53 +348,42 @@ export default function Home() {
                 </div>
                 {pointId && (
                   <button onClick={() => setPointId(null)} className="text-[11px] text-primary hover:underline">
-                    Show all points
+                    Clear selection
                   </button>
                 )}
               </div>
-              <div className="space-y-2">
-                {pointGroups.length === 0 && (
-                  <Skeleton className="h-20 w-full" />
-                )}
-                {pointGroups.map(({ route, coast, points }) => (
-                  <div key={route.id}>
-                    <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-                      {coast === "south" ? (
-                        <span className="inline-flex rounded bg-orange-100 px-1.5 py-0.5 text-[9px] uppercase text-orange-800">
-                          South Coast
-                        </span>
-                      ) : (
-                        <span className="inline-flex rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] uppercase text-emerald-800">
-                          North Coast
-                        </span>
-                      )}
-                      <span>{route.name.replace("Mombasa Terminus ↔ ", "").replace(" (Mtwapa · Malindi)", "")}</span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {points.map((p) => {
-                        const active = pointId === p.id;
-                        return (
-                          <button
-                            key={p.id}
-                            onClick={() => setPointId(active ? null : p.id)}
-                            className={cn(
-                              "rounded-lg border p-2 text-left text-xs transition-all",
-                              active
-                                ? "border-primary bg-primary shadow-sm text-primary-foreground"
-                                : "border-border bg-card hover:bg-accent hover:text-accent-foreground",
-                            )}
-                          >
-                            <div className="truncate font-medium">{p.name}</div>
-                            <div className={cn("mt-0.5 text-[10px]", active ? "opacity-80" : "text-muted-foreground")}>
-                              KSh {p.fare} · door +{p.homeSurcharge}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
+              {pointGroups.length === 0 ? (
+                <Skeleton className="h-11 w-full" />
+              ) : (
+                <div className="space-y-1.5">
+                  <select
+                    id="booking-point"
+                    aria-label={`${pointLabelCap} point`}
+                    value={pointId ?? ""}
+                    onChange={(event) => setPointId(event.target.value || null)}
+                    className="h-11 w-full rounded-lg border border-input bg-background px-3 text-sm shadow-sm outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option value="">Choose a {pointLabelCap.toLowerCase()} point</option>
+                    {pointGroups.map(({ route, coast, points }) => (
+                      <optgroup
+                        key={route.id}
+                        label={`${coast === "south" ? "South Coast" : "North Coast"} · ${route.name.replace("Mombasa Terminus ↔ ", "").replace(" (Mtwapa · Malindi)", "")}`}
+                      >
+                        {points.map((point) => (
+                          <option key={point.id} value={point.id}>
+                            {point.name} · KSh {point.fare} · door +KSh {point.homeSurcharge}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                  {selectedPoint && (
+                    <p className="text-[11px] text-muted-foreground">
+                      {selectedPoint.point.name} · KSh {selectedPoint.point.fare} per seat · door surcharge +KSh {selectedPoint.point.homeSurcharge}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Options: door-to-door + charter + live fare preview */}
@@ -492,9 +495,11 @@ export default function Home() {
                   <CardContent className="py-8 text-center text-sm text-muted-foreground">
                     {selectedTrainGone
                       ? "This train’s meet-cab has already left for the selected day — pick a later train or another date."
-                      : pointId
-                        ? "No cabs serve this point for that train. Try another point or \"Show all points\"."
-                        : "No cabs posted for this train yet."}
+                      : hasEligibleDrivers === false
+                        ? "No bookable cabs are available yet. Drivers will appear here after onboarding and approval."
+                        : pointId
+                        ? "No available cabs serve this point for that train. Try another point or clear your selection."
+                        : "No available cabs are listed for this train yet."}
                   </CardContent>
                 </Card>
               )}
