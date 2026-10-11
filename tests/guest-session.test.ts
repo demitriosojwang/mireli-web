@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getPassengerSession: vi.fn(),
+  assertSessionSigningKeyAvailable: vi.fn(),
   platformConfigFindUnique: vi.fn(),
   passengerFindUnique: vi.fn(),
   passengerCreate: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/session", () => ({
   getPassengerSession: mocks.getPassengerSession,
+  assertSessionSigningKeyAvailable: mocks.assertSessionSigningKeyAvailable,
   encodeSession: mocks.encodeSession,
   passengerCookieOptions: () => ({
     name: "mireli_session",
@@ -50,6 +52,7 @@ const guest = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.assertSessionSigningKeyAvailable.mockImplementation(() => undefined);
   mocks.getPassengerSession.mockResolvedValue(null);
   mocks.platformConfigFindUnique.mockResolvedValue(null);
   mocks.passengerCreate.mockResolvedValue(guest);
@@ -64,12 +67,30 @@ describe("guest passenger session", () => {
     const response = await GET();
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
     expect((await response.json()).passenger.isGuest).toBe(true);
     expect(response.headers.get("set-cookie")).toContain("mireli_session=");
     expect(mocks.issueCredit).not.toHaveBeenCalled();
     expect(mocks.audit).toHaveBeenCalledWith(expect.objectContaining({
       metadata: { welcomeCredit: 0, welcomeCreditSkipped: true },
     }));
+  });
+
+  it("does not create a guest record when session signing is unavailable", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.assertSessionSigningKeyAvailable.mockImplementationOnce(() => {
+      throw new Error("SESSION_SECRET must contain at least 32 characters.");
+    });
+
+    const response = await GET();
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect((await response.json()).error).toContain("booking session is temporarily unavailable");
+    expect(mocks.getPassengerSession).not.toHaveBeenCalled();
+    expect(mocks.platformConfigFindUnique).not.toHaveBeenCalled();
+    expect(mocks.passengerCreate).not.toHaveBeenCalled();
+    log.mockRestore();
   });
 
   it("issues configured welcome credit only when operator settings exist", async () => {

@@ -14,6 +14,9 @@ driver platform and approved route data are live.
 - [x] Start a passenger guest session without creating default operator
   settings; issue the welcome credit only when configured credit validity is
   present, and retry guest creation only for a unique-phone collision.
+- [x] Check the session-signing key before writing guest records or credits;
+  show a retryable booking-session error and block booking submission when
+  passenger identity could not be initialized.
 - [x] Require an explicit pickup/drop-off point before a cab can be booked.
 - [x] Keep available cabs at zero when there are no active, approved drivers.
 - [x] Return that empty supply state before running the scheduling tick, and

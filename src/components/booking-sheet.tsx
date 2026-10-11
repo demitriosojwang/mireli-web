@@ -332,6 +332,15 @@ function BookingSheetContent({
                 {created.cashDue > 0 ? "Pay later from My rides" : "Done"}
               </Button>
             </div>
+          ) : identity.error || !me?.session ? (
+            <div className="space-y-3 px-4 pb-2" role="alert">
+              <p className="text-sm text-destructive">
+                We couldn&apos;t start a secure booking session, so this booking has not been submitted.
+              </p>
+              <Button variant="outline" className="w-full" onClick={() => void refresh()}>
+                Try again
+              </Button>
+            </div>
           ) : (
             <div className="space-y-4 px-4 pb-2">
               {/* Route info */}
@@ -542,7 +551,7 @@ function BookingSheetContent({
             </div>
           )}
 
-          {!created && (
+          {!created && !identity.error && me?.session && (
             <SheetFooter className="px-4 pb-4">
               {guestBlocked ? (
                 <p className="text-center text-[11px] text-muted-foreground">

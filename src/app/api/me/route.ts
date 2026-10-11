@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import {
   getPassengerSession,
   encodeSession,
+  assertSessionSigningKeyAvailable,
   passengerCookieOptions,
   type Session,
 } from "@/lib/session";
@@ -19,6 +20,16 @@ import { audit } from "@/lib/audit";
  * Admin stays identity-gated at /admin — never touched by this route.
  */
 export async function GET() {
+  try {
+    assertSessionSigningKeyAvailable();
+  } catch (error) {
+    console.error("[api/me] Passenger session signing is unavailable", error);
+    return NextResponse.json(
+      { error: "Your booking session is temporarily unavailable. Please try again shortly." },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
   const existing = await getPassengerSession();
 
   if (existing) {
@@ -122,7 +133,7 @@ async function respondFor(
     },
     creditBalance,
     activeCredits: credits.length,
-  });
+  }, { headers: { "Cache-Control": "no-store" } });
   if (setCookie) {
     res.cookies.set({ ...passengerCookieOptions(), value: encodeSession(session) });
   }

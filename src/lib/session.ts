@@ -16,6 +16,11 @@ function sessionSecret(): string {
   throw new Error("SESSION_SECRET must contain at least 32 characters.");
 }
 
+/** Fail before writing guest records or credits when cookie signing is unavailable. */
+export function assertSessionSigningKeyAvailable(): void {
+  sessionSecret();
+}
+
 const PASSENGER_COOKIE = "mireli_session";
 const ADMIN_COOKIE = "mireli_admin";
 
