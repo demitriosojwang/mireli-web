@@ -218,6 +218,24 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  // Secure a driver and cab before applying credit or allowing payment. An
+  // unmatched request must never look like a confirmed booking to a passenger.
+  const allocation = await allocateBooking({
+    bookingId: booking.id,
+    routeId: route.id,
+    direction,
+    seats: isCharter ? 999 : tripSeats, // charter handled inside allocator
+    travelDate: travelDateDate,
+    charter: isCharter,
+  });
+  if (!allocation.tripId) {
+    await db.booking.delete({ where: { id: booking.id } });
+    return NextResponse.json(
+      { error: "No approved driver and cab are available for this journey yet. No payment was taken; please try another date later." },
+      { status: 409 },
+    );
+  }
+
   // Credit offer — the passenger chooses; partial use supported
   let creditApplied = 0;
   if (applyCredit) {
@@ -230,16 +248,6 @@ export async function POST(req: NextRequest) {
       data: { creditApplied, cashDue },
     });
   }
-
-  // Auto-allocation
-  const allocation = await allocateBooking({
-    bookingId: booking.id,
-    routeId: route.id,
-    direction,
-    seats: isCharter ? 999 : tripSeats, // charter handled inside allocator
-    travelDate: travelDateDate,
-    charter: isCharter,
-  });
 
   await audit({
     actorId: session.id,

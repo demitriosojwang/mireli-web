@@ -175,10 +175,14 @@ export async function allocateBooking(params: {
       status: { in: ["scheduled", "locked"] },
     },
     orderBy: { departureAt: "asc" },
-    include: { bookings: { select: { seats: true } } },
+    include: {
+      bookings: { select: { seats: true } },
+      driver: { include: { application: { include: { documents: { where: { state: { not: "replaced" } } } } } } },
+    },
   });
 
   for (const t of candidates) {
+    if (!t.driver || !(isLocalDemoEnabled() || evaluateDriverApplication(t.driver.application, t.driver.status).eligible)) continue;
     if (params.charter) {
       // Charter = the whole cab: only a completely empty trip qualifies
       if (t.bookedSeats === 0) {
