@@ -57,8 +57,8 @@ driver platform and approved route data are live.
 
 - [ ] Confirm that the attached schedule is still current; the PDF has no
   effective date. Enter the confirmed trains in the production timetable.
-- [ ] Store overnight arrival day offsets correctly, especially the 03:55
-  Nairobi arrival for the night train.
+- [x] Apply each train's destination-day offset when scheduling Mombasa arrival
+  pickups, including the 03:55 next-day Nairobi-to-Mombasa night train.
 - [ ] Test the feeder schedule against train arrivals/departures. The current
   engine rule leaves Mombasa pickup-stage cabs 120 minutes before the train:
   06:00 for 08:00, 13:00 for 15:00, and 20:00 for 22:00.
@@ -145,3 +145,4 @@ not connect to Mireli's current Mombasa routes. It notes long-distance service
 on Friday, Saturday, and Sunday. Kenya Railways contact details printed on the
 PDF are www.krc.co.ke, info@krc.co.ke, 0709 907 000, and 0709 907 555; these
 are not Mireli customer-support contacts.
+

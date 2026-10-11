@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import {evaluateDriverApplication} from "@/lib/driver/onboarding";
 import { getConfig, onTripCompleted, runReconciliationSweep, isPayoutBatchDue, runPayoutBatch } from "@/lib/money";
 import { audit } from "@/lib/audit";
-import { nairobiDate, nairobiDayRange, nairobiEventAt } from "@/lib/nairobi-time";
+import { nairobiDate, nairobiDayRange, nairobiEventAt, nairobiTrainArrivalAt } from "@/lib/nairobi-time";
 import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 
 /**
@@ -93,7 +93,7 @@ export async function ensureTrips(): Promise<number> {
         // Arrival event at MTM → meet-and-drop shuttles leave after the buffer.
         // Anchored on the arrival calendar day (night train's 03:55 arrival
         // belongs to the train that left NTM 22:00 the previous evening).
-        const trainArr = dayAt(now, dayOffset, train.destTime);
+        const trainArr = nairobiTrainArrivalAt(now, dayOffset, train.destDayOffset, train.destTime);
         const dep = new Date(trainArr.getTime() + cfg.trainMeetBufferMinutes * 60 * 1000);
         for (const route of routes) {
           if (dep.getTime() < now.getTime() - 30 * 60 * 1000) continue;
@@ -371,3 +371,4 @@ export async function runFullSweep(actor: { id: string; name: string; role: "pas
   }
   return { tick, recon, batchDue, batch };
 }
+
