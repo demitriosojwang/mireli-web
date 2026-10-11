@@ -5,6 +5,7 @@ import { getConfig } from "@/lib/money";
 import { nairobiDayRange } from "@/lib/nairobi-time";
 import { evaluateDriverApplication } from "@/lib/driver/onboarding";
 import { isLocalDemoEnabled } from "@/lib/runtime-mode";
+import { DriverError } from "@/lib/driver/errors";
 
 /** Bookable departures for a date + direction. */
 export async function GET(req: NextRequest) {
@@ -18,44 +19,85 @@ export async function GET(req: NextRequest) {
   let dayEnd: Date;
   try { ({ start: dayStart, end: dayEnd } = nairobiDayRange(date)); }
   catch { return NextResponse.json({ error: "Invalid travel date" }, { status: 400 }); }
-  await runOperationalTick();
-  const now = new Date();
-  const cfg = await getConfig();
-  const activeDrivers = await db.driver.findMany({
-    where: { status: "active" },
-    select: {
-      id: true,
-      status: true,
-      application: {
-        include: { documents: { where: { state: { not: "replaced" } } } },
+  try {
+    // Check supply before running the scheduler. With no active, approved
+    // drivers there can be no customer-facing trips, and the scheduler would
+    // otherwise perform config, route, document, and trip queries on every
+    // availability request just to return an empty list.
+    const activeDrivers = await db.driver.findMany({
+      where: { status: "active" },
+      select: {
+        id: true,
+        status: true,
+        application: {
+          select: {
+            status: true,
+            policyVersion: true,
+            ownsVehicle: true,
+            documents: {
+              where: { state: { not: "replaced" } },
+              select: { type: true, state: true, scanState: true, expiresAt: true },
+            },
+          },
+        },
       },
-    },
-  });
-  const eligibleDriverIds = new Set(
-    activeDrivers
+    });
+    const eligibleDriverIds = activeDrivers
       .filter((driver) => isLocalDemoEnabled() || evaluateDriverApplication(driver.application, driver.status).eligible)
-      .map((driver) => driver.id),
-  );
+      .map((driver) => driver.id);
 
-  const trips = await db.trip.findMany({
-    where: {
-      direction,
-      departureAt: { gte: dayStart, lt: dayEnd },
-      status: { in: ["scheduled", "locked", "departed"] },
-    },
-    orderBy: { departureAt: "asc" },
-    include: {
-      route: { include: { stages: { orderBy: { order: "asc" } } } },
-      driver: true,
-      train: true,
-      bookings: { where: { status: { in: ["awaiting_payment", "confirmed", "boarded", "completed"] } }, select: { seats: true } },
-    },
-  });
-  const availableTrips = trips.filter((trip) => !!trip.driverId && eligibleDriverIds.has(trip.driverId));
+    if (eligibleDriverIds.length === 0) {
+      return NextResponse.json({ hasEligibleDrivers: false, trips: [] });
+    }
+
+    await runOperationalTick();
+    const cfg = await getConfig();
+    const now = new Date();
+    const trips = await db.trip.findMany({
+      where: {
+        direction,
+        driverId: { in: eligibleDriverIds },
+        departureAt: { gte: dayStart, lt: dayEnd },
+        status: { in: ["scheduled", "locked", "departed"] },
+      },
+      orderBy: { departureAt: "asc" },
+      select: {
+        id: true,
+        routeId: true,
+        direction: true,
+        departureAt: true,
+        status: true,
+        capacity: true,
+        route: {
+          select: {
+            id: true,
+            name: true,
+            durationMinutes: true,
+            charterPrice: true,
+            stages: {
+              orderBy: { order: "asc" },
+              select: { id: true, name: true, order: true, fare: true, homeSurcharge: true },
+            },
+          },
+        },
+        driver: { select: { name: true, plate: true, cabType: true, rating: true } },
+        train: {
+          select: { name: true, direction: true, originTime: true, destTime: true },
+        },
+        bookings: {
+          where: { status: { in: ["awaiting_payment", "confirmed", "boarded", "completed"] } },
+          select: { seats: true },
+        },
+      },
+    });
 
   return NextResponse.json({
-    hasEligibleDrivers: eligibleDriverIds.size > 0,
-    trips: availableTrips.map((t) => {
+    hasEligibleDrivers: true,
+    // A stale trip row or an active route without any customer-selectable
+    // point cannot be booked. Do not present either as available supply.
+    trips: trips
+      .filter((t) => !!t.driver && t.route.stages.some((stage) => stage.order > 0))
+      .map((t) => {
       const relevantBooked = t.bookings.reduce((s, b) => s + b.seats, 0);
       const seatsLeft = Math.max(t.capacity - relevantBooked, 0);
       const stages = t.route.stages.map((s) => ({
@@ -118,8 +160,21 @@ export async function GET(req: NextRequest) {
         // FROM_TERMINUS exposes drop-off points; TO_TERMINUS exposes pickup points
         pointsLabel: isFromTerminus ? "drop-off" : "pickup",
         points: nonTerminusStages,
-        minFare: Math.min(...nonTerminusStages.map((s) => s.fare)),
+        minFare: nonTerminusStages.length ? Math.min(...nonTerminusStages.map((s) => s.fare)) : 0,
       };
-    }),
+      }),
   });
+  } catch (error) {
+    if (error instanceof DriverError && error.code === "PLATFORM_NOT_CONFIGURED") {
+      return NextResponse.json(
+        { error: "Ride schedules are not set up yet.", code: error.code },
+        { status: error.status },
+      );
+    }
+    console.error("trip availability failed", error);
+    return NextResponse.json(
+      { error: "Cab availability is temporarily unavailable." },
+      { status: 503 },
+    );
+  }
 }

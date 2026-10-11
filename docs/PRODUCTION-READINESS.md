@@ -11,8 +11,15 @@ driver platform and approved route data are live.
 - [x] Replace the oversized drop-off list with a searchable, grouped point picker.
 - [x] Show loading, empty, and retryable error states for route/timetable data;
   do not leave a blank loading bar when the database has no stages.
+- [x] Start a passenger guest session without creating default operator
+  settings; issue the welcome credit only when configured credit validity is
+  present, and retry guest creation only for a unique-phone collision.
 - [x] Require an explicit pickup/drop-off point before a cab can be booked.
-- [x] Keep available cabs at zero when no eligible driver has declared a route.
+- [x] Keep available cabs at zero when there are no active, approved drivers.
+- [x] Return that empty supply state before running the scheduling tick, and
+  limit availability reads to approved-driver and booking-display fields.
+- [x] Allocate eligible drivers across every active route, matching the
+  current operating policy.
 - [x] Show the flat booking fee in the fare preview and booking total.
 - [x] Apply the 10% commission only to a private charter's fare. Pass the full
   door-to-door surcharge to the driver and retain the KSh 50 booking fee for
@@ -53,10 +60,12 @@ driver platform and approved route data are live.
   developer and verify both apps use the same production backend.
 - [ ] Complete verified driver onboarding, document review, vehicle/PSV checks,
   and payout-destination approval. Do not seed a demo driver into production.
-- [ ] Have at least one approved driver declare each bookable route and test
-  assignment, capacity, cancellation, reassignment, and the passenger manifest.
-- [ ] Confirm customer availability stays at zero when a driver is inactive,
-  suspended, unapproved, or has not declared that route.
+- [ ] Have at least one approved driver onboarded and test assignment,
+  capacity, cancellation, reassignment, and the passenger manifest on each
+  active route. Under the current policy, every approved active driver can serve
+  every active route.
+- [ ] Confirm customer availability stays at zero when all drivers are inactive,
+  suspended, or unapproved.
 
 ### Payments and settlement
 
