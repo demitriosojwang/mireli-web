@@ -133,8 +133,7 @@ export default function AdminLoginPage() {
                   onKeyDown={(e) => e.key === "Enter" && verify()}
                 />
                 <p className="text-[10px] text-muted-foreground">
-                  Admin accounts require a second verification code. In production, this would be a
-                  TOTP code from your authenticator app.
+                  Admin access requires verified staff sign-in and a separate access code.
                 </p>
               </motion.div>
 
@@ -148,9 +147,6 @@ export default function AdminLoginPage() {
               >
                 ← Use a different email
               </button>
-              <p className="text-center text-[10px] text-muted-foreground">
-                Demo: any 4-digit code works · access code is set in Config
-              </p>
             </>
           )}
         </motion.div>

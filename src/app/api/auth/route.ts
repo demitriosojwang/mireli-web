@@ -1,271 +1,221 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import {
+  adminCookieOptions,
   encodeSession,
   getPassengerSession,
-  isAdminEmail,
   normalizePhone,
   passengerCookieOptions,
-  adminCookieOptions,
 } from "@/lib/session";
-import { getConfig, issueCredit } from "@/lib/money";
+import { issueCredit } from "@/lib/money";
 import { audit } from "@/lib/audit";
-import { isLocalDemoEnabled } from "@/lib/runtime-mode";
+import { DriverError, text } from "@/lib/driver/errors";
+import {
+  consumePassengerChallenge,
+  requestPassengerChallenge,
+  verifyPassengerChallenge,
+} from "@/lib/passenger-auth";
 
-/**
- * Unified auth — one entry point, roles detected by identity:
- *  - passengers log in with phone (any 4-digit OTP in the prototype)
- *  - admin identity is recognised by email whitelist (never by a visible button)
- *    and requires a second factor (2FA code) — enforced ONLY on /admin.
- * The main passenger site never grants admin; /admin/login is a separate URL.
- */
+const NO_STORE = { "Cache-Control": "no-store" };
+
+/** Passenger sign-in uses a short-lived, single-use SMS/email challenge. */
 export async function POST(req: NextRequest) {
-  const body = await req.json().catch(() => ({}));
-  const step = body.step as string;
-  if (step !== "logout" && !isLocalDemoEnabled()) {
-    return NextResponse.json({ error: "Verified sign-in is not configured. Contact mirelisgr001@gmail.com." }, { status: 503 });
+  const parsed = await req.json().catch(() => null);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return NextResponse.json({ error: "Request body must be a JSON object." }, { status: 400, headers: NO_STORE });
   }
-  const cfg = await getConfig();
-  const adminEmails = JSON.parse(cfg.adminEmails) as string[];
+  const body = parsed as Record<string, unknown>;
+  const step = typeof body.step === "string" ? body.step : "";
 
   if (step === "logout") {
-    const res = NextResponse.json({ ok: true });
+    const res = NextResponse.json({ ok: true }, { headers: NO_STORE });
     res.cookies.set({ ...passengerCookieOptions(), value: "" });
     res.cookies.set({ ...adminCookieOptions(), value: "" });
     return res;
   }
 
-  if (step === "request") {
-    const identifier = String(body.identifier || "").trim();
-    if (!identifier) return NextResponse.json({ error: "Enter your phone number or email" }, { status: 400 });
-    const phone = normalizePhone(identifier);
-    const email = phone ? null : identifier.toLowerCase();
-    if (!phone && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email || "")) {
-      return NextResponse.json({ error: "Enter a valid phone number or email" }, { status: 400 });
+  try {
+    if (step === "request") {
+      const challenge = await requestPassengerChallenge(body.identifier);
+      return NextResponse.json({ ok: true, ...challenge }, { headers: NO_STORE });
     }
-    // Anti-enumeration: always the same "OTP sent" response shape.
-    return NextResponse.json({
-      ok: true,
-      identifier: phone || email,
-      method: phone ? "phone" : "email",
-      hint: "Prototype: any 4-digit code works",
-    });
+
+    if (step === "verify") return await verifySignIn(body);
+    if (step === "signup") return await claimGuestAccount(body);
+    return NextResponse.json({ error: "Unknown authentication step" }, { status: 400, headers: NO_STORE });
+  } catch (error) {
+    if (error instanceof DriverError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: error.status, headers: NO_STORE });
+    }
+    console.error("passenger authentication failed", error);
+    return NextResponse.json({ error: "Sign-in is temporarily unavailable." }, { status: 503, headers: NO_STORE });
+  }
+}
+
+async function verifySignIn(body: Record<string, unknown>) {
+  const challenge = await verifyPassengerChallenge(body.challengeId, body.code);
+  const phone = challenge.phone;
+  const email = challenge.email;
+  const contact = phone || email!;
+  const nameInput = typeof body.name === "string" ? body.name.trim() : "";
+  const existing = phone
+    ? await db.passenger.findUnique({ where: { phone } })
+    : await db.passenger.findFirst({ where: { email: email! } });
+
+  // Email can be used to sign in to an existing account, but new passenger
+  // accounts need a verified mobile number for booking and M-Pesa contact.
+  if (!existing && !phone) {
+    return NextResponse.json(
+      { error: "No account was found for that email. Create an account with your mobile number." },
+      { status: 404, headers: NO_STORE },
+    );
   }
 
-  if (step === "verify") {
-    const identifier = String(body.identifier || "").trim();
-    const code = String(body.code || "").trim();
-    const name = String(body.name || "").trim();
-    if (!/^\d{4}$/.test(code)) {
-      return NextResponse.json({ error: "Enter the 4-digit code" }, { status: 400 });
-    }
+  // Keep the verified challenge pending while a first-time passenger supplies
+  // the name required to create their account. It is consumed in the account
+  // transaction below, so this response alone cannot grant a session.
+  if (!existing && !nameInput) {
+    return NextResponse.json({ needsName: true, identifier: contact }, { headers: NO_STORE });
+  }
+  const name = existing ? existing.name || "Passenger" : text(nameInput, "Name", 2, 80);
 
-    const phone = normalizePhone(identifier);
-    const email = phone ? null : identifier.toLowerCase();
+  const result = await db.$transaction(async (tx) => {
+    await consumePassengerChallenge(tx, challenge);
+    const found = phone
+      ? await tx.passenger.findUnique({ where: { phone } })
+      : await tx.passenger.findFirst({ where: { email: email! } });
+    if (found) return { passenger: found, isNew: false };
+    if (!nameInput) throw new DriverError(400, "NAME_REQUIRED", "Enter your name to create an account.");
+    if (!phone) throw new DriverError(400, "MOBILE_REQUIRED", "Create your account with a verified mobile number.");
+    const passenger = await tx.passenger.create({
+      data: {
+        phone,
+        email: email || null,
+        name,
+      },
+    });
+    return { passenger, isNew: true };
+  });
 
-    if (phone) {
-      let passenger = await db.passenger.findUnique({ where: { phone } });
-      let isNew = false;
-      if (!passenger) {
-        if (!name || name.length < 2) {
-          return NextResponse.json({ needsName: true, identifier: phone }, { status: 200 });
-        }
-        isNew = true;
-        passenger = await db.passenger.create({
-          data: { phone, name: name.slice(0, 80) },
-        });
-        // Karibu — welcome credit (30-day validity per config)
+  let welcomeCredit = 0;
+  if (result.isNew) {
+    try {
+      const config = await db.platformConfig.findUnique({ where: { id: "main" }, select: { creditValidityDays: true } });
+      if (config) {
         await issueCredit({
-          passengerId: passenger.id,
+          passengerId: result.passenger.id,
           amount: 100,
           note: "Karibu Mi-Reli! Welcome credit — applies to any ride.",
-          validityDays: cfg.creditValidityDays,
+          validityDays: config.creditValidityDays,
         });
-        await audit({
-          actorId: passenger.id,
-          actorName: passenger.name || phone,
-          actorRole: "passenger",
-          action: "auth.signup",
-          entity: "passenger",
-          entityId: passenger.id,
-          metadata: { welcomeCredit: 100 },
-        });
+        welcomeCredit = 100;
       }
-      const session = {
-        role: "passenger" as const,
-        id: passenger.id,
-        name: passenger.name || "Passenger",
-        identifier: passenger.phone,
-        exp: Date.now() + 7 * 24 * 60 * 60 * 1000,
-      };
-      const res = NextResponse.json({ ok: true, session, isNew });
-      res.cookies.set({ ...passengerCookieOptions(), value: encodeSession(session) });
-      await audit({
-        actorId: passenger.id,
-        actorName: passenger.name || phone,
-        actorRole: "passenger",
-        action: "auth.login",
-        entity: "passenger",
-        entityId: passenger.id,
-      });
-      return res;
+    } catch (error) {
+      // Authentication remains available if the optional welcome-credit
+      // ledger is unavailable; never create operator settings as a fallback.
+      console.error("passenger welcome credit could not be issued", error);
     }
-
-    if (email) {
-      // Non-admin email login (e.g. someone booking from a laptop) — passenger session by email.
-      let passenger = await db.passenger.findFirst({ where: { email } });
-      if (!passenger) {
-        if (!name || name.length < 2) {
-          return NextResponse.json({ needsName: true, identifier: email }, { status: 200 });
-        }
-        passenger = await db.passenger.create({ data: { email, name: name.slice(0, 80), phone: `email-${email}` } });
-      }
-      const session = {
-        role: "passenger" as const,
-        id: passenger.id,
-        name: passenger.name || "Passenger",
-        identifier: email,
-        exp: Date.now() + 7 * 24 * 60 * 60 * 1000,
-      };
-      const res = NextResponse.json({ ok: true, session });
-      res.cookies.set({ ...passengerCookieOptions(), value: encodeSession(session) });
-      return res;
-    }
-
-    return NextResponse.json({ error: "Invalid identifier" }, { status: 400 });
   }
 
-  if (step === "signup") {
-    // Account creation from the booking flow. The rule: to book more than the
-    // single no-login seat, the passenger fills the EXACT same details they
-    // booked with — the platform then upgrades the guest into a Mi-Reli
-    // account (or claims an existing account that matches those details).
-    const code = String(body.code || "").trim();
-    if (!/^\d{4}$/.test(code)) {
-      return NextResponse.json({ error: "Enter the 4-digit code" }, { status: 400 });
-    }
+  const passenger = result.passenger;
+  const session = {
+    role: "passenger" as const,
+    id: passenger.id,
+    name: passenger.name || "Passenger",
+    identifier: contact,
+    exp: Date.now() + 7 * 24 * 60 * 60 * 1000,
+  };
+  const res = NextResponse.json({ ok: true, session, isNew: result.isNew }, { headers: NO_STORE });
+  res.cookies.set({ ...passengerCookieOptions(), value: encodeSession(session) });
+  await audit({
+    actorId: passenger.id,
+    actorName: passenger.name || contact,
+    actorRole: "passenger",
+    action: result.isNew ? "auth.signup" : "auth.login",
+    entity: "passenger",
+    entityId: passenger.id,
+    metadata: result.isNew ? { welcomeCredit } : undefined,
+  });
+  return res;
+}
 
-    const fullName = String(body.name || "").trim();
-    if (fullName.length < 2 || !fullName.includes(" ")) {
-      return NextResponse.json(
-        { error: "Enter your full name (first and last name)" },
-        { status: 400 },
-      );
-    }
-    const phone = normalizePhone(String(body.phone || ""));
-    if (!phone) {
-      return NextResponse.json({ error: "Enter a valid phone number (07XX XXX XXX or 2547XX XXX XXX)" }, { status: 400 });
-    }
-    const email = String(body.email || "").trim().toLowerCase();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-      return NextResponse.json({ error: "Enter a valid email address" }, { status: 400 });
-    }
-    const idType = body.idType === "passport" ? "passport" : "id";
-    const idNumber = String(body.idNumber || "").trim();
-    if (idNumber.length < 4) {
-      return NextResponse.json({ error: `Enter a valid ${idType === "passport" ? "passport number" : "ID number"}` }, { status: 400 });
-    }
-    const nationality = String(body.nationality || "").trim();
-    if (!nationality) return NextResponse.json({ error: "Select your nationality" }, { status: 400 });
-    const gender = String(body.gender || "").trim().toLowerCase();
-    if (!gender) return NextResponse.json({ error: "Select your gender" }, { status: 400 });
+async function claimGuestAccount(body: Record<string, unknown>) {
+  const fullName = text(body.name, "Full name", 2, 80);
+  if (!fullName.includes(" ")) {
+    return NextResponse.json({ error: "Enter your first and last name" }, { status: 400, headers: NO_STORE });
+  }
+  const phone = normalizePhone(typeof body.phone === "string" ? body.phone : "");
+  if (!phone) return NextResponse.json({ error: "Enter a valid Kenyan mobile number" }, { status: 400, headers: NO_STORE });
+  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return NextResponse.json({ error: "Enter a valid email address" }, { status: 400, headers: NO_STORE });
+  const idType = body.idType === "passport" ? "passport" : "id";
+  const idNumber = text(body.idNumber, idType === "passport" ? "Passport number" : "ID number", 4, 100);
+  const nationality = text(body.nationality, "Nationality", 1, 60);
+  const gender = text(body.gender, "Gender", 1, 20).toLowerCase();
+  if (!["female", "male", "other"].includes(gender)) return NextResponse.json({ error: "Select a valid gender" }, { status: 400 });
 
-    const session = await getPassengerSession();
-    if (!session) {
-      return NextResponse.json({ error: "Session expired — refresh and try again" }, { status: 401 });
-    }
-    const current = await db.passenger.findUnique({ where: { id: session.id } });
-    if (!current) {
-      return NextResponse.json({ error: "Session expired — refresh and try again" }, { status: 401 });
-    }
-    if (!current.phone.startsWith("guest-")) {
-      return NextResponse.json(
-        { error: "You already have a Mi-Reli account. Log out first to sign up with different details." },
-        { status: 409 },
-      );
-    }
+  const session = await getPassengerSession();
+  if (!session) return NextResponse.json({ error: "Session expired — refresh and try again" }, { status: 401, headers: NO_STORE });
+  const guest = await db.passenger.findUnique({ where: { id: session.id } });
+  if (!guest) return NextResponse.json({ error: "Session expired — refresh and try again" }, { status: 401, headers: NO_STORE });
+  if (!guest.phone.startsWith("guest-")) {
+    return NextResponse.json({ error: "You already have a Mi-Reli account. Log out first to sign up with different details." }, { status: 409, headers: NO_STORE });
+  }
 
-    const profile = { name: fullName.slice(0, 80), email, idType, idNumber, nationality: nationality.slice(0, 60), gender };
-    const sameDetails = (a: string | null | undefined, b: string) =>
-      (a || "").trim().toLowerCase() === b.trim().toLowerCase();
+  const challenge = await verifyPassengerChallenge(body.challengeId, body.code);
+  if (challenge.channel !== "passenger_sms" || challenge.phone !== phone) {
+    return NextResponse.json({ error: "Request a verification code for this phone number first." }, { status: 400, headers: NO_STORE });
+  }
 
-    // Does the phone already belong to a real account?
-    const existing = phone === current.phone ? null : await db.passenger.findUnique({ where: { phone } });
+  const profile = { name: fullName, email, idType, idNumber, nationality, gender };
+  const sameDetails = (a: string | null | undefined, b: string) => (a || "").trim().toLowerCase() === b.trim().toLowerCase();
+  const result = await db.$transaction(async (tx) => {
+    await consumePassengerChallenge(tx, challenge);
+    const current = await tx.passenger.findUnique({ where: { id: guest.id } });
+    if (!current || !current.phone.startsWith("guest-")) throw new DriverError(409, "GUEST_SESSION_CHANGED", "Refresh the page and try again.");
+    const existing = phone === current.phone ? null : await tx.passenger.findUnique({ where: { phone } });
 
     if (existing) {
-      // Claim only when the details match EXACTLY — that is the platform's
-      // identity check ("fill the exact same details").
-      const matches =
-        sameDetails(existing.name, fullName) &&
+      const matches = sameDetails(existing.name, fullName) &&
         sameDetails(existing.email, email) &&
         sameDetails(existing.idNumber, idNumber) &&
         sameDetails(existing.nationality, nationality) &&
         sameDetails(existing.gender, gender);
-      if (!matches) {
-        return NextResponse.json(
-          { error: "An account with this phone already exists. Fill the exact same details you booked with, or login instead." },
-          { status: 409 },
-        );
-      }
-      // Move the guest's bookings + credits onto the claimed account, then
-      // retire the guest row.
-      await db.booking.updateMany({ where: { passengerId: current.id }, data: { passengerId: existing.id } });
-      await db.credit.updateMany({ where: { passengerId: current.id }, data: { passengerId: existing.id } });
-      await db.passenger.delete({ where: { id: current.id } });
-      await db.passenger.update({
-        where: { id: existing.id },
-        data: {
-          email: existing.email || email,
-          idType: existing.idType || idType,
-          idNumber: existing.idNumber || idNumber,
-          nationality: existing.nationality || nationality,
-          gender: existing.gender || gender,
-        },
-      });
-      const newSession = {
-        role: "passenger" as const,
-        id: existing.id,
-        name: existing.name || fullName,
-        identifier: existing.phone,
-        exp: Date.now() + 7 * 24 * 60 * 60 * 1000,
-      };
-      const res = NextResponse.json({ ok: true, claimed: true });
-      res.cookies.set({ ...passengerCookieOptions(), value: encodeSession(newSession) });
-      await audit({
-        actorId: existing.id,
-        actorName: existing.name || phone,
-        actorRole: "passenger",
-        action: "auth.claim",
-        entity: "passenger",
-        entityId: existing.id,
-        metadata: { matchedBy: "exact_details", guestId: current.id },
-      });
-      return res;
+      if (!matches) throw new DriverError(409, "ACCOUNT_DETAILS_MISMATCH", "An account with this phone already exists. Use the same details as that account, or sign in instead.");
+      await tx.booking.updateMany({ where: { passengerId: current.id }, data: { passengerId: existing.id } });
+      await tx.credit.updateMany({ where: { passengerId: current.id }, data: { passengerId: existing.id } });
+      await tx.passenger.delete({ where: { id: current.id } });
+      const updated = await tx.passenger.update({ where: { id: existing.id }, data: {
+        email: existing.email || email,
+        idType: existing.idType || idType,
+        idNumber: existing.idNumber || idNumber,
+        nationality: existing.nationality || nationality,
+        gender: existing.gender || gender,
+      } });
+      return { passenger: updated, claimed: true, guestId: current.id };
     }
 
-    // Fresh account — upgrade the guest row in place so their first booking,
-    // credit and session continuity carry over.
-    const updated = await db.passenger.update({ where: { id: current.id }, data: { phone, ...profile } });
-    const newSession = {
-      role: "passenger" as const,
-      id: updated.id,
-      name: updated.name || "Passenger",
-      identifier: updated.phone,
-      exp: Date.now() + 7 * 24 * 60 * 60 * 1000,
-    };
-    const res = NextResponse.json({ ok: true, claimed: false });
-    res.cookies.set({ ...passengerCookieOptions(), value: encodeSession(newSession) });
-    await audit({
-      actorId: updated.id,
-      actorName: updated.name || phone,
-      actorRole: "passenger",
-      action: "auth.signup",
-      entity: "passenger",
-      entityId: updated.id,
-      metadata: { upgradedFromGuest: true, nationality, gender },
-    });
-    return res;
-  }
+    const updated = await tx.passenger.update({ where: { id: current.id }, data: { phone, ...profile } });
+    return { passenger: updated, claimed: false, guestId: current.id };
+  });
 
-  return NextResponse.json({ error: "Unknown step" }, { status: 400 });
+  const nextSession = {
+    role: "passenger" as const,
+    id: result.passenger.id,
+    name: result.passenger.name || fullName,
+    identifier: result.passenger.phone,
+    exp: Date.now() + 7 * 24 * 60 * 60 * 1000,
+  };
+  const res = NextResponse.json({ ok: true, claimed: result.claimed }, { headers: NO_STORE });
+  res.cookies.set({ ...passengerCookieOptions(), value: encodeSession(nextSession) });
+  await audit({
+    actorId: result.passenger.id,
+    actorName: result.passenger.name || fullName,
+    actorRole: "passenger",
+    action: result.claimed ? "auth.claim" : "auth.signup",
+    entity: "passenger",
+    entityId: result.passenger.id,
+    metadata: result.claimed ? { matchedBy: "exact_details", guestId: result.guestId } : { upgradedFromGuest: true, nationality, gender },
+  });
+  return res;
 }

@@ -28,6 +28,12 @@ driver platform and approved route data are live.
   failed transfers for recovery.
 - [x] Restrict simulated callback and injected failure controls to local demo
   mode at both the admin UI and API layers.
+- [x] Replace the passenger four-digit prototype with single-use six-digit
+  SMS/email challenges, hashed challenge storage, delivery failure handling,
+  rate limits, and a one-minute resend cooldown. Demo codes are local-only.
+- [x] Require a verified Kenyan mobile number for new passenger accounts;
+  email verification can sign in to an existing account without creating a
+  synthetic phone number.
 
 ## Must complete before opening bookings
 
@@ -86,8 +92,12 @@ driver platform and approved route data are live.
 
 ### Operations, security, and launch checks
 
-- [ ] Verify passenger login, administrator authentication/MFA, staff roles,
-  audit records, backups, and recovery using production-like accounts.
+- [ ] Configure production `SESSION_SECRET`, `DRIVER_AUTH_SECRET`, Africa's
+  Talking SMS credentials, and Brevo email credentials; verify real delivery,
+  expiry, resend throttling, and lockout with production-like accounts.
+- [ ] Implement and verify administrator authentication/MFA and staff roles.
+- [ ] Verify authentication audit records, session revocation, backups, and
+  recovery using production-like accounts.
 - [ ] Build the exceptions inbox for unassigned trips, safety alerts, stuck
   refunds/payouts, and fairness disputes; ensure alerts reach the operator.
 - [ ] Add booking lookup by booking ID/phone and test it with support scenarios.

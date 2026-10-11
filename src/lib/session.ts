@@ -5,8 +5,8 @@ import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 /**
  * Lightweight signed-cookie sessions (HMAC-SHA256).
  * The cookie is signed server-side and verified for each request. These
- * signatures do not replace verified identity, MFA or server-side revocation;
- * those remain release requirements and production sign-in is disabled.
+ * signatures do not replace server-side revocation or administrator MFA.
+ * Passenger sign-in is verified with a one-time SMS/email challenge.
  */
 
 function sessionSecret(): string {

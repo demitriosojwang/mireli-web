@@ -77,7 +77,9 @@ export async function verifyChallenge(input: Record<string, unknown>) {
   await limit(`verify:${id}`, 6, 300000);
   const challenge = await db.driverAuthChallenge.findUnique({where: {id}});
   const denied = () => new DriverError(401, "INVALID_CHALLENGE", "The code is invalid or expired.");
-  if (!challenge || challenge.consumedAt || challenge.expiresAt <= new Date() || challenge.attempts >= 5) throw denied();
+  // Passenger sign-in uses the same storage table with a separate channel.
+  // Never allow a passenger OTP to create or authenticate a driver session.
+  if (!challenge || !["sms", "email"].includes(challenge.channel) || challenge.consumedAt || challenge.expiresAt <= new Date() || challenge.attempts >= 5) throw denied();
   const attempted = await db.driverAuthChallenge.updateMany({where: {id, consumedAt: null, attempts: {lt: 5}, expiresAt: {gt: new Date()}}, data: {attempts: {increment: 1}}});
   if (attempted.count !== 1 || !/^\d{6}$/.test(code) || !matchesChallenge(id, code, challenge.codeHash)) throw denied();
   const token = randomBytes(32).toString("base64url");

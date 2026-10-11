@@ -15,7 +15,7 @@ it.each([passengerLogin, adminLogin])("rejects prototype login before querying p
   vi.stubEnv("NODE_ENV", "production");
   vi.stubEnv("MIRELI_DEMO_MODE", "true");
   const response = await handler(new NextRequest("https://example.test/api/auth", {
-    method: "POST", body: JSON.stringify({ step: "verify", code: "1234" }), headers: { "content-type": "application/json" },
+    method: "POST", body: JSON.stringify({ step: "verify", challengeId: "a".repeat(48), code: "123456" }), headers: { "content-type": "application/json" },
   }));
   expect(response.status).toBe(503);
 });

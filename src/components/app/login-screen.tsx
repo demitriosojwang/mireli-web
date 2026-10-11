@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,13 +17,22 @@ import { cn } from "@/lib/utils";
 export function LoginScreen({ onDone }: { onDone: () => void }) {
   const [identifier, setIdentifier] = useState("");
   const [code, setCode] = useState("");
+  const [challengeId, setChallengeId] = useState<string | null>(null);
+  const [demoCode, setDemoCode] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [needsName, setNeedsName] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
+  const [resendSeconds, setResendSeconds] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const isEmail = identifier.includes("@");
+
+  useEffect(() => {
+    if (resendSeconds <= 0) return;
+    const timer = window.setTimeout(() => setResendSeconds((seconds) => Math.max(0, seconds - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [resendSeconds]);
 
   async function handleSendOtp() {
     if (identifier.trim().length < 5) {
@@ -33,7 +42,13 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      await api("/api/auth", { body: { step: "request", identifier } });
+      const result = await api<{ challengeId: string; cooldownSeconds: number; demoCode?: string; simulation?: boolean }>("/api/auth", {
+        body: { step: "request", identifier },
+      });
+      setChallengeId(result.challengeId);
+      setDemoCode(result.simulation ? result.demoCode || null : null);
+      setCode("");
+      setResendSeconds(result.cooldownSeconds);
       setOtpSent(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
@@ -43,15 +58,15 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
   }
 
   async function handleVerifyOtp() {
-    if (code.length !== 4) {
-      setError("Enter the 4-digit code");
+    if (code.length !== 6 || !challengeId) {
+      setError("Enter the 6-digit code");
       return;
     }
     setBusy(true);
     setError(null);
     try {
       const res = await api<{ ok?: boolean; needsName?: boolean }>("/api/auth", {
-        body: { step: "verify", identifier, code, name },
+        body: { step: "verify", challengeId, code, name },
       });
       if (res.needsName) {
         setNeedsName(true);
@@ -70,6 +85,9 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
     setIdentifier("");
     setCode("");
     setName("");
+    setChallengeId(null);
+    setDemoCode(null);
+    setResendSeconds(0);
     setNeedsName(false);
     setOtpSent(false);
     setError(null);
@@ -133,13 +151,14 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
                 <Input
                   type="text"
                   inputMode="numeric"
-                  maxLength={4}
+                  autoComplete="one-time-code"
+                  maxLength={6}
                   value={code}
                   onChange={(e) => {
                     setCode(e.target.value.replace(/\D/g, ""));
                     setError(null);
                   }}
-                  placeholder="••••"
+                  placeholder="••••••"
                   className={cn("h-11 text-center text-lg tracking-[0.5em]", error && "border-destructive")}
                   autoFocus
                   onKeyDown={(e) => e.key === "Enter" && handleVerifyOtp()}
@@ -172,13 +191,21 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
               <Button
                 className="h-11 w-full"
                 onClick={handleVerifyOtp}
-                disabled={busy || code.length !== 4 || (needsName && name.length < 2)}
+                disabled={busy || code.length !== 6 || !challengeId || (needsName && name.length < 2)}
               >
                 Verify &amp; log in <ArrowRight className="ml-1 h-4 w-4" />
               </Button>
               <p className="text-center text-[10px] text-muted-foreground">
-                Demo: any 4-digit code works. In production, this is sent via SMS or email.
+                {demoCode ? `Local demo code: ${demoCode}` : `We sent a 6-digit code to ${identifier}.`}
               </p>
+              <button
+                type="button"
+                onClick={handleSendOtp}
+                disabled={busy || resendSeconds > 0}
+                className="w-full text-center text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {resendSeconds > 0 ? `Resend code in ${resendSeconds}s` : "Resend code"}
+              </button>
             </>
           )}
 
@@ -193,7 +220,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
         <div className="mt-8 w-full max-w-sm space-y-2">
           <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
-            <span>New here? You get a KSh 100 welcome travel credit, valid 30 days.</span>
+            <span>New passengers can book one seat before creating an account.</span>
           </div>
           <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
@@ -201,7 +228,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
           </div>
           <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
-            <span>Every action is audit-logged. Sessions expire automatically.</span>
+            <span>Verification codes expire after 5 minutes. Sign-in sessions expire after 7 days.</span>
           </div>
         </div>
       </div>
