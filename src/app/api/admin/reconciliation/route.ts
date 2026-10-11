@@ -7,6 +7,7 @@ import {
   setPayoutFailureInjection,
   setRefundFailureInjection,
 } from "@/lib/daraja";
+import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 
 /**
  * Reconciliation — the admin's spot-check surface for the nightly sweep:
@@ -71,6 +72,7 @@ export async function GET() {
   const failedRefunds = await db.refundRecord.count({ where: { status: "failed" } });
 
   return NextResponse.json({
+    simulation: isLocalDemoEnabled(),
     lastReconciliationAt: cfg.lastReconciliationAt,
     sweepPendingMinutes: cfg.sweepPendingMinutes,
     counts: { ambiguous: ambiguous.length, stuckRefunds, pendingRefunds, failedPayouts, failedRefunds, failedTx: failedTx.length },
@@ -111,6 +113,13 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const body = await req.json().catch(() => ({}));
   const actor = { id: session.id, name: session.name, role: "admin" as const };
+
+  if (
+    ["simulate_missed_callback", "inject_refund_failure", "inject_payout_failure"].includes(body.action) &&
+    !isLocalDemoEnabled()
+  ) {
+    return NextResponse.json({ error: "Simulation tools are available only in the local demo." }, { status: 404 });
+  }
 
   if (body.action === "sweep") {
     const summary = await runReconciliationSweep(actor);

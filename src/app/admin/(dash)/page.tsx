@@ -56,7 +56,7 @@ export default function AdminOverview() {
 
       <div className="grid grid-cols-2 gap-2">
         <StatCard label="Collected today" value={ksh(data.today.collected)} sub={`${data.today.bookings} bookings placed`} tone="good" />
-        <StatCard label="Commission today" value={ksh(data.today.commission)} sub={`rate ${(data.config.commissionRate * 100).toFixed(1)}% (NTSA cap 18%)`} tone="info" />
+        <StatCard label="Commission today" value={ksh(data.today.commission)} sub={`charter rate ${(data.config.commissionRate * 100).toFixed(1)}% (NTSA cap 18%)`} tone="info" />
         <StatCard label="Paid out today" value={ksh(data.today.paidOut)} sub={`${data.config.payoutMode} mode`} />
         <StatCard
           label="Queued payouts"

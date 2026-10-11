@@ -82,6 +82,7 @@ export async function GET(req: NextRequest) {
         routeName: t.route.name,
         durationMinutes: t.route.durationMinutes,
         charterPrice: t.route.charterPrice,
+        platformFeeAmount: cfg.bookingFeeAmount,
         direction: t.direction,
         departureAt: t.departureAt,
         // TO_TERMINUS: when the cab is scheduled to reach the terminus —

@@ -26,6 +26,7 @@ interface LedgerEntryRow {
   cashAmount: number;
   creditApplied: number;
   homeSurchargeAmount: number;
+  platformFeeAmount: number;
   mpesaReceipt: string | null;
   collectedAt: string | null;
   status: string;
@@ -70,6 +71,7 @@ function LedgerTab() {
               <th className="p-3 text-right">Cash</th>
               <th className="p-3 text-right">Credit</th>
               <th className="p-3 text-right">Home surch.</th>
+              <th className="p-3 text-right">Booking fee</th>
               <th className="p-3">M-Pesa</th>
               <th className="p-3">Bucket</th>
             </tr>
@@ -87,6 +89,7 @@ function LedgerTab() {
                 <td className="p-3 text-right">{ksh(e.cashAmount)}</td>
                 <td className="p-3 text-right text-emerald-700">{e.creditApplied > 0 ? ksh(e.creditApplied) : "—"}</td>
                 <td className="p-3 text-right text-teal-700">{e.homeSurchargeAmount > 0 ? ksh(e.homeSurchargeAmount) : "—"}</td>
+                <td className="p-3 text-right">{e.platformFeeAmount > 0 ? ksh(e.platformFeeAmount) : "—"}</td>
                 <td className="p-3 font-mono text-xs">{e.mpesaReceipt || "—"}</td>
                 <td className="p-3">
                   <Badge variant="outline" className="whitespace-nowrap">{LEDGER_LABELS[e.status] || e.status}</Badge>
@@ -95,7 +98,7 @@ function LedgerTab() {
             ))}
             {data && data.entries.length === 0 && (
               <tr>
-                <td colSpan={9} className="p-8 text-center text-muted-foreground">No ledger entries here.</td>
+                <td colSpan={10} className="p-8 text-center text-muted-foreground">No ledger entries here.</td>
               </tr>
             )}
           </tbody>
@@ -103,7 +106,8 @@ function LedgerTab() {
       </div>
       <p className="text-xs text-muted-foreground">
         Read-only by design: the admin inspects the ledger; the engine moves it. Home surcharge is
-        tracked separately — it passes to the driver in full and never enters the commission base.
+        passed to the driver in full. The flat booking fee is retained by Mi-Reli and is excluded
+        from driver payout and charter commission.
       </p>
     </div>
   );
@@ -220,6 +224,7 @@ interface PayoutRow {
   gross: number;
   commission: number;
   homeSurcharge: number;
+  platformFee: number;
   net: number;
   method: string;
   status: string;
@@ -237,7 +242,7 @@ function PayoutsTab() {
     payoutDay: number;
     lastPayoutRunAt: string | null;
     batch: { due: boolean; mode: string; note: string };
-    totals: { queued: number; paid: number; commission: number; failed: number };
+    totals: { queued: number; paid: number; commission: number; platformFees: number; failed: number };
     payouts: PayoutRow[];
   }>("/api/admin/payouts");
   const [busy, setBusy] = useState(false);
@@ -269,30 +274,27 @@ function PayoutsTab() {
     }
   }
 
-  const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-2">
         <StatCard label="Queued" value={ksh(data?.totals.queued || 0)} tone="warn" />
         <StatCard label="Paid out" value={ksh(data?.totals.paid || 0)} tone="good" />
         <StatCard label="Commission realised" value={ksh(data?.totals.commission || 0)} tone="info" />
+        <StatCard label="Booking fees" value={ksh(data?.totals.platformFees || 0)} tone="info" />
         <StatCard label="Failed" value={ksh(data?.totals.failed || 0)} tone={(data?.totals.failed || 0) > 0 ? "bad" : "default"} />
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
         <div>
           <p className="text-sm font-medium">
-            {data?.payoutMode === "weekly" && `Weekly batch — runs ${dayNames[data?.payoutDay ?? 5]} (like Uber/Bolt in Kenya)`}
-            {data?.payoutMode === "daily" && "Daily batch"}
-            {data?.payoutMode === "instant_per_trip" && "Instant per trip — B2C fires on completion"}
+            {data?.payoutMode === "instant_per_trip" ? "After-trip payout dispatch" : "Payout timing needs review"}
           </p>
           <p className="text-xs text-muted-foreground">
-            Last run: {data?.lastPayoutRunAt ? fmtDateTime(data.lastPayoutRunAt) : "never"} · {data?.batch.note}
+            Dispatch begins when a trip completes. Provider confirmation is still required. {data?.batch.note}
           </p>
         </div>
-        <Button onClick={runBatch} disabled={busy}>
-          <Send className="h-4 w-4" /> Run batch now
+        <Button onClick={runBatch} disabled={busy || !data?.payouts.some((p) => p.status === "queued")}>
+          <Send className="h-4 w-4" /> Process queued payouts
         </Button>
       </div>
 
@@ -303,6 +305,7 @@ function PayoutsTab() {
               <th className="p-3">Driver</th>
               <th className="p-3">Trip route</th>
               <th className="p-3 text-right">Gross</th>
+              <th className="p-3 text-right">Booking fee</th>
               <th className="p-3 text-right">Commission</th>
               <th className="p-3 text-right">Home surch.</th>
               <th className="p-3 text-right">Net payout</th>
@@ -318,6 +321,7 @@ function PayoutsTab() {
                 </td>
                 <td className="p-3 text-xs">{p.route || "—"}</td>
                 <td className="p-3 text-right">{ksh(p.gross)}</td>
+                <td className="p-3 text-right">{p.platformFee > 0 ? ksh(p.platformFee) : "—"}</td>
                 <td className="p-3 text-right">{ksh(p.commission)}</td>
                 <td className="p-3 text-right">{p.homeSurcharge > 0 ? ksh(p.homeSurcharge) : "—"}</td>
                 <td className="p-3 text-right font-semibold">{ksh(p.net)}</td>
@@ -336,7 +340,7 @@ function PayoutsTab() {
             ))}
             {data && data.payouts.length === 0 && (
               <tr>
-                <td colSpan={8} className="p-8 text-center text-muted-foreground">
+                <td colSpan={9} className="p-8 text-center text-muted-foreground">
                   Payout records are born when a trip completes — none yet.
                 </td>
               </tr>

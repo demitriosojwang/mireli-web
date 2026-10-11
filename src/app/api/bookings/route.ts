@@ -43,6 +43,7 @@ export async function GET() {
       seats: b.seats,
       isCharter: b.isCharter,
       fareAmount: b.fareAmount,
+      platformFeeAmount: b.platformFeeAmount,
       homeSurcharge: b.homeSurcharge,
       creditApplied: b.creditApplied,
       cashDue: b.cashDue,
@@ -159,7 +160,8 @@ export async function POST(req: NextRequest) {
   const tripSeats = isCharter ? 0 : Math.max(1, Math.min(parseInt(seats, 10) || 1, 6));
   const fare = isCharter ? route.charterPrice : stage.fare * tripSeats;
   const homeSurcharge = homePickup ? (isCharter ? stage.homeSurcharge : stage.homeSurcharge * tripSeats) : 0;
-  const total = fare + homeSurcharge;
+  const platformFeeAmount = cfg.bookingFeeAmount;
+  const total = fare + homeSurcharge + platformFeeAmount;
 
   // ── Guest rule: 1 seat, 1 booking — no login required. Anything more needs
   // a Mi-Reli account created with the exact same details. ─────────────────
@@ -203,7 +205,8 @@ export async function POST(req: NextRequest) {
       homeAddress: homePickup ? String(homeAddress).slice(0, 200) : null,
       seats: isCharter ? 1 : tripSeats,
       isCharter,
-      fareAmount: total, // total trip value (fare + home surcharge)
+      fareAmount: total, // total charged (fare + home surcharge + flat platform fee)
+      platformFeeAmount,
       homeSurcharge,
       creditApplied: 0,
       cashDue: total,
@@ -256,7 +259,7 @@ export async function POST(req: NextRequest) {
     action: isCharter ? "booking.create.charter" : "booking.create",
     entity: "booking",
     entityId: booking.id,
-    metadata: { code: booking.code, total, creditApplied, cashDue, allocation: allocation.note, passengerName: fullName, passengerPhone: phone, passengerNationality: nationality, passengerGender: gender },
+    metadata: { code: booking.code, total, platformFeeAmount, creditApplied, cashDue, allocation: allocation.note, passengerName: fullName, passengerPhone: phone, passengerNationality: nationality, passengerGender: gender },
   });
 
   // Fully covered by credit? Confirm immediately — no cash ever moves.
@@ -269,6 +272,7 @@ export async function POST(req: NextRequest) {
       cashAmount: 0,
       creditApplied,
       homeSurchargeAmount: homeSurcharge,
+      platformFeeAmount,
       mpesaReceipt: null,
     });
     await audit({
@@ -294,6 +298,7 @@ export async function POST(req: NextRequest) {
       code: fresh!.code,
       status: fresh!.status,
       fareAmount: fresh!.fareAmount,
+      platformFeeAmount: fresh!.platformFeeAmount,
       homeSurcharge: fresh!.homeSurcharge,
       creditApplied: fresh!.creditApplied,
       cashDue: fresh!.cashDue,

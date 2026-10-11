@@ -67,9 +67,10 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
   );
 }
 
-/** Hook: show the splash once per browser session. */
-export function useSplashOnce(): boolean {
+/** Resolve the session preference before data-heavy booking queries start. */
+export function useSplashOnce(): { show: boolean; ready: boolean } {
   const [show, setShow] = useState(false);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     // Deferred so we don't call setState synchronously inside the effect.
@@ -78,9 +79,10 @@ export function useSplashOnce(): boolean {
         window.sessionStorage.setItem("mireli-splash-seen", "1");
         setShow(true);
       }
+      setReady(true);
     }, 0);
     return () => clearTimeout(t);
   }, []);
 
-  return show;
+  return { show, ready };
 }

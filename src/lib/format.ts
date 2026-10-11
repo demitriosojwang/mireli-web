@@ -25,7 +25,7 @@ export function daysUntil(d: string | Date): number {
 export const LEDGER_LABELS: Record<string, string> = {
   held: "Held (pending)",
   driver_payable: "Driver-payable",
-  commission_taken: "Commission taken · paid out",
+  commission_taken: "Settled · driver paid",
   refunded: "Refunded",
   partially_refunded: "Partially refunded",
   converted_to_credit: "Converted to credit",

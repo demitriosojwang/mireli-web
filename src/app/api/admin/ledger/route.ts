@@ -47,6 +47,7 @@ export async function GET(req: NextRequest) {
       cashAmount: e.cashAmount,
       creditApplied: e.creditApplied,
       homeSurchargeAmount: e.homeSurchargeAmount,
+      platformFeeAmount: e.platformFeeAmount,
       mpesaReceipt: e.mpesaReceipt,
       collectedAt: e.collectedAt,
       status: e.status,

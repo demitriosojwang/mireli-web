@@ -7,13 +7,21 @@ import { SiteFooter, SiteHeader, SiteNav } from "@/components/site-chrome";
 import { BookingSheet, BookableTrip, BookingDraft } from "@/components/booking-sheet";
 import { PaySheet } from "@/components/pay-sheet";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { api, useMe } from "@/lib/client";
 import { fmtTime, ksh } from "@/lib/format";
+import { DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
 import { SplashScreen, useSplashOnce } from "@/components/app/splash-screen";
 import {
   DatePicker,
@@ -29,10 +37,12 @@ import {
   Anchor,
   CalendarDays,
   Car,
+  Check,
+  ChevronsUpDown,
   Clock,
   Crown,
   Home as HomeIcon,
-  Info,
+  Loader2,
   MapPin,
   Navigation,
   Sparkles,
@@ -69,6 +79,8 @@ interface TrainRow {
   destTime: string;
 }
 
+type CatalogueStatus = "loading" | "ready" | "empty" | "error";
+
 function coastOf(routeName: string): "north" | "south" {
   return routeName.toLowerCase().includes("south") ? "south" : "north";
 }
@@ -76,7 +88,7 @@ function coastOf(routeName: string): "north" | "south" {
 export default function Home() {
   const { me } = useMe();
   const router = useRouter();
-  const splashSeen = useSplashOnce();
+  const { show: splashSeen, ready: splashReady } = useSplashOnce();
   const [splashDone, setSplashDone] = useState(false);
 
   const showSplash = splashSeen && !splashDone;
@@ -87,12 +99,19 @@ export default function Home() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   });
   const [routes, setRoutes] = useState<RouteInfo[]>([]);
+  const [bookingFeeAmount, setBookingFeeAmount] = useState(DEFAULT_BOOKING_FEE_AMOUNT);
+  const [routesStatus, setRoutesStatus] = useState<CatalogueStatus>("loading");
   const [trips, setTrips] = useState<BookableTrip[] | null>(null);
+  const [tripsStatus, setTripsStatus] = useState<CatalogueStatus>("loading");
   const [hasEligibleDrivers, setHasEligibleDrivers] = useState<boolean | null>(null);
   const [timetable, setTimetable] = useState<TrainRow[]>([]);
+  const [timetableStatus, setTimetableStatus] = useState<CatalogueStatus>("loading");
+  const [catalogueRetry, setCatalogueRetry] = useState(0);
   const [myBookings, setMyBookings] = useState<BookingRow[]>([]);
   const [isRefreshing, setLoading] = useState(false);
   const [loadedQuery, setLoadedQuery] = useState<string | null>(null);
+  const [tripRefreshKey, setTripRefreshKey] = useState(0);
+  const [pointPickerOpen, setPointPickerOpen] = useState(false);
   const queryKey = `${direction}|${date}`;
   const loading = isRefreshing || loadedQuery !== queryKey;
 
@@ -109,19 +128,15 @@ export default function Home() {
 
   const isAuthed = !!me?.session;
 
-  const loadTrips = useCallback(async (dir: string, d: string) => {
+  const refreshTrips = useCallback(() => {
     setLoading(true);
-    try {
-      const res = await api<{ trips: BookableTrip[]; hasEligibleDrivers: boolean }>(`/api/trips?date=${d}&direction=${dir}`);
-      setTrips(res.trips);
-      setHasEligibleDrivers(res.hasEligibleDrivers);
-    } catch {
-      setTrips([]);
-      setHasEligibleDrivers(null);
-    } finally {
-      setLoading(false);
-      setLoadedQuery(`${dir}|${d}`);
-    }
+    setTripRefreshKey((key) => key + 1);
+  }, []);
+
+  const retryCatalogues = useCallback(() => {
+    setRoutesStatus("loading");
+    setTimetableStatus("loading");
+    setCatalogueRetry((attempt) => attempt + 1);
   }, []);
 
   const loadMyBookings = useCallback(async () => {
@@ -134,13 +149,30 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    api<{ routes: RouteInfo[] }>("/api/routes")
-      .then((r) => setRoutes(r.routes))
-      .catch(() => {});
-    api<{ trains: TrainRow[] }>("/api/trains")
-      .then((r) => setTimetable(r.trains))
-      .catch(() => {});
-  }, []);
+    const controller = new AbortController();
+    api<{ routes: RouteInfo[]; bookingFeeAmount: number }>("/api/routes", { signal: controller.signal })
+      .then((response) => {
+        setRoutes(response.routes);
+        setBookingFeeAmount(response.bookingFeeAmount);
+        setRoutesStatus(response.routes.length ? "ready" : "empty");
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        setRoutes([]);
+        setRoutesStatus("error");
+      });
+    api<{ trains: TrainRow[] }>("/api/trains", { signal: controller.signal })
+      .then((response) => {
+        setTimetable(response.trains);
+        setTimetableStatus(response.trains.length ? "ready" : "empty");
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        setTimetable([]);
+        setTimetableStatus("error");
+      });
+    return () => controller.abort();
+  }, [catalogueRetry]);
 
   useEffect(() => {
     if (!isAuthed) return;
@@ -152,22 +184,32 @@ export default function Home() {
   }, [isAuthed]);
 
   useEffect(() => {
-    if (showSplash) return;
+    if (!splashReady || showSplash) return;
+    const controller = new AbortController();
     let active = true;
-    api<{ trips: BookableTrip[]; hasEligibleDrivers: boolean }>(`/api/trips?date=${date}&direction=${direction}`)
+    api<{ trips: BookableTrip[]; hasEligibleDrivers: boolean }>(`/api/trips?date=${date}&direction=${direction}`, { signal: controller.signal })
       .then((res) => {
         if (!active) return;
         setTrips(res.trips);
         setHasEligibleDrivers(res.hasEligibleDrivers);
+        setTripsStatus(res.trips.length ? "ready" : "empty");
       })
       .catch(() => {
-        if (!active) return;
+        if (!active || controller.signal.aborted) return;
         setTrips([]);
         setHasEligibleDrivers(null);
+        setTripsStatus("error");
       })
-      .finally(() => { if (active) setLoadedQuery(queryKey); });
-    return () => { active = false; };
-  }, [showSplash, direction, date, queryKey]);
+      .finally(() => {
+        if (!active) return;
+        setLoading(false);
+        setLoadedQuery(queryKey);
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [splashReady, showSplash, direction, date, queryKey, tripRefreshKey]);
 
   function openBooking(trip: BookableTrip) {
     const fallbackStage =
@@ -261,7 +303,7 @@ export default function Home() {
     const surcharge = homePickup
       ? (charter ? previewStage?.homeSurcharge || 0 : (previewStage?.homeSurcharge || 0) * seats)
       : 0;
-    return { base, surcharge, total: base + surcharge };
+    return { base, surcharge, platformFee: selectedPoint ? bookingFeeAmount : 0, total: base + surcharge + (selectedPoint ? bookingFeeAmount : 0) };
   })();
 
   /* ─── Splash (after all hooks) ───────────────────────────────────────────── */
@@ -320,10 +362,19 @@ export default function Home() {
                 <TrainIcon className="h-3.5 w-3.5" />
                 {direction === "FROM_TERMINUS" ? "Arriving on which train?" : "Catching which train?"}
               </div>
-              {trainOptions.length === 0 && !loading && (
-                <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
-                  Timetable unavailable right now — cabs run to the Madaraka Express schedule (08:00 Inter-County · 15:00 Express · 22:00 Night Train).
+              {timetableStatus === "loading" && <p className="text-xs text-muted-foreground">Loading train times…</p>}
+              {timetableStatus === "error" && (
+                <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs text-muted-foreground">
+                  Train times could not load. <button type="button" className="font-medium text-primary underline underline-offset-2" onClick={retryCatalogues}>Try again</button>
                 </p>
+              )}
+              {timetableStatus === "empty" && (
+                <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+                  The train timetable is being configured. Booking will open when the schedule is published.
+                </p>
+              )}
+              {timetableStatus === "ready" && trainOptions.length === 0 && (
+                <p className="text-xs text-muted-foreground">No trains are configured for this direction yet.</p>
               )}
               <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
                 {trainOptions.map((t) => (
@@ -352,107 +403,149 @@ export default function Home() {
                   </button>
                 )}
               </div>
-              {pointGroups.length === 0 ? (
+              {routesStatus === "loading" ? (
                 <Skeleton className="h-11 w-full" />
+              ) : routesStatus === "error" ? (
+                <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-muted-foreground">
+                  Drop-off points could not load. <button type="button" className="font-medium text-primary underline underline-offset-2" onClick={retryCatalogues}>Try again</button>
+                </div>
+              ) : routesStatus === "empty" || pointGroups.length === 0 ? (
+                <div className="rounded-xl border border-dashed bg-card px-4 py-3 text-sm text-muted-foreground">
+                  {pointLabelCap} points are being set up. Bookings open when the route list is published.
+                </div>
               ) : (
                 <div className="space-y-1.5">
-                  <select
-                    id="booking-point"
-                    aria-label={`${pointLabelCap} point`}
-                    value={pointId ?? ""}
-                    onChange={(event) => setPointId(event.target.value || null)}
-                    className="h-11 w-full rounded-lg border border-input bg-background px-3 text-sm shadow-sm outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20"
-                  >
-                    <option value="">Choose a {pointLabelCap.toLowerCase()} point</option>
-                    {pointGroups.map(({ route, coast, points }) => (
-                      <optgroup
-                        key={route.id}
-                        label={`${coast === "south" ? "South Coast" : "North Coast"} · ${route.name.replace("Mombasa Terminus ↔ ", "").replace(" (Mtwapa · Malindi)", "")}`}
+                  <Popover open={pointPickerOpen} onOpenChange={setPointPickerOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        id="booking-point"
+                        type="button"
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={pointPickerOpen}
+                        aria-label={`${pointLabelCap} point`}
+                        className="h-12 w-full justify-between rounded-xl bg-card px-4 text-left font-normal shadow-sm"
                       >
-                        {points.map((point) => (
-                          <option key={point.id} value={point.id}>
-                            {point.name} · KSh {point.fare} · door +KSh {point.homeSurcharge}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
+                        <span className="flex min-w-0 items-center gap-2">
+                          <MapPin className="h-4 w-4 shrink-0 text-primary" />
+                          <span className={cn("truncate", !selectedPoint && "text-muted-foreground")}>
+                            {selectedPoint?.point.name ?? `Choose a ${pointLabelCap.toLowerCase()} point`}
+                          </span>
+                        </span>
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder={`Search ${pointLabelCap.toLowerCase()} points…`} />
+                        <CommandList>
+                          <CommandEmpty>No matching point found.</CommandEmpty>
+                          {pointGroups.map(({ route, coast, points }) => (
+                            <CommandGroup
+                              key={route.id}
+                              heading={`${coast === "south" ? "South Coast" : "North Coast"} · ${route.name.replace("Mombasa Terminus ↔ ", "").replace(" (Mtwapa · Malindi)", "")}`}
+                            >
+                              {points.map((point) => (
+                                <CommandItem
+                                  key={point.id}
+                                  value={`${coast} ${route.name} ${point.name}`}
+                                  onSelect={() => {
+                                    setPointId(point.id);
+                                    setPointPickerOpen(false);
+                                  }}
+                                  className="min-h-11"
+                                >
+                                  <Check className={cn("h-4 w-4", pointId === point.id ? "opacity-100" : "opacity-0")} />
+                                  <span className="min-w-0 flex-1 truncate">{point.name}</span>
+                                  <span className="text-xs tabular-nums text-muted-foreground">KSh {point.fare}</span>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          ))}
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                   {selectedPoint && (
-                    <p className="text-[11px] text-muted-foreground">
-                      {selectedPoint.point.name} · KSh {selectedPoint.point.fare} per seat · door surcharge +KSh {selectedPoint.point.homeSurcharge}
+                    <p className="px-1 text-[11px] text-muted-foreground">
+                      {selectedPoint.coast === "south" ? "South Coast" : "North Coast"} · {ksh(selectedPoint.point.fare)} per seat
                     </p>
                   )}
                 </div>
               )}
             </div>
 
-            {/* Options: door-to-door + charter + live fare preview */}
-            <Card className="border-primary/30 bg-primary/5">
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-1.5 text-sm">
-                  <Car className="h-4 w-4" /> {pointLabelCap} options
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 pt-0">
-                {/* Door-to-door toggle */}
-                <div className="flex items-start justify-between gap-3 rounded-lg border bg-card p-3">
-                  <div className="flex-1">
-                    <Label className="flex items-center gap-1 text-sm font-medium">
-                      <HomeIcon className="h-4 w-4" /> Door-to-door {direction === "FROM_TERMINUS" ? "drop-off" : "pickup"}
-                    </Label>
-                    <p className="mt-1 text-[11px] text-muted-foreground">
-                      {selectedPoint
-                        ? `+${ksh(selectedPoint.point.homeSurcharge)}/seat — passes to your driver in full.`
-                        : "Pick a point first to see its door surcharge."}
-                    </p>
-                  </div>
-                  <Switch checked={homePickup} onCheckedChange={setHomePickup} aria-label="Door-to-door" />
-                </div>
-
-                {/* Charter toggle */}
-                <div className="flex items-start justify-between gap-3 rounded-lg border bg-card p-3">
-                  <div className="flex-1">
-                    <Label className="flex items-center gap-1 text-sm font-medium">
-                      <Crown className="h-4 w-4 text-violet-600" /> Book the whole vehicle (private)
-                    </Label>
-                    <p className="mt-1 text-[11px] text-muted-foreground">
-                      Reserve the entire cab for your family or group — no other passengers join.
-                    </p>
-                  </div>
-                  <Switch
-                    checked={charter}
-                    onCheckedChange={(c) => {
-                      setCharter(c);
-                      if (c) setHomePickup(false);
-                    }}
-                    aria-label="Charter"
-                  />
-                </div>
-
-                {/* Live fare preview */}
-                <div className="space-y-1.5 rounded-lg border bg-card p-3">
-                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Live fare preview</div>
-                  <div className="space-y-1 text-xs">
-                    <Row
-                      label={charter ? "Charter (whole cab)" : `Base (per seat${selectedPoint ? ` · ${selectedPoint.point.name}` : ""})`}
-                      value={selectedPoint || charter ? ksh(charter ? (selectedPoint?.route.charterPrice ?? 0) : (previewStage?.fare || 0)) : "—"}
-                    />
-                    {homePickup && selectedPoint && (
-                      <Row label={`Door-to-door surcharge${charter ? "" : ` × ${seats}`}`} value={`+${ksh(previewStage?.homeSurcharge || 0)}${charter ? "" : ` × ${seats}`}`} />
-                    )}
-                    {!charter && seats > 1 && selectedPoint && <Row label={`Seats × ${seats}`} value={`${ksh(previewStage?.fare || 0)} × ${seats}`} />}
-                  </div>
-                  <div className="flex items-center justify-between border-t pt-1.5">
-                    <span className="text-sm font-medium">
-                      Total {charter ? "(whole cab)" : seats > 1 ? `(${seats} seats)` : ""}
+            {/* Ride type and door service: a single compact choice step. */}
+            <section className="space-y-2.5" aria-labelledby="ride-options-title">
+              <div className="flex items-baseline justify-between">
+                <h2 id="ride-options-title" className="text-sm font-semibold">Choose your ride</h2>
+                <span className="text-[11px] text-muted-foreground">You can review the fare next</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  aria-pressed={!charter}
+                  onClick={() => setCharter(false)}
+                  className={cn("rounded-xl border bg-card p-3 text-left transition-colors", !charter ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
+                >
+                  <span className="flex items-center gap-2">
+                    <Users className="h-4 w-4 shrink-0 text-primary" />
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium">Shared ride</span>
+                      <span className="block text-[11px] text-muted-foreground">Pay per seat</span>
                     </span>
-                    <span className="text-lg font-bold tabular-nums text-primary">
-                      {selectedPoint || charter ? ksh(farePreview.total) : "—"}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={charter}
+                  onClick={() => setCharter(true)}
+                  className={cn("rounded-xl border bg-card p-3 text-left transition-colors", charter ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
+                >
+                  <span className="flex items-center gap-2">
+                    <Crown className="h-4 w-4 shrink-0 text-violet-600" />
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium">Private cab</span>
+                      <span className="block text-[11px] text-muted-foreground">Reserve the vehicle</span>
                     </span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                  </span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                aria-pressed={homePickup}
+                disabled={!selectedPoint}
+                onClick={() => setHomePickup((selected) => !selected)}
+                className={cn("flex w-full items-center gap-3 rounded-xl border bg-card p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60", homePickup && "border-primary/50 bg-primary/5")}
+              >
+                <span className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded border", homePickup ? "border-primary bg-primary text-primary-foreground" : "border-input bg-background")}>
+                  {homePickup && <Check className="h-3.5 w-3.5" />}
+                </span>
+                <HomeIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium">Door-to-door {direction === "FROM_TERMINUS" ? "drop-off" : "pickup"}</span>
+                  <span className="block text-[11px] text-muted-foreground">
+                    {selectedPoint
+                      ? `Add ${ksh((selectedPoint.point.homeSurcharge || 0) * (charter ? 1 : seats))} · paid to your driver`
+                      : "Choose a point to see this option"}
+                  </span>
+                </span>
+                <span className="sr-only">{homePickup ? "Selected" : "Not selected"}</span>
+              </button>
+
+              <div className="flex items-center justify-between rounded-xl border bg-card px-3.5 py-3">
+                <span>
+                  <span className="block text-xs text-muted-foreground">Estimated total{charter ? " · whole cab" : seats > 1 ? ` · ${seats} seats` : ""}</span>
+                  <span className="block text-[11px] text-muted-foreground">
+                    {selectedPoint ? `Includes ${ksh(bookingFeeAmount)} booking fee` : "Final amount shown before payment"}
+                  </span>
+                </span>
+                <span className="text-lg font-bold tabular-nums text-primary">
+                  {selectedPoint ? ksh(farePreview.total) : "Choose a point"}
+                </span>
+              </div>
+            </section>
 
             {/* Seats (pooled only) */}
             {!charter && (
@@ -484,15 +577,23 @@ export default function Home() {
               </div>
 
               {loading && (
-                <div className="space-y-2">
-                  <Skeleton className="h-36 w-full" />
-                  <Skeleton className="h-36 w-full" />
+                <div role="status" className="flex items-center gap-2 rounded-xl border bg-card px-4 py-3 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Checking available cabs…
                 </div>
               )}
 
-              {!loading && visibleTrips.length === 0 && (
+              {!loading && tripsStatus === "error" && (
                 <Card>
-                  <CardContent className="py-8 text-center text-sm text-muted-foreground">
+                  <CardContent className="flex items-center justify-between gap-3 p-4 text-sm text-muted-foreground">
+                    <span>Cab availability could not load.</span>
+                    <Button type="button" size="sm" variant="outline" onClick={refreshTrips}>Try again</Button>
+                  </CardContent>
+                </Card>
+              )}
+
+              {!loading && tripsStatus !== "error" && visibleTrips.length === 0 && (
+                <Card>
+                  <CardContent className="py-5 text-center text-sm text-muted-foreground">
                     {selectedTrainGone
                       ? "This train’s meet-cab has already left for the selected day — pick a later train or another date."
                       : hasEligibleDrivers === false
@@ -511,31 +612,23 @@ export default function Home() {
                       trip={trip}
                       pointName={selectedPoint?.point.name}
                       pointFare={selectedPoint?.point.fare}
+                      pointSurcharge={selectedPoint?.point.homeSurcharge}
                       seats={seats}
                       charter={charter}
+                      homePickup={homePickup}
+                      hasPoint={!!selectedPoint}
                       onBook={() => openBooking(trip)}
                     />
                   </motion.div>
                 ))}
             </div>
 
-            {/* How it works */}
-            <Card className="border-dashed">
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-1.5 text-xs">
-                  <Info className="h-3.5 w-3.5" /> How points &amp; fares work
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-1.5 pt-0 text-xs text-muted-foreground">
-                <p>
-                  Cabs meet every Madaraka Express at Mombasa Terminus. {direction === "FROM_TERMINUS" ? "Choose your drop-off point — the cab drops you there on the way from the terminus." : "Choose your pickup point and be there 10 minutes before the cab leaves for the terminus."}
-                </p>
-                <p>
-                  Shared-ride fare is <span className="font-medium text-foreground">KSh 400</span> per seat upcountry (Malindi 700, Diani Naivas 500). Door-to-door adds the point&apos;s surcharge, which goes to your driver in full.
-                </p>
-                <p>Private charter = the whole cab. Cancel before lock for a full refund; after lock, fares become 30-day travel credit.</p>
-              </CardContent>
-            </Card>
+            <details className="rounded-xl border bg-card px-3.5 py-3 text-sm">
+              <summary className="cursor-pointer font-medium">Fare and service details</summary>
+              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                The fare is based on your selected point and ride type. Door-to-door surcharges go to your driver in full. A private cab reserves the whole vehicle. Review the complete amount and cancellation terms before you pay.
+              </p>
+            </details>
 
             {/* My bookings */}
             {myBookings.length > 0 && (
@@ -585,12 +678,12 @@ export default function Home() {
         open={sheetOpen}
         onClose={() => {
           setSheetOpen(false);
-          loadTrips(direction, date);
+          refreshTrips();
           loadMyBookings();
         }}
         draft={draft}
         onBooked={() => {
-          loadTrips(direction, date);
+          refreshTrips();
           loadMyBookings();
         }}
       />
@@ -616,32 +709,31 @@ export default function Home() {
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-medium tabular-nums">{value}</span>
-    </div>
-  );
-}
-
 function CabCard({
   trip,
   pointName,
   pointFare,
+  pointSurcharge,
   seats,
   charter,
+  homePickup,
+  hasPoint,
   onBook,
 }: {
   trip: BookableTrip;
   pointName?: string;
   pointFare?: number;
+  pointSurcharge?: number;
   seats: number;
   charter: boolean;
+  homePickup: boolean;
+  hasPoint: boolean;
   onBook: () => void;
 }) {
   const booked = trip.capacity - trip.seatsLeft;
-  const fare = charter ? trip.charterPrice : (pointFare ?? trip.minFare) * seats;
+  const baseFare = charter ? trip.charterPrice : (pointFare ?? trip.minFare) * seats;
+  const surcharge = homePickup ? (pointSurcharge ?? 0) * (charter ? 1 : seats) : 0;
+  const fare = baseFare + surcharge + (hasPoint ? trip.platformFeeAmount : 0);
   const full = trip.seatsLeft <= 0 || !trip.bookable;
 
   return (
@@ -678,6 +770,7 @@ function CabCard({
               {charter ? "Charter" : seats > 1 ? `${seats} seats` : "Fare"}
             </div>
             <div className="font-bold tabular-nums text-primary">{ksh(fare)}</div>
+            {hasPoint && <div className="text-[10px] text-muted-foreground">includes {ksh(trip.platformFeeAmount)} fee</div>}
             {!charter && seats === 1 && pointFare != null && pointFare !== trip.minFare && (
               <div className="text-[10px] text-muted-foreground">from {ksh(trip.minFare)}</div>
             )}
@@ -703,13 +796,15 @@ function CabCard({
           <SeatMeter booked={booked} capacity={trip.capacity} />
         </div>
 
-        <Button className="h-9 w-full" size="sm" disabled={full} onClick={onBook}>
-          {full
+        <Button className="h-9 w-full" size="sm" disabled={full || !hasPoint} onClick={onBook}>
+          {!hasPoint
+            ? `Choose a ${trip.pointsLabel} point first`
+            : full
             ? trip.seatsLeft <= 0
               ? "Not enough seats"
               : "Unavailable"
             : charter
-              ? `Book charter · ${ksh(trip.charterPrice)}`
+              ? `Book charter · ${ksh(fare)}`
               : `Reserve ${seats > 1 ? `${seats} seats` : "seat"} · ${ksh(fare)}`}
         </Button>
       </CardContent>

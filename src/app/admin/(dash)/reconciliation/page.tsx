@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 interface ReconData {
+  simulation: boolean;
   lastReconciliationAt: string | null;
   counts: { ambiguous: number; stuckRefunds: number; pendingRefunds: number; failedPayouts: number; failedRefunds: number; failedTx: number };
   daily: { date: string; commission: number; paidOut: number }[];
@@ -196,24 +197,26 @@ export default function AdminReconciliation() {
       </Card>
 
       {/* Simulation tools */}
-      <Card className="border-dashed">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <FlaskConical className="h-4 w-4 text-muted-foreground" /> Prototype simulation tools
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => doAction("simulate_missed_callback", "Missed callback simulated")} disabled={busy}>
-            <Radio className="h-4 w-4" /> Simulate missed callback
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => doAction("inject_refund_failure", "Failure armed")} disabled={busy}>
-            <Badge variant="outline" className="mr-1">next</Badge> Refund fails
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => doAction("inject_payout_failure", "Failure armed")} disabled={busy}>
-            <Badge variant="outline" className="mr-1">next</Badge> Payout fails
-          </Button>
-        </CardContent>
-      </Card>
+      {data?.simulation && (
+        <Card className="border-dashed">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <FlaskConical className="h-4 w-4 text-muted-foreground" /> Local demo simulation tools
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => doAction("simulate_missed_callback", "Missed callback simulated")} disabled={busy}>
+              <Radio className="h-4 w-4" /> Simulate missed callback
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => doAction("inject_refund_failure", "Failure armed")} disabled={busy}>
+              <Badge variant="outline" className="mr-1">next</Badge> Refund fails
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => doAction("inject_payout_failure", "Failure armed")} disabled={busy}>
+              <Badge variant="outline" className="mr-1">next</Badge> Payout fails
+            </Button>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

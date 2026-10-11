@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
 
 /** Network map for the booking form: routes with ordered stages + fares. */
 export async function GET() {
@@ -8,7 +9,12 @@ export async function GET() {
     where: { active: true },
     include: { stages: { orderBy: { order: "asc" } } },
   });
+  const config = await db.platformConfig.findUnique({
+    where: { id: "main" },
+    select: { bookingFeeAmount: true },
+  });
   return NextResponse.json({
+    bookingFeeAmount: config?.bookingFeeAmount ?? DEFAULT_BOOKING_FEE_AMOUNT,
     routes: routes.map((r) => ({
       id: r.id,
       name: r.name,

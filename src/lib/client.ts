@@ -53,13 +53,14 @@ export function isValidMpesaPhone(input: string): boolean {
 
 export async function api<T = unknown>(
   path: string,
-  options?: { method?: string; body?: unknown }
+  options?: { method?: string; body?: unknown; signal?: AbortSignal }
 ): Promise<T> {
   const res = await fetch(path, {
     method: options?.method || (options?.body ? "POST" : "GET"),
     headers: options?.body ? { "Content-Type": "application/json" } : undefined,
     body: options?.body ? JSON.stringify(options.body) : undefined,
     cache: "no-store",
+    signal: options?.signal,
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {

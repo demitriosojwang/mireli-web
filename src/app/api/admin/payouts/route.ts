@@ -4,7 +4,7 @@ import { getAdminSession } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import { executePayout, getConfig, isPayoutBatchDue, runPayoutBatch } from "@/lib/money";
 
-/** Payout records — created automatically on trip completion, paid in batches. */
+/** Payout records — dispatch starts automatically when a trip completes. */
 export async function GET() {
   const session = await getAdminSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -26,6 +26,7 @@ export async function GET() {
       queued: payouts.filter((p) => p.status === "queued").reduce((s, p) => s + p.netPayoutAmount, 0),
       paid: payouts.filter((p) => p.status === "completed" && p.settlementVerified).reduce((s, p) => s + p.netPayoutAmount, 0),
       commission: payouts.filter((p) => p.status === "completed" && p.settlementVerified).reduce((s, p) => s + p.commissionAmount, 0),
+      platformFees: payouts.filter((p) => p.status === "completed" && p.settlementVerified).reduce((s, p) => s + p.platformFeeAmount, 0),
       processing:payouts.filter(p=>p.status==="processing").reduce((s,p)=>s+p.netPayoutAmount,0),
       ambiguous:payouts.filter(p=>p.status==="ambiguous").reduce((s,p)=>s+p.netPayoutAmount,0),
       failed: payouts.filter((p) => p.status === "failed").reduce((s, p) => s + p.netPayoutAmount, 0),
@@ -39,6 +40,7 @@ export async function GET() {
       gross: p.grossFareTotal,
       commission: p.commissionAmount,
       homeSurcharge: p.homeSurchargeAmount,
+      platformFee: p.platformFeeAmount,
       net: p.netPayoutAmount,
       method: p.method,
       status: p.status === "completed" && !p.settlementVerified ? "needs_review" : p.status,
