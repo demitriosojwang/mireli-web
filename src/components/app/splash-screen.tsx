@@ -39,17 +39,14 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
         }}
       />
 
-      {/* Logo with bounce-in animation */}
+      {/* Supplied full brand lockup with bounce-in animation */}
       <div className="mireli-splash-in relative z-10 flex flex-col items-center">
         <div
-          className="mb-6 h-28 w-28 overflow-hidden rounded-3xl shadow-2xl"
+          className="mb-6 h-48 w-48 overflow-hidden rounded-3xl bg-white shadow-2xl"
           style={{ boxShadow: "0 0 60px oklch(0.67 0.19 42 / 0.4)" }}
         >
-          <img src="/mireli-logo.svg" alt="Mi-Reli" className="h-full w-full object-cover" />
+          <img src="/mireli-logo.jpeg" alt="Mi-Reli" className="h-full w-full object-contain" />
         </div>
-
-        {/* Wordmark */}
-        <h1 className="mb-2 text-4xl font-bold tracking-tight text-white">Mi-Reli</h1>
 
         {/* Tagline */}
         <p className="text-sm uppercase tracking-[0.3em] text-white/60">Ride · Connect · Journey</p>
