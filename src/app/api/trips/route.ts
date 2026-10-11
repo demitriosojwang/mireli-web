@@ -76,7 +76,7 @@ export async function GET(req: NextRequest) {
             charterPrice: true,
             stages: {
               orderBy: { order: "asc" },
-              select: { id: true, name: true, order: true, fare: true, homeSurcharge: true },
+              select: { order: true, fare: true },
             },
           },
         },
@@ -100,14 +100,7 @@ export async function GET(req: NextRequest) {
       .map((t) => {
       const relevantBooked = t.bookings.reduce((s, b) => s + b.seats, 0);
       const seatsLeft = Math.max(t.capacity - relevantBooked, 0);
-      const stages = t.route.stages.map((s) => ({
-        id: s.id,
-        name: s.name,
-        order: s.order,
-        fare: s.fare,
-        homeSurcharge: s.homeSurcharge,
-      }));
-      const nonTerminusStages = stages.filter((s) => s.order > 0);
+      const nonTerminusStages = t.route.stages.filter((s) => s.order > 0);
       const isFromTerminus = t.direction === "FROM_TERMINUS";
       const train = t.train
         ? {
@@ -156,10 +149,10 @@ export async function GET(req: NextRequest) {
               rating: t.driver.rating,
             }
           : null,
-        stages,
-        // FROM_TERMINUS exposes drop-off points; TO_TERMINUS exposes pickup points
+        // Stage details are loaded once from /api/routes, not repeated for
+        // every cab. The current policy lets every active driver serve every
+        // active route, so filtering by routeId is sufficient.
         pointsLabel: isFromTerminus ? "drop-off" : "pickup",
-        points: nonTerminusStages,
         minFare: nonTerminusStages.length ? Math.min(...nonTerminusStages.map((s) => s.fare)) : 0,
       };
       }),

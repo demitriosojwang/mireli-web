@@ -212,13 +212,14 @@ export default function Home() {
   }, [splashReady, showSplash, direction, date, queryKey, tripRefreshKey]);
 
   function openBooking(trip: BookableTrip) {
+    const routeStages = routes.find((route) => route.id === trip.routeId)?.stages ?? [];
     const fallbackStage =
       direction === "FROM_TERMINUS"
-        ? trip.stages.filter((s) => s.order > 0).slice(-1)[0]
-        : trip.stages.filter((s) => s.order > 0)[0];
+        ? routeStages.filter((s) => s.order > 0).slice(-1)[0]
+        : routeStages.filter((s) => s.order > 0)[0];
     setDraft({
-      trip,
-      stageId: pointId && trip.stages.some((s) => s.id === pointId) ? pointId : fallbackStage?.id || "",
+      trip: { ...trip, stages: routeStages },
+      stageId: pointId && routeStages.some((s) => s.id === pointId) ? pointId : fallbackStage?.id || "",
       seats,
       charter,
       homePickup,
@@ -273,6 +274,7 @@ export default function Home() {
     }
     return null;
   })();
+  const selectedRouteId = selectedPoint?.route.id ?? null;
 
   // Trips after train + point filters
   const visibleTrips = useMemo(() => {
@@ -280,9 +282,9 @@ export default function Home() {
       trip.bookable && (charter ? trip.seatsLeft === trip.capacity : trip.seatsLeft > 0),
     );
     if (trainKey) list = list.filter((t) => t.train && `${t.train.name}-${t.train.mtmTime}` === trainKey);
-    if (pointId) list = list.filter((t) => t.stages.some((s) => s.id === pointId));
+    if (selectedRouteId) list = list.filter((t) => t.routeId === selectedRouteId);
     return list;
-  }, [trips, trainKey, pointId, charter]);
+  }, [trips, trainKey, selectedRouteId, charter]);
 
   // How many seats can actually be booked on the cabs currently listed?
   const seatCap = useMemo(() => {
@@ -407,7 +409,7 @@ export default function Home() {
                 <Skeleton className="h-11 w-full" />
               ) : routesStatus === "error" ? (
                 <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-muted-foreground">
-                  Drop-off points could not load. <button type="button" className="font-medium text-primary underline underline-offset-2" onClick={retryCatalogues}>Try again</button>
+                  {pointLabelCap} points could not load. <button type="button" className="font-medium text-primary underline underline-offset-2" onClick={retryCatalogues}>Try again</button>
                 </div>
               ) : routesStatus === "empty" || pointGroups.length === 0 ? (
                 <div className="rounded-xl border border-dashed bg-card px-4 py-3 text-sm text-muted-foreground">

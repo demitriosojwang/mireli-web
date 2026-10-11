@@ -89,10 +89,14 @@ describe("customer trip availability", () => {
     expect(result.hasEligibleDrivers).toBe(true);
     expect(result.trips).toHaveLength(1);
     expect(result.trips[0]).toMatchObject({ minFare: 700, seatsLeft: 3, platformFeeAmount: 50 });
+    expect(result.trips[0]).not.toHaveProperty("stages");
+    expect(result.trips[0]).not.toHaveProperty("points");
     expect(result.trips[0].driver).not.toHaveProperty("phone");
     expect(mocks.tripFindMany.mock.calls[0][0].where.driverId.in).toEqual([eligibleDriver.id]);
     expect(mocks.driverFindMany.mock.calls[0][0].select.application.select.documents.select)
       .toEqual({ type: true, state: true, scanState: true, expiresAt: true });
+    expect(mocks.tripFindMany.mock.calls[0][0].select.route.select.stages.select)
+      .toEqual({ order: true, fare: true });
   });
 
   it("returns a clear setup response instead of an unhandled error when booking settings are absent", async () => {

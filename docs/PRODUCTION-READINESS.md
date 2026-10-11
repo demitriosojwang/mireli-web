@@ -21,6 +21,8 @@ driver platform and approved route data are live.
 - [x] Keep available cabs at zero when there are no active, approved drivers.
 - [x] Return that empty supply state before running the scheduling tick, and
   limit availability reads to approved-driver and booking-display fields.
+- [x] Keep route stages in one route-catalogue response instead of repeating
+  the full stop list in every cab's availability response.
 - [x] Allocate eligible drivers across every active route, matching the
   current operating policy.
 - [x] Show the flat booking fee in the fare preview and booking total.

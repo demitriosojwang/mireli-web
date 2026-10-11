@@ -60,15 +60,18 @@ export interface BookableTrip {
   capacity: number;
   seatsLeft: number;
   bookable: boolean;
-  stages: Stage[];
   pointsLabel: "drop-off" | "pickup";
   minFare: number;
   driver: { name: string; plate: string; cabType: string; rating: number } | null;
 }
 
+export interface BookableTripWithStages extends BookableTrip {
+  stages: Stage[];
+}
+
 /** Everything the main view collected before the sheet opens. */
 export interface BookingDraft {
-  trip: BookableTrip;
+  trip: BookableTripWithStages;
   stageId: string;
   seats: number;
   charter: boolean;
