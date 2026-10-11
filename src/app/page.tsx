@@ -274,7 +274,6 @@ export default function Home() {
     }
     return null;
   })();
-  const selectedRouteId = selectedPoint?.route.id ?? null;
 
   // Trips after train + point filters
   const visibleTrips = useMemo(() => {
@@ -282,9 +281,12 @@ export default function Home() {
       trip.bookable && (charter ? trip.seatsLeft === trip.capacity : trip.seatsLeft > 0),
     );
     if (trainKey) list = list.filter((t) => t.train && `${t.train.name}-${t.train.mtmTime}` === trainKey);
-    if (selectedRouteId) list = list.filter((t) => t.routeId === selectedRouteId);
+    if (pointId) {
+      const routeId = routes.find((route) => route.stages.some((stage) => stage.id === pointId))?.id;
+      if (routeId) list = list.filter((t) => t.routeId === routeId);
+    }
     return list;
-  }, [trips, trainKey, selectedRouteId, charter]);
+  }, [trips, trainKey, pointId, routes, charter]);
 
   // How many seats can actually be booked on the cabs currently listed?
   const seatCap = useMemo(() => {
