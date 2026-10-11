@@ -66,7 +66,7 @@ async function verifySignIn(body: Record<string, unknown>) {
   // accounts need a verified mobile number for booking and M-Pesa contact.
   if (!existing && !phone) {
     return NextResponse.json(
-      { error: "No account was found for that email. Create an account with your mobile number." },
+      { error: "No account was found for that email. Create an account with a verified mobile number." },
       { status: 404, headers: NO_STORE },
     );
   }

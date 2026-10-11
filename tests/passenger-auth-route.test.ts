@@ -174,6 +174,7 @@ describe("passenger authentication route", () => {
   it("upgrades the guest booking identity after the phone challenge is verified", async () => {
     mocks.getPassengerSession.mockResolvedValueOnce({ role: "passenger", id: guest.id, name: guest.name, identifier: guest.phone, exp: Date.now() + 60000 });
     mocks.passengerFindUnique.mockResolvedValueOnce(guest);
+    mocks.txPassengerUpdate.mockResolvedValueOnce({ ...account, id: guest.id });
     mocks.txPassengerFindUnique
       .mockResolvedValueOnce(guest)
       .mockResolvedValueOnce(null);
