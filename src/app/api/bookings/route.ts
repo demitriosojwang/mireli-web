@@ -223,14 +223,25 @@ export async function POST(req: NextRequest) {
 
   // Secure a driver and cab before applying credit or allowing payment. An
   // unmatched request must never look like a confirmed booking to a passenger.
-  const allocation = await allocateBooking({
-    bookingId: booking.id,
-    routeId: route.id,
-    direction,
-    seats: isCharter ? 999 : tripSeats, // charter handled inside allocator
-    travelDate: travelDateDate,
-    charter: isCharter,
-  });
+  let allocation: Awaited<ReturnType<typeof allocateBooking>>;
+  try {
+    allocation = await allocateBooking({
+      bookingId: booking.id,
+      routeId: route.id,
+      direction,
+      seats: isCharter ? 999 : tripSeats, // charter handled inside allocator
+      travelDate: travelDateDate,
+      charter: isCharter,
+    });
+  } catch {
+    // Allocation is the gate before credit use or M-Pesa. Remove the unpaid
+    // draft if the scheduler/database fails so it cannot look bookable later.
+    await db.booking.delete({ where: { id: booking.id } }).catch(() => undefined);
+    return NextResponse.json(
+      { error: "We couldn't secure a driver for this booking yet. No payment was requested; please try again shortly." },
+      { status: 503 },
+    );
+  }
   if (!allocation.tripId) {
     await db.booking.delete({ where: { id: booking.id } });
     return NextResponse.json(
@@ -330,3 +341,4 @@ export async function POST(req: NextRequest) {
     bookingWindowMinutes: cfg.bookingWindowMinutes,
   });
 }
+

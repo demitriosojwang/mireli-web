@@ -176,82 +176,100 @@ export async function allocateBooking(params: {
     },
     orderBy: { departureAt: "asc" },
     include: {
-      bookings: { select: { seats: true } },
       driver: { include: { application: { include: { documents: { where: { state: { not: "replaced" } } } } } } },
     },
   });
 
   for (const t of candidates) {
     if (!t.driver || !(isLocalDemoEnabled() || evaluateDriverApplication(t.driver.application, t.driver.status).eligible)) continue;
-    if (params.charter) {
-      // Charter = the whole cab: only a completely empty trip qualifies
-      if (t.bookedSeats === 0) {
-        await db.trip.update({
-          where: { id: t.id },
-          data: { bookedSeats: t.capacity },
-        });
-        await db.booking.update({
-          where: { id: params.bookingId },
-          data: { tripId: t.id, allocationNote: `Charter — whole cab allocated (${t.direction === "FROM_TERMINUS" ? "from-terminus" : "to-terminus"})` },
-        });
-        return { tripId: t.id, note: "Charter allocated — entire cab reserved for you" };
-      }
-      continue;
-    }
-    if (t.bookedSeats + params.seats <= t.capacity) {
-      await db.trip.update({
+    // Lock the trip row before checking its manifest so concurrent bookings
+    // cannot both observe the same free seats. Recount active bookings here
+    // instead of trusting bookedSeats: older cancellations did not decrement
+    // that cached counter.
+    const reservation = await db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "Trip" WHERE "id" = ${t.id} FOR UPDATE`;
+      const current = await tx.trip.findUnique({
         where: { id: t.id },
-        data: { bookedSeats: { increment: params.seats } },
+        include: {
+          bookings: {
+            where: { status: { in: ["awaiting_payment", "confirmed", "boarded"] } },
+            select: { seats: true, isCharter: true },
+          },
+        },
       });
-      await db.booking.update({
-        where: { id: params.bookingId },
-        data: { tripId: t.id, allocationNote: `Auto-allocated to ${t.direction === "FROM_TERMINUS" ? "from-terminus" : "to-terminus"} trip` },
-      });
-      return { tripId: t.id, note: `Auto-allocated — ${t.capacity - t.bookedSeats - params.seats} seats left on that departure` };
+      if (!current || !["scheduled", "locked"].includes(current.status)) return null;
+
+      const hasCharter = current.bookings.some((booking) => booking.isCharter);
+      const occupiedSeats = hasCharter ? current.capacity : current.bookings.reduce((sum, booking) => sum + booking.seats, 0);
+      if (params.charter ? current.bookings.length > 0 : hasCharter || occupiedSeats + params.seats > current.capacity) return null;
+
+      const nextOccupiedSeats = params.charter ? current.capacity : occupiedSeats + params.seats;
+      const note = params.charter
+        ? `Charter — whole cab allocated (${current.direction === "FROM_TERMINUS" ? "from-terminus" : "to-terminus"})`
+        : `Auto-allocated to ${current.direction === "FROM_TERMINUS" ? "from-terminus" : "to-terminus"} trip`;
+      await tx.trip.update({ where: { id: current.id }, data: { bookedSeats: nextOccupiedSeats } });
+      await tx.booking.update({ where: { id: params.bookingId }, data: { tripId: current.id, allocationNote: note } });
+      return { tripId: current.id, seatsLeft: current.capacity - nextOccupiedSeats };
+    });
+    if (reservation) {
+      return {
+        tripId: reservation.tripId,
+        note: params.charter
+          ? "Charter allocated — entire cab reserved for you"
+          : `Auto-allocated — ${reservation.seatsLeft} seats left on that departure`,
+      };
     }
   }
 
-  // No scheduled capacity — try to spin up an extra trip with a free driver
-  const busy = await db.trip.findMany({
-    where: {
-      departureAt: { gte: from, lt: dayEnd },
-      status: { in: ["scheduled", "locked", "departed"] },
-    },
-    select: { driverId: true },
-  });
-  const busyIds = new Set(busy.map((b) => b.driverId));
+  // No scheduled capacity — try to spin up an extra trip with a free driver.
+  // Lock each candidate driver while checking the day manifest so concurrent
+  // requests cannot assign one driver to two extra departures.
   const freeCandidates=await db.driver.findMany({
-    where:{status:"active",id:{notIn:[...busyIds].filter(Boolean) as string[]}},
+    where:{status:"active"},
     orderBy:{createdAt:"asc"},
     include:{application:{include:{documents:{where:{state:{not:"replaced"}}}}}}
   });
-  const freeDriver=freeCandidates.find(d=>isLocalDemoEnabled() || evaluateDriverApplication(d.application,d.status).eligible);
-  if (freeDriver && params.seats <= freeDriver.capacity) {
-    // Depart 2 hours out on the travel day
-    const dep = new Date(Math.max(now.getTime() + 2 * 60 * 60 * 1000, dayStart.getTime()));
-    if (dep.getTime() < dayStart.getTime() + 2 * 60 * 60 * 1000) {
-      dep.setTime(dayStart.getTime() + 2 * 60 * 60 * 1000);
+  const earliestExtraDeparture = Math.max(now.getTime() + 2 * 60 * 60 * 1000, dayStart.getTime() + 2 * 60 * 60 * 1000);
+  const dep = new Date(Math.ceil(earliestExtraDeparture / (60 * 60 * 1000)) * 60 * 60 * 1000);
+  if (dep < dayEnd) {
+    for (const driver of freeCandidates) {
+      if (!(isLocalDemoEnabled() || evaluateDriverApplication(driver.application, driver.status).eligible)) continue;
+      if (!params.charter && params.seats > driver.capacity) continue;
+      const extraTripId = await db.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Driver" WHERE "id" = ${driver.id} FOR UPDATE`;
+        const alreadyAssigned = await tx.trip.findFirst({
+          where: {
+            driverId: driver.id,
+            departureAt: { gte: dayStart, lt: dayEnd },
+            status: { in: ["scheduled", "locked", "departed"] },
+          },
+          select: { id: true },
+        });
+        if (alreadyAssigned) return null;
+        const trip = await tx.trip.create({
+          data: {
+            routeId: params.routeId,
+            driverId: driver.id,
+            direction: params.direction,
+            departureAt: dep,
+            capacity: driver.capacity,
+            bookedSeats: params.charter ? driver.capacity : params.seats,
+            source: "auto",
+          },
+        });
+        await tx.booking.update({
+          where: { id: params.bookingId },
+          data: {
+            tripId: trip.id,
+            allocationNote: `Auto-created extra departure with ${driver.name} (${driver.plate})${params.charter ? " — charter" : ""}`,
+          },
+        });
+        return trip.id;
+      });
+      if (extraTripId) {
+        return { tripId: extraTripId, note: `Extra departure created with ${driver.name}${params.charter ? " — charter" : ""}` };
+      }
     }
-    dep.setMinutes(0, 0, 0);
-    const t = await db.trip.create({
-      data: {
-        routeId: params.routeId,
-        driverId: freeDriver.id,
-        direction: params.direction,
-        departureAt: dep,
-        capacity: freeDriver.capacity,
-        bookedSeats: params.charter ? freeDriver.capacity : params.seats,
-        source: "auto",
-      },
-    });
-    await db.booking.update({
-      where: { id: params.bookingId },
-      data: {
-        tripId: t.id,
-        allocationNote: `Auto-created extra departure with ${freeDriver.name} (${freeDriver.plate})${params.charter ? " — charter" : ""}`,
-      },
-    });
-    return { tripId: t.id, note: `Extra departure created with ${freeDriver.name}${params.charter ? " — charter" : ""}` };
   }
 
   await db.booking.update({
