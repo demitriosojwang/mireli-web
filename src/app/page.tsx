@@ -13,7 +13,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Command,
-  CommandEmpty,
   CommandGroup,
   CommandInput,
   CommandItem,
@@ -55,9 +54,26 @@ import { cn } from "@/lib/utils";
 interface RouteInfo {
   id: string;
   name: string;
-  durationMinutes: number;
   charterPrice: number;
-  stages: { id: string; name: string; order: number; fare: number; homeSurcharge: number }[];
+}
+
+interface StagePoint {
+  id: string;
+  name: string;
+  order: number;
+  fare: number;
+  homeSurcharge: number;
+}
+
+interface PointSearchResult extends StagePoint {
+  routeId: string;
+  route: RouteInfo;
+}
+
+interface SelectedPoint {
+  point: StagePoint;
+  route: RouteInfo;
+  coast: "north" | "south";
 }
 
 interface BookingRow {
@@ -98,7 +114,7 @@ export default function Home() {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   });
-  const [routes, setRoutes] = useState<RouteInfo[]>([]);
+  const [pointCount, setPointCount] = useState(0);
   const [bookingFeeAmount, setBookingFeeAmount] = useState(DEFAULT_BOOKING_FEE_AMOUNT);
   const [routesStatus, setRoutesStatus] = useState<CatalogueStatus>("loading");
   const [trips, setTrips] = useState<BookableTrip[] | null>(null);
@@ -112,12 +128,17 @@ export default function Home() {
   const [loadedQuery, setLoadedQuery] = useState<string | null>(null);
   const [tripRefreshKey, setTripRefreshKey] = useState(0);
   const [pointPickerOpen, setPointPickerOpen] = useState(false);
+  const [pointSearch, setPointSearch] = useState("");
+  const [pointMatches, setPointMatches] = useState<PointSearchResult[]>([]);
+  const [pointSearchStatus, setPointSearchStatus] = useState<CatalogueStatus | "idle">("idle");
+  const [pointSearchHasMore, setPointSearchHasMore] = useState(false);
+  const [pointSearchRetry, setPointSearchRetry] = useState(0);
   const queryKey = `${direction}|${date}`;
   const loading = isRefreshing || loadedQuery !== queryKey;
 
   // selection state (original store equivalents)
   const [trainKey, setTrainKey] = useState<string | null>(null);
-  const [pointId, setPointId] = useState<string | null>(null);
+  const [selectedPoint, setSelectedPoint] = useState<SelectedPoint | null>(null);
   const [homePickup, setHomePickup] = useState(false);
   const [charter, setCharter] = useState(false);
   const [requestedSeats, setSeats] = useState(1);
@@ -150,15 +171,15 @@ export default function Home() {
 
   useEffect(() => {
     const controller = new AbortController();
-    api<{ routes: RouteInfo[]; bookingFeeAmount: number }>("/api/routes", { signal: controller.signal })
+    api<{ pointCount: number; bookingFeeAmount: number }>("/api/routes", { signal: controller.signal })
       .then((response) => {
-        setRoutes(response.routes);
+        setPointCount(response.pointCount);
         setBookingFeeAmount(response.bookingFeeAmount);
-        setRoutesStatus(response.routes.length ? "ready" : "empty");
+        setRoutesStatus(response.pointCount ? "ready" : "empty");
       })
       .catch(() => {
         if (controller.signal.aborted) return;
-        setRoutes([]);
+        setPointCount(0);
         setRoutesStatus("error");
       });
     api<{ trains: TrainRow[] }>("/api/trains", { signal: controller.signal })
@@ -173,6 +194,36 @@ export default function Home() {
       });
     return () => controller.abort();
   }, [catalogueRetry]);
+
+  useEffect(() => {
+    const query = pointSearch.trim();
+    if (!pointPickerOpen || query.length < 2) return;
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      setPointSearchStatus("loading");
+      api<{ points: PointSearchResult[]; hasMore: boolean }>(
+        `/api/stages?q=${encodeURIComponent(query)}`,
+        { signal: controller.signal },
+      )
+        .then((response) => {
+          setPointMatches(response.points);
+          setPointSearchHasMore(response.hasMore);
+          setPointSearchStatus(response.points.length ? "ready" : "empty");
+        })
+        .catch(() => {
+          if (controller.signal.aborted) return;
+          setPointMatches([]);
+          setPointSearchHasMore(false);
+          setPointSearchStatus("error");
+        });
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [pointPickerOpen, pointSearch, pointSearchRetry]);
 
   useEffect(() => {
     if (!isAuthed) return;
@@ -212,14 +263,10 @@ export default function Home() {
   }, [splashReady, showSplash, direction, date, queryKey, tripRefreshKey]);
 
   function openBooking(trip: BookableTrip) {
-    const routeStages = routes.find((route) => route.id === trip.routeId)?.stages ?? [];
-    const fallbackStage =
-      direction === "FROM_TERMINUS"
-        ? routeStages.filter((s) => s.order > 0).slice(-1)[0]
-        : routeStages.filter((s) => s.order > 0)[0];
+    if (!selectedPoint || selectedPoint.route.id !== trip.routeId) return;
     setDraft({
-      trip: { ...trip, stages: routeStages },
-      stageId: pointId && routeStages.some((s) => s.id === pointId) ? pointId : fallbackStage?.id || "",
+      trip: { ...trip, stages: [selectedPoint.point] },
+      stageId: selectedPoint.point.id,
       seats,
       charter,
       homePickup,
@@ -256,24 +303,20 @@ export default function Home() {
 
   const pointLabelCap = direction === "FROM_TERMINUS" ? "Drop-off" : "Pickup";
 
-  // Points grid grouped by route (coast), from the stable routes network
+  // The search response is already bounded; group only the small matching set.
   const pointGroups = useMemo(() => {
-    return routes
-      .map((r) => ({
-        route: r,
-        coast: coastOf(r.name),
-        points: r.stages.filter((s) => s.order > 0),
-      }))
-      .filter((g) => g.points.length > 0);
-  }, [routes]);
-
-  const selectedPoint = (() => {
-    for (const g of pointGroups) {
-      const p = g.points.find((s) => s.id === pointId);
-      if (p) return { point: p, route: g.route, coast: g.coast };
+    const groups = new Map<string, { route: RouteInfo; coast: "north" | "south"; points: PointSearchResult[] }>();
+    for (const point of pointMatches) {
+      const route = point.route;
+      const group = groups.get(route.id);
+      if (group) {
+        group.points.push(point);
+      } else {
+        groups.set(route.id, { route, coast: coastOf(route.name), points: [point] });
+      }
     }
-    return null;
-  })();
+    return Array.from(groups.values());
+  }, [pointMatches]);
 
   // Trips after train + point filters
   const visibleTrips = useMemo(() => {
@@ -281,12 +324,9 @@ export default function Home() {
       trip.bookable && (charter ? trip.seatsLeft === trip.capacity : trip.seatsLeft > 0),
     );
     if (trainKey) list = list.filter((t) => t.train && `${t.train.name}-${t.train.mtmTime}` === trainKey);
-    if (pointId) {
-      const routeId = routes.find((route) => route.stages.some((stage) => stage.id === pointId))?.id;
-      if (routeId) list = list.filter((t) => t.routeId === routeId);
-    }
+    if (selectedPoint) list = list.filter((t) => t.routeId === selectedPoint.route.id);
     return list;
-  }, [trips, trainKey, pointId, routes, charter]);
+  }, [trips, trainKey, selectedPoint, charter]);
 
   // How many seats can actually be booked on the cabs currently listed?
   const seatCap = useMemo(() => {
@@ -401,8 +441,8 @@ export default function Home() {
                 <div className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
                   <MapPin className="h-3.5 w-3.5" /> {pointLabelCap} point
                 </div>
-                {pointId && (
-                  <button onClick={() => setPointId(null)} className="text-[11px] text-primary hover:underline">
+                {selectedPoint && (
+                  <button onClick={() => setSelectedPoint(null)} className="text-[11px] text-primary hover:underline">
                     Clear selection
                   </button>
                 )}
@@ -413,13 +453,24 @@ export default function Home() {
                 <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-muted-foreground">
                   {pointLabelCap} points could not load. <button type="button" className="font-medium text-primary underline underline-offset-2" onClick={retryCatalogues}>Try again</button>
                 </div>
-              ) : routesStatus === "empty" || pointGroups.length === 0 ? (
+              ) : routesStatus === "empty" || pointCount === 0 ? (
                 <div className="rounded-xl border border-dashed bg-card px-4 py-3 text-sm text-muted-foreground">
                   {pointLabelCap} points are being set up. Bookings open when the route list is published.
                 </div>
               ) : (
                 <div className="space-y-1.5">
-                  <Popover open={pointPickerOpen} onOpenChange={setPointPickerOpen}>
+                  <Popover
+                    open={pointPickerOpen}
+                    onOpenChange={(open) => {
+                      setPointPickerOpen(open);
+                      if (!open) {
+                        setPointSearch("");
+                        setPointMatches([]);
+                        setPointSearchStatus("idle");
+                        setPointSearchHasMore(false);
+                      }
+                    }}
+                  >
                     <PopoverTrigger asChild>
                       <Button
                         id="booking-point"
@@ -440,10 +491,36 @@ export default function Home() {
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
-                      <Command>
-                        <CommandInput placeholder={`Search ${pointLabelCap.toLowerCase()} points…`} />
-                        <CommandList>
-                          <CommandEmpty>No matching point found.</CommandEmpty>
+                      <Command shouldFilter={false}>
+                        <CommandInput
+                          value={pointSearch}
+                          onValueChange={(value) => {
+                            setPointSearch(value);
+                            setPointMatches([]);
+                            setPointSearchStatus(value.trim().length >= 2 ? "loading" : "idle");
+                            setPointSearchHasMore(false);
+                          }}
+                          placeholder={`Search ${pointLabelCap.toLowerCase()} points…`}
+                        />
+                        <CommandList className="max-h-60">
+                          {pointSearch.trim().length < 2 && (
+                            <p className="px-3 py-5 text-center text-sm text-muted-foreground">
+                              Type at least 2 letters to find a point.
+                            </p>
+                          )}
+                          {pointSearchStatus === "loading" && pointSearch.trim().length >= 2 && (
+                            <p className="px-3 py-5 text-center text-sm text-muted-foreground">Searching points…</p>
+                          )}
+                          {pointSearchStatus === "error" && (
+                            <p className="px-3 py-5 text-center text-sm text-muted-foreground" role="alert">
+                              Points could not load. <button type="button" className="font-medium text-primary underline" onClick={() => { setPointSearchStatus("loading"); setPointSearchRetry((attempt) => attempt + 1); }}>Try again</button>
+                            </p>
+                          )}
+                          {pointSearchStatus === "empty" && (
+                            <p className="px-3 py-5 text-center text-sm text-muted-foreground">
+                              No matching point. Try another area or stop name.
+                            </p>
+                          )}
                           {pointGroups.map(({ route, coast, points }) => (
                             <CommandGroup
                               key={route.id}
@@ -454,12 +531,22 @@ export default function Home() {
                                   key={point.id}
                                   value={`${coast} ${route.name} ${point.name}`}
                                   onSelect={() => {
-                                    setPointId(point.id);
+                                    setSelectedPoint({
+                                      point: {
+                                        id: point.id,
+                                        name: point.name,
+                                        order: point.order,
+                                        fare: point.fare,
+                                        homeSurcharge: point.homeSurcharge,
+                                      },
+                                      route,
+                                      coast,
+                                    });
                                     setPointPickerOpen(false);
                                   }}
                                   className="min-h-11"
                                 >
-                                  <Check className={cn("h-4 w-4", pointId === point.id ? "opacity-100" : "opacity-0")} />
+                                  <Check className={cn("h-4 w-4", selectedPoint?.point.id === point.id ? "opacity-100" : "opacity-0")} />
                                   <span className="min-w-0 flex-1 truncate">{point.name}</span>
                                   <span className="text-xs tabular-nums text-muted-foreground">KSh {point.fare}</span>
                                 </CommandItem>
@@ -467,6 +554,11 @@ export default function Home() {
                             </CommandGroup>
                           ))}
                         </CommandList>
+                        {pointSearchHasMore && pointSearchStatus === "ready" && (
+                          <p className="border-t px-3 py-2 text-xs text-muted-foreground">
+                            Showing 12 matches. Add more letters to narrow your search.
+                          </p>
+                        )}
                       </Command>
                     </PopoverContent>
                   </Popover>
@@ -602,7 +694,7 @@ export default function Home() {
                       ? "This train’s meet-cab has already left for the selected day — pick a later train or another date."
                       : hasEligibleDrivers === false
                         ? "No bookable cabs are available yet. Drivers will appear here after onboarding and approval."
-                        : pointId
+                        : selectedPoint
                         ? "No available cabs serve this point for that train. Try another point or clear your selection."
                         : "No available cabs are listed for this train yet."}
                   </CardContent>
@@ -815,3 +907,4 @@ function CabCard({
     </Card>
   );
 }
+
