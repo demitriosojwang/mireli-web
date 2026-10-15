@@ -19,3 +19,15 @@ export function nairobiEventAt(base: Date, dayOffset: number, hhmm: string): Dat
   const [hour, minute] = hhmm.split(":").map(Number);
   return new Date(start.getTime() + dayOffset * DAY + (hour * 60 + minute) * 60000);
 }
+
+/** Resolve an arrival from a service date plus the train's destination-day offset. */
+export function nairobiTrainArrivalAt(
+  base: Date,
+  serviceDayOffset: number,
+  destDayOffset: number,
+  hhmm: string,
+): Date {
+  if (!Number.isInteger(destDayOffset) || destDayOffset < 0) throw new Error("Invalid train arrival day offset");
+  return nairobiEventAt(base, serviceDayOffset + destDayOffset, hhmm);
+}
+

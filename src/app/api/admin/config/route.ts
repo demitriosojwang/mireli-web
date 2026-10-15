@@ -12,6 +12,7 @@ export async function GET() {
   return NextResponse.json({
     config: {
       commissionRate: cfg.commissionRate,
+      bookingFeeAmount: cfg.bookingFeeAmount,
       fullRefundCutoffMinutes: cfg.fullRefundCutoffMinutes,
       seatFillThresholdPercent: cfg.seatFillThresholdPercent,
       creditValidityDays: cfg.creditValidityDays,
@@ -53,6 +54,13 @@ export async function PUT(req: NextRequest) {
     }
     data.commissionRate = rate;
   }
+  if (body.bookingFeeAmount !== undefined) {
+    const amount = Number(body.bookingFeeAmount);
+    if (!Number.isSafeInteger(amount) || amount < 0 || amount > 10000) {
+      return NextResponse.json({ error: "Booking fee must be a whole KSh amount from 0 to 10,000" }, { status: 400 });
+    }
+    data.bookingFeeAmount = amount;
+  }
   if (body.fullRefundCutoffMinutes !== undefined) {
     const v = parseInt(body.fullRefundCutoffMinutes, 10);
     if (Number.isNaN(v) || v < 0 || v > 24 * 60) return NextResponse.json({ error: "Cutoff must be 0–1440 minutes" }, { status: 400 });
@@ -69,10 +77,10 @@ export async function PUT(req: NextRequest) {
     data.creditValidityDays = v;
   }
   if (body.payoutMode !== undefined) {
-    if (!["weekly", "daily", "instant_per_trip"].includes(body.payoutMode)) {
-      return NextResponse.json({ error: "payoutMode must be weekly, daily or instant_per_trip" }, { status: 400 });
+    if (body.payoutMode !== "instant_per_trip") {
+      return NextResponse.json({ error: "Driver payouts are configured to start after each completed trip." }, { status: 400 });
     }
-    data.payoutMode = body.payoutMode;
+    data.payoutMode = "instant_per_trip";
   }
   if (body.payoutDay !== undefined) {
     const v = parseInt(body.payoutDay, 10);

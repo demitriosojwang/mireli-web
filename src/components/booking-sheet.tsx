@@ -26,6 +26,7 @@ import { AuthSheet } from "@/components/auth-sheet";
 import { api, useMe, detailsComplete, type PassengerDetails } from "@/lib/client";
 import { ksh, fmtTime } from "@/lib/format";
 import { NATIONALITIES, DEFAULT_NATIONALITY } from "@/lib/nationalities";
+import { DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
 import { Crown, Home, Loader2, MapPin, Ticket as TicketIcon, TrainFront, UserRound, AlarmClock, LogIn } from "lucide-react";
 import { DotBadge, Stars } from "@/components/app/shared";
 
@@ -50,6 +51,7 @@ export interface BookableTrip {
   routeName: string;
   durationMinutes: number;
   charterPrice: number;
+  platformFeeAmount: number;
   direction: string;
   departureAt: string;
   terminusAt: string;
@@ -58,15 +60,18 @@ export interface BookableTrip {
   capacity: number;
   seatsLeft: number;
   bookable: boolean;
-  stages: Stage[];
   pointsLabel: "drop-off" | "pickup";
   minFare: number;
   driver: { name: string; plate: string; cabType: string; rating: number } | null;
 }
 
+export interface BookableTripWithStages extends BookableTrip {
+  stages: Stage[];
+}
+
 /** Everything the main view collected before the sheet opens. */
 export interface BookingDraft {
-  trip: BookableTrip;
+  trip: BookableTripWithStages;
   stageId: string;
   seats: number;
   charter: boolean;
@@ -81,6 +86,7 @@ interface CreateResponse {
     code: string;
     status: string;
     fareAmount: number;
+    platformFeeAmount: number;
     creditApplied: number;
     cashDue: number;
     stageName: string;
@@ -177,7 +183,8 @@ function BookingSheetContent({
 
   const fare = trip ? (draft?.charter ? trip.charterPrice : (stage?.fare || 0) * (draft?.seats || 1)) : 0;
   const surcharge = draft?.homePickup ? (draft?.charter ? stage?.homeSurcharge || 0 : (stage?.homeSurcharge || 0) * (draft?.seats || 1)) : 0;
-  const total = fare + surcharge;
+  const platformFeeAmount = trip?.platformFeeAmount ?? DEFAULT_BOOKING_FEE_AMOUNT;
+  const total = fare + surcharge + platformFeeAmount;
   const creditApplied = useCredit ? Math.min(creditBalance, total) : 0;
   const cashDue = total - creditApplied;
   const detailsOk = detailsComplete(details);
@@ -268,6 +275,8 @@ function BookingSheetContent({
                   {isCharter ? "Total fare" : draft.seats > 1 ? `${draft.seats} seats` : "Fare"}
                 </div>
                 <div className="text-2xl font-bold tabular-nums text-primary">{ksh(total)}</div>
+                <div className="text-[10px] text-muted-foreground">Includes {ksh(platformFeeAmount)} booking fee</div>
+                {surcharge > 0 && <div className="text-[10px] text-muted-foreground">Includes {ksh(surcharge)} door-to-door surcharge</div>}
                 {!isCharter && draft.seats > 1 && (
                   <div className="text-[10px] text-muted-foreground">
                     {draft.seats} × {ksh(stage?.fare || 0)}
@@ -292,8 +301,12 @@ function BookingSheetContent({
               </div>
               <div className="rounded-lg border bg-muted/40 p-3 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Trip value</span>
+                  <span className="text-muted-foreground">Total (includes booking fee)</span>
                   <span className="font-medium">{ksh(created.fareAmount)}</span>
+                </div>
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>Booking fee</span>
+                  <span>{ksh(created.platformFeeAmount)}</span>
                 </div>
                 {created.creditApplied > 0 && (
                   <div className="flex justify-between text-emerald-700">
@@ -320,6 +333,15 @@ function BookingSheetContent({
               )}
               <Button variant="outline" className="w-full" onClick={onClose}>
                 {created.cashDue > 0 ? "Pay later from My rides" : "Done"}
+              </Button>
+            </div>
+          ) : identity.error || !me?.session ? (
+            <div className="space-y-3 px-4 pb-2" role="alert">
+              <p className="text-sm text-destructive">
+                We couldn&apos;t start a secure booking session, so this booking has not been submitted.
+              </p>
+              <Button variant="outline" className="w-full" onClick={() => void refresh()}>
+                Try again
               </Button>
             </div>
           ) : (
@@ -532,7 +554,7 @@ function BookingSheetContent({
             </div>
           )}
 
-          {!created && (
+          {!created && !identity.error && me?.session && (
             <SheetFooter className="px-4 pb-4">
               {guestBlocked ? (
                 <p className="text-center text-[11px] text-muted-foreground">

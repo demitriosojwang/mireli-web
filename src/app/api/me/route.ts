@@ -4,10 +4,11 @@ import { db } from "@/lib/db";
 import {
   getPassengerSession,
   encodeSession,
+  assertSessionSigningKeyAvailable,
   passengerCookieOptions,
   type Session,
 } from "@/lib/session";
-import { getConfig, issueCredit } from "@/lib/money";
+import { issueCredit } from "@/lib/money";
 import { audit } from "@/lib/audit";
 
 /**
@@ -19,6 +20,16 @@ import { audit } from "@/lib/audit";
  * Admin stays identity-gated at /admin — never touched by this route.
  */
 export async function GET() {
+  try {
+    assertSessionSigningKeyAvailable();
+  } catch (error) {
+    console.error("[api/me] Passenger session signing is unavailable", error);
+    return NextResponse.json(
+      { error: "Your booking session is temporarily unavailable. Please try again shortly." },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
   const existing = await getPassengerSession();
 
   if (existing) {
@@ -26,17 +37,23 @@ export async function GET() {
     if (passenger) return respondFor(passenger, existing);
   }
 
-  // No valid session → silently start a guest session.
-  const cfg = await getConfig();
+  // A guest session lets people browse before operations have finished
+  // configuring the platform. Welcome credit is only issued when an operator
+  // configuration exists; never invent settings to make a guest account.
+  const cfg = await db.platformConfig.findUnique({
+    where: { id: "main" },
+    select: { creditValidityDays: true },
+  });
   const passenger = await createGuestPassenger();
 
-  // Karibu — same welcome credit a first-time passenger would receive (30-day validity per config).
-  await issueCredit({
-    passengerId: passenger.id,
-    amount: 100,
-    note: "Karibu Mi-Reli! Welcome credit — applies to any ride.",
-    validityDays: cfg.creditValidityDays,
-  });
+  if (cfg) {
+    await issueCredit({
+      passengerId: passenger.id,
+      amount: 100,
+      note: "Karibu Mi-Reli! Welcome credit — applies to any ride.",
+      validityDays: cfg.creditValidityDays,
+    });
+  }
   await audit({
     actorId: passenger.id,
     actorName: "Guest",
@@ -44,7 +61,7 @@ export async function GET() {
     action: "auth.guest_start",
     entity: "passenger",
     entityId: passenger.id,
-    metadata: { welcomeCredit: 100 },
+    metadata: { welcomeCredit: cfg ? 100 : 0, welcomeCreditSkipped: !cfg },
   });
 
   const session = {
@@ -63,11 +80,17 @@ async function createGuestPassenger() {
     const phone = `guest-${crypto.randomBytes(4).toString("hex")}`;
     try {
       return await db.passenger.create({ data: { phone, name: "Guest" } });
-    } catch {
-      // collision — try a new suffix
+    } catch (error) {
+      // Only retry an actual unique-phone collision. A database outage or
+      // schema error must not be hidden behind repeated create attempts.
+      if (!isUniqueConstraintError(error)) throw error;
     }
   }
   throw new Error("Could not start a guest session");
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "P2002";
 }
 
 async function respondFor(
@@ -110,7 +133,7 @@ async function respondFor(
     },
     creditBalance,
     activeCredits: credits.length,
-  });
+  }, { headers: { "Cache-Control": "no-store" } });
   if (setCookie) {
     res.cookies.set({ ...passengerCookieOptions(), value: encodeSession(session) });
   }

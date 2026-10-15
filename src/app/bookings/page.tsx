@@ -79,7 +79,7 @@ interface TierQuote {
 }
 
 export default function BookingsPage() {
-  const { me, loading: meLoading } = useMe();
+  const { me, loading: meLoading, error: identityError, refresh: retryIdentity } = useMe();
   const { toast } = useToast();
   const [loadedBookings, setBookings] = useState<BookingRow[] | null>(null);
   const bookings = me?.session ? loadedBookings : meLoading ? null : [];
@@ -157,7 +157,12 @@ export default function BookingsPage() {
         <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-4 px-4 text-center">
           <Ticket className="h-10 w-10 text-muted-foreground" />
           <p className="font-semibold">Couldn&apos;t load your session</p>
-          <p className="text-sm text-muted-foreground">Check your connection, then head back to booking.</p>
+          <p className="text-sm text-muted-foreground">
+            {identityError || "Your booking session is unavailable. Please try again."}
+          </p>
+          <Button variant="outline" onClick={() => void retryIdentity()} disabled={meLoading}>
+            {meLoading ? "Retrying…" : "Try again"}
+          </Button>
           <Button asChild>
             <Link href="/">Book a ride</Link>
           </Button>

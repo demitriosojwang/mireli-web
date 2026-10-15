@@ -125,6 +125,7 @@ export async function recordCollection(params: {
   cashAmount: number;
   creditApplied: number;
   homeSurchargeAmount: number;
+  platformFeeAmount: number;
   mpesaReceipt: string | null;
 }) {
   const existing = await db.ledgerEntry.findUnique({
@@ -139,6 +140,7 @@ export async function recordCollection(params: {
       cashAmount: params.cashAmount,
       creditApplied: params.creditApplied,
       homeSurchargeAmount: params.homeSurchargeAmount,
+      platformFeeAmount: params.platformFeeAmount,
       mpesaReceipt: params.mpesaReceipt,
       collectedAt: params.cashAmount > 0 ? new Date() : null,
       status: "held",
@@ -351,7 +353,11 @@ export async function executeCancellation(params: {
       // Commission reversal is proportional — the platform never keeps a
       // commission on a refunded fare.
       const cfgC = await getConfig();
-      const commissionReversed = Math.round(amount * cfgC.commissionRate);
+      const commissionableFare = Math.max(0, entry.totalAmount - entry.homeSurchargeAmount - entry.platformFeeAmount);
+      const refundedShare = entry.totalAmount > 0 ? Math.min(1, amount / entry.totalAmount) : 0;
+      const commissionReversed = booking.isCharter
+        ? Math.round(commissionableFare * refundedShare * cfgC.commissionRate)
+        : 0;
       const driverClawback = amount - commissionReversed;
       await db.refundRecord.update({
         where: { id: refund.id },
@@ -461,12 +467,12 @@ export async function settleCompletedTrip(tx:Prisma.TransactionClient,tripId:str
     for(const booking of trip.bookings) {
       const entry=booking.ledgerEntry;
       if(booking.status!=="boarded" || !entry || entry.status!=="held")continue;
-      const split=calculateSettlement(entry.totalAmount,entry.homeSurchargeAmount,Math.round(commissionRate*10000));
+      const split=calculateSettlement(entry.totalAmount,entry.homeSurchargeAmount,entry.platformFeeAmount,Math.round(commissionRate*10000),booking.isCharter);
       // A partially boarded party needs an explicit operations decision about its fare.
       // Preserve the held funds and show the unsettled statement without guessing a refund policy.
       const needsReview=booking.noShowSeats>0;
       const payout=await tx.payoutRecord.create({data:{driverId:trip.driverId,tripId,ledgerEntryId:entry.id,
-        grossFareTotal:split.gross,commissionAmount:split.commission,homeSurchargeAmount:split.surcharge,netPayoutAmount:split.net,status:needsReview?"needs_review":"queued",
+        grossFareTotal:split.gross,commissionAmount:split.commission,homeSurchargeAmount:split.surcharge,platformFeeAmount:split.platformFee,netPayoutAmount:split.net,status:needsReview?"needs_review":"queued",
         failureReason:needsReview?"Partial party no-show: settlement requires operations review.":null}});
       if(!needsReview)await tx.ledgerEntry.update({where:{id:entry.id},data:{status:"driver_payable",statusChangedAt:new Date()}});
       await tx.booking.update({where:{id:booking.id},data:{status:"completed"}});
@@ -510,7 +516,7 @@ export async function runPayoutBatch(actor: {id:string;name:string;role:"passeng
   return counts;
 }
 
-/** Is the scheduled payout batch due? (weekly default, config-driven) */
+/** Is recovery work needed for after-trip payouts? Legacy batch modes remain migration-only. */
 export async function isPayoutBatchDue(): Promise<{ due: boolean; mode: string; note: string }> {
   const cfg = await getConfig();
   if (cfg.payoutMode === "instant_per_trip")
@@ -532,7 +538,7 @@ export async function isPayoutBatchDue(): Promise<{ due: boolean; mode: string; 
     note: due
       ? alreadyThisWeek
         ? "Batch day — already ran this week."
-        : "Weekly batch day (like Uber/Bolt in Kenya)."
+        : "Payout batch due."
       : `Runs on day ${cfg.payoutDay} of the week.`,
   };
 }
@@ -665,6 +671,7 @@ export async function confirmBookingPayment(
     cashAmount: booking.cashDue,
     creditApplied: booking.creditApplied,
     homeSurchargeAmount: booking.homeSurcharge,
+    platformFeeAmount: booking.platformFeeAmount,
     mpesaReceipt: tx.receipt,
   });
   await audit({

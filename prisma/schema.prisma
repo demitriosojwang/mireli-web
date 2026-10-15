@@ -136,7 +136,8 @@ model Booking {
   homeAddress   String?
   seats         Int       @default(1)
   isCharter     Boolean   @default(false)
-  fareAmount    Int // total fare (seats × per-seat, or charter price)
+  fareAmount    Int // total charged: fare + door surcharge + flat platform fee
+  platformFeeAmount Int @default(0) // flat fee retained by Mi-Reli; not paid to the driver
   homeSurcharge Int // total home surcharge for this booking
   creditApplied Int // portion covered by travel credit (never cash)
   cashDue       Int // portion to collect via M-Pesa STK
@@ -177,6 +178,7 @@ model LedgerEntry {
   cashAmount          Int // actually collected via STK push
   creditApplied       Int // portion paid with travel credit
   homeSurchargeAmount Int // tracked separately — passes to driver in full
+  platformFeeAmount   Int      @default(0) // flat booking fee retained by Mi-Reli
   mpesaReceipt        String?
   collectedAt         DateTime?
   status              String   @default("held") // held | driver_payable | commission_taken | refunded | partially_refunded | converted_to_credit | forfeited
@@ -214,6 +216,7 @@ model PayoutRecord {
   grossFareTotal      Int
   commissionAmount    Int
   homeSurchargeAmount Int // passes through in full — not part of commission base
+  platformFeeAmount   Int      @default(0) // recorded separately; excluded from driver gross
   netPayoutAmount     Int
   method              String    @default("b2c")
   mpesaResultCode     String?
@@ -409,11 +412,12 @@ model MpesaTransaction {
 
 model PlatformConfig {
   id                         String    @id @default("main")
-  commissionRate             Float     @default(0.15) // must stay under NTSA 18% cap
+  commissionRate             Float     @default(0.10) // charter commission; must stay under NTSA 18% cap
+  bookingFeeAmount           Int       @default(50) // flat KSh fee per booking, retained by Mi-Reli
   fullRefundCutoffMinutes    Int       @default(60) // lock cutoff before departure
   seatFillThresholdPercent   Int       @default(70) // trip locks early when this full
   creditValidityDays         Int       @default(30) // late-cancellation credit validity
-  payoutMode                 String    @default("weekly") // weekly | daily | instant_per_trip
+  payoutMode                 String    @default("instant_per_trip") // after each completed trip
   payoutDay                  Int       @default(5) // 0=Sun .. 5=Fri (weekly batch day)
   stuckRefundHours           Int       @default(4) // pending refund alert threshold
   stuckPayoutHours           Int       @default(24) // queued payout alert threshold

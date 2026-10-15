@@ -6,13 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/client";
 import { fmtDateTime } from "@/lib/format";
@@ -21,6 +14,7 @@ import { Save } from "lucide-react";
 interface ConfigData {
   config: {
     commissionRate: number;
+    bookingFeeAmount: number;
     fullRefundCutoffMinutes: number;
     seatFillThresholdPercent: number;
     creditValidityDays: number;
@@ -40,8 +34,6 @@ interface ConfigData {
   lastPayoutRunAt: string | null;
   lastReconciliationAt: string | null;
 }
-
-const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 export default function AdminConfig() {
   const { toast } = useToast();
@@ -100,7 +92,23 @@ export default function AdminConfig() {
                 onChange={(e) => setForm({ ...form, commissionRate: Number(e.target.value) })}
               />
               <p className="text-xs text-muted-foreground">
-                Charged on (fare − home surcharge) at trip completion. Current: {(form.commissionRate * 100).toFixed(1)}%
+                Applied only to private charter fare. Door surcharges and the booking fee are excluded.
+                Current: {(form.commissionRate * 100).toFixed(1)}%
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="c-booking-fee">Flat booking fee (KSh per booking)</Label>
+              <Input
+                id="c-booking-fee"
+                type="number"
+                step="1"
+                min="0"
+                max="10000"
+                value={form.bookingFeeAmount}
+                onChange={(e) => setForm({ ...form, bookingFeeAmount: Number(e.target.value) })}
+              />
+              <p className="text-xs text-muted-foreground">
+                Charged once on every shared or private booking. It is included in the total shown before payment.
               </p>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -132,37 +140,15 @@ export default function AdminConfig() {
           <CardHeader>
             <CardTitle className="text-base">Payouts</CardTitle>
             <CardDescription>
-              Weekly batch is the confirmed model (mirrors Uber/Bolt in Kenya). Instant mode fires
-              B2C the moment a trip completes.
+              Driver payout dispatch starts after the trip is completed. Only approved payout
+              destinations can receive money; provider confirmation is still required.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-1.5">
-              <Label>Payout mode</Label>
-              <Select value={form.payoutMode} onValueChange={(v) => setForm({ ...form, payoutMode: v })}>
-                <SelectTrigger aria-label="Payout mode">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="weekly">Weekly batch (default)</SelectItem>
-                  <SelectItem value="daily">Daily batch</SelectItem>
-                  <SelectItem value="instant_per_trip">Instant per trip</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Payout day (weekly mode)</Label>
-              <Select value={String(form.payoutDay)} onValueChange={(v) => setForm({ ...form, payoutDay: parseInt(v, 10) })}>
-                <SelectTrigger aria-label="Payout day">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {DAY_NAMES.map((d, i) => (
-                    <SelectItem key={d} value={String(i)}>{d}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">Last run: {data?.lastPayoutRunAt ? fmtDateTime(data.lastPayoutRunAt) : "never"}</p>
+              <Label>Payout timing</Label>
+              <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">After each completed trip</div>
+              <p className="text-xs text-muted-foreground">Last payout activity: {data?.lastPayoutRunAt ? fmtDateTime(data.lastPayoutRunAt) : "none yet"}</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">

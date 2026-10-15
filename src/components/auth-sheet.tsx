@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Sheet,
   SheetContent,
@@ -47,21 +47,50 @@ function AuthSheetContent({
   const [step, setStep] = useState<"details" | "verify">("details");
   const [details, setDetails] = useState<PassengerDetails>(() => ({ ...initialDetails, nationality: initialDetails.nationality || DEFAULT_NATIONALITY }));
   const [code, setCode] = useState("");
+  const [challengeId, setChallengeId] = useState<string | null>(null);
+  const [demoCode, setDemoCode] = useState<string | null>(null);
+  const [resendSeconds, setResendSeconds] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (resendSeconds <= 0) return;
+    const timer = window.setTimeout(() => setResendSeconds((seconds) => Math.max(0, seconds - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [resendSeconds]);
 
   function set<K extends keyof PassengerDetails>(key: K, value: PassengerDetails[K]) {
     setDetails((d) => ({ ...d, [key]: value }));
   }
 
+  async function requestCode() {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api<{ challengeId: string; cooldownSeconds: number; demoCode?: string; simulation?: boolean }>("/api/auth", {
+        body: { step: "request", identifier: details.phone },
+      });
+      setChallengeId(result.challengeId);
+      setDemoCode(result.simulation ? result.demoCode || null : null);
+      setCode("");
+      setResendSeconds(result.cooldownSeconds);
+      setStep("verify");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not send a verification code");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submit() {
-    if (!detailsComplete(details) || code.length !== 4) return;
+    if (!detailsComplete(details) || code.length !== 6 || !challengeId) return;
     setBusy(true);
     setError(null);
     try {
       await api("/api/auth", {
         body: {
           step: "signup",
+          challengeId,
           code,
           name: details.fullName.trim(),
           phone: details.phone,
@@ -91,7 +120,7 @@ function AuthSheetContent({
           <SheetDescription>
             {step === "details"
               ? "Fill the exact same details you booked with — your rides and travel credit carry over to your account."
-              : `We send a 4-digit code to ${details.phone}. Enter it to finish creating your account.`}
+              : `Enter the 6-digit code sent to ${details.phone} to finish creating your account.`}
           </SheetDescription>
         </SheetHeader>
 
@@ -191,19 +220,30 @@ function AuthSheetContent({
               <Input
                 type="text"
                 inputMode="numeric"
-                maxLength={4}
+                autoComplete="one-time-code"
+                maxLength={6}
                 value={code}
                 onChange={(e) => {
                   setCode(e.target.value.replace(/\D/g, ""));
                   setError(null);
                 }}
-                placeholder="••••"
+                placeholder="••••••"
                 className="h-11 text-center text-lg tracking-[0.5em]"
                 autoFocus
                 onKeyDown={(e) => e.key === "Enter" && submit()}
                 disabled={busy}
               />
-              <p className="text-[10px] text-muted-foreground">Demo: any 4-digit code works. In production this is sent via SMS.</p>
+              <p className="text-[10px] text-muted-foreground">
+                {demoCode ? `Local demo code: ${demoCode}` : `We sent a 6-digit code to ${details.phone}.`}
+              </p>
+              <button
+                type="button"
+                onClick={requestCode}
+                disabled={busy || resendSeconds > 0}
+                className="w-full text-left text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {resendSeconds > 0 ? `Resend code in ${resendSeconds}s` : "Resend code"}
+              </button>
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
             <button
@@ -223,15 +263,12 @@ function AuthSheetContent({
             <Button
               className="h-11 w-full"
               disabled={busy || !detailsComplete(details)}
-              onClick={() => {
-                setStep("verify");
-                setError(null);
-              }}
+              onClick={requestCode}
             >
               Continue <ArrowRight className="ml-1 h-4 w-4" />
             </Button>
           ) : (
-            <Button className="h-11 w-full" disabled={busy || code.length !== 4} onClick={submit}>
+            <Button className="h-11 w-full" disabled={busy || code.length !== 6 || !challengeId} onClick={submit}>
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create account & continue"}
             </Button>
           )}

@@ -22,7 +22,7 @@ interface CreditRow {
 }
 
 export default function CreditsPage() {
-  const { me, loading: meLoading } = useMe();
+  const { me, loading: meLoading, error: identityError, refresh: retryIdentity } = useMe();
   const [credits, setCredits] = useState<CreditRow[] | null>(null);
   const [balance, setBalance] = useState(0);
 
@@ -45,7 +45,12 @@ export default function CreditsPage() {
         <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-4 px-4 text-center">
           <Wallet className="h-10 w-10 text-muted-foreground" />
           <p className="font-semibold">Couldn&apos;t load your credits</p>
-          <p className="text-sm text-muted-foreground">Check your connection, then head back to booking.</p>
+          <p className="text-sm text-muted-foreground">
+            {identityError || "Your booking session is unavailable. Please try again."}
+          </p>
+          <Button variant="outline" onClick={() => void retryIdentity()} disabled={meLoading}>
+            {meLoading ? "Retrying…" : "Try again"}
+          </Button>
           <Button asChild>
             <Link href="/">Book a ride</Link>
           </Button>

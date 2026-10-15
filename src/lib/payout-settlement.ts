@@ -10,11 +10,15 @@ export function classifySubmission(result:daraja.DarajaResultCode):"completed"|"
   if(["1001","2001"].includes(result.resultCode))return "failed";
   return "ambiguous";
 }
-export function calculateSettlement(gross:number,surcharge:number,rateBps:number) {
-  if(!Number.isSafeInteger(gross) || gross<0 || !Number.isSafeInteger(surcharge) || surcharge<0 || surcharge>gross || !Number.isInteger(rateBps) || rateBps<0 || rateBps>10000 || !Number.isSafeInteger((gross-surcharge)*rateBps))
+export function calculateSettlement(total:number,surcharge:number,platformFee:number,rateBps:number,isCharter:boolean) {
+  if(!Number.isSafeInteger(total) || total<0 || !Number.isSafeInteger(surcharge) || surcharge<0 || surcharge>total ||
+    !Number.isSafeInteger(platformFee) || platformFee<0 || platformFee>total-surcharge || !Number.isInteger(rateBps) ||
+    rateBps<0 || rateBps>10000 || !Number.isSafeInteger((total-surcharge-platformFee)*rateBps))
     throw new DriverError(409,"INVALID_LEDGER","Settlement requires finance review.");
-  const commission=Math.round((gross-surcharge)*rateBps/10000);
-  return {gross,surcharge,commission,net:gross-commission};
+  const gross=total-platformFee;
+  const commissionableFare=isCharter ? gross-surcharge : 0;
+  const commission=Math.round(commissionableFare*rateBps/10000);
+  return {gross,surcharge,platformFee,commission,net:gross-commission};
 }
 export async function sendPayout(payoutId:string):Promise<boolean> {
   const payout=await db.payoutRecord.findUnique({where:{id:payoutId},include:{driver:true}});

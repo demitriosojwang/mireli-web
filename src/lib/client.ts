@@ -53,13 +53,14 @@ export function isValidMpesaPhone(input: string): boolean {
 
 export async function api<T = unknown>(
   path: string,
-  options?: { method?: string; body?: unknown }
+  options?: { method?: string; body?: unknown; signal?: AbortSignal }
 ): Promise<T> {
   const res = await fetch(path, {
     method: options?.method || (options?.body ? "POST" : "GET"),
     headers: options?.body ? { "Content-Type": "application/json" } : undefined,
     body: options?.body ? JSON.stringify(options.body) : undefined,
     cache: "no-store",
+    signal: options?.signal,
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -79,13 +80,19 @@ function fetchIdentity() {
 export function useMe() {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
       const data = await fetchIdentity();
       setMe(data);
+      return true;
     } catch {
-      setMe({ session: null });
+      setMe(null);
+      setError("We couldn't start your secure booking session. Please try again.");
+      return false;
     } finally {
       setLoading(false);
     }
@@ -94,12 +101,17 @@ export function useMe() {
   useEffect(() => {
     let active = true;
     fetchIdentity().then((data) => { if (active) setMe(data); })
-      .catch(() => { if (active) setMe({ session: null }); })
+      .catch(() => {
+        if (active) {
+          setMe(null);
+          setError("We couldn't start your secure booking session. Please try again.");
+        }
+      })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, []);
 
-  return { me, loading, refresh };
+  return { me, loading, error, refresh };
 }
 
 export const DIRECTION_LABELS: Record<string, string> = {
