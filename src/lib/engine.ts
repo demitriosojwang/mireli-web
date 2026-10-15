@@ -38,6 +38,78 @@ function dayAt(base: Date, dayOffset: number, hhmm: string): Date {
   return nairobiEventAt(base, dayOffset, hhmm);
 }
 
+/** Assign a scheduled departure only when the driver is still approved and
+ * has no trip whose configured duration overlaps this slot. The advisory lock
+ * makes concurrent scheduler ticks idempotent for the same route/train slot;
+ * the driver row lock serializes assignments across different routes. */
+async function createScheduledTrip(params: {
+  routeId: string;
+  direction: string;
+  trainId: string;
+  departureAt: Date;
+  routeDurationMinutes: number;
+  driverIds: string[];
+}): Promise<boolean> {
+  const slotKey = `${params.routeId}:${params.direction}:${params.trainId}:${params.departureAt.toISOString()}`;
+  const departureEnd = new Date(params.departureAt.getTime() + params.routeDurationMinutes * 60 * 1000);
+
+  for (const driverId of params.driverIds) {
+    const result = await db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${slotKey}))`;
+      const existingSlot = await tx.trip.findFirst({
+        where: {
+          routeId: params.routeId,
+          direction: params.direction,
+          trainId: params.trainId,
+          departureAt: params.departureAt,
+        },
+        select: { id: true },
+      });
+      if (existingSlot) return "exists" as const;
+
+      await tx.$queryRaw`SELECT "id" FROM "Driver" WHERE "id" = ${driverId} FOR UPDATE`;
+      const driver = await tx.driver.findUnique({
+        where: { id: driverId },
+        include: { application: { include: { documents: { where: { state: { not: "replaced" } } } } } },
+      });
+      if (!driver || !(isLocalDemoEnabled() || evaluateDriverApplication(driver.application, driver.status).eligible)) {
+        return "unavailable" as const;
+      }
+
+      const assignedTrips = await tx.trip.findMany({
+        where: {
+          driverId,
+          departureAt: { lt: departureEnd },
+          status: { in: ["scheduled", "locked", "departed"] },
+        },
+        select: { departureAt: true, route: { select: { durationMinutes: true } } },
+      });
+      const overlaps = assignedTrips.some((trip) =>
+        trip.departureAt.getTime() + trip.route.durationMinutes * 60 * 1000 > params.departureAt.getTime(),
+      );
+      if (overlaps) return "busy" as const;
+
+      await tx.trip.create({
+        data: {
+          routeId: params.routeId,
+          driverId,
+          direction: params.direction,
+          departureAt: params.departureAt,
+          capacity: driver.capacity,
+          source: "schedule",
+          trainId: params.trainId,
+        },
+      });
+      return "created" as const;
+    });
+
+    if (result === "exists") return false;
+    if (result === "created") return true;
+  }
+
+  return false;
+}
+
 /** Creates scheduled trips for the next `tripHorizonDays`, anchored to the
  *  train timetable, and assigns available drivers. Return shuttles reuse the
  *  outbound driver of the same route + train when feasible. Lazily
@@ -61,6 +133,13 @@ export async function ensureTrips(): Promise<number> {
   let created = 0;
   let rr = (await db.trip.count()) % Math.max(drivers.length, 1); // round-robin offset
 
+  const orderedDriverIds = (preferredDriverId?: string | null) => {
+    const rotated = [...drivers.slice(rr), ...drivers.slice(0, rr)].map((driver) => driver.id);
+    return preferredDriverId
+      ? [preferredDriverId, ...rotated.filter((id) => id !== preferredDriverId)]
+      : rotated;
+  };
+
   for (let dayOffset = 0; dayOffset <= cfg.tripHorizonDays; dayOffset++) {
     for (const train of trains) {
       if (train.direction === "MBA_TO_NBO") {
@@ -70,24 +149,18 @@ export async function ensureTrips(): Promise<number> {
         const dep = new Date(trainDep.getTime() - CAB_LEAD_MINUTES * 60 * 1000);
         for (const route of routes) {
           if (dep.getTime() < now.getTime() - 30 * 60 * 1000) continue; // skip stale slots
-          const exists = await db.trip.findFirst({
-            where: { routeId: route.id, direction: "TO_TERMINUS", trainId: train.id, departureAt: dep },
+          const wasCreated = await createScheduledTrip({
+            routeId: route.id,
+            direction: "TO_TERMINUS",
+            trainId: train.id,
+            departureAt: dep,
+            routeDurationMinutes: route.durationMinutes,
+            driverIds: orderedDriverIds(),
           });
-          if (exists) continue;
-          const driver = drivers[rr % drivers.length];
-          rr++;
-          await db.trip.create({
-            data: {
-              routeId: route.id,
-              driverId: driver.id,
-              direction: "TO_TERMINUS",
-              departureAt: dep,
-              capacity: driver.capacity,
-              source: "schedule",
-              trainId: train.id,
-            },
-          });
-          created++;
+          if (wasCreated) {
+            created++;
+            rr = (rr + 1) % drivers.length;
+          }
         }
       } else {
         // Arrival event at MTM → meet-and-drop shuttles leave after the buffer.
@@ -104,7 +177,7 @@ export async function ensureTrips(): Promise<number> {
           // Pair the return cab with the driver who ran the outbound for the
           // same-named train within the last 24h (e.g. 08:00 departure ↔ 14:00 arrival).
           const pairedDepTrain = trains.find((t) => t.direction === "MBA_TO_NBO" && t.name === train.name);
-          let driver: (typeof drivers)[number] | null = null;
+          let preferredDriverId: string | null = null;
           if (pairedDepTrain) {
             const outbound = await db.trip.findFirst({
               where: {
@@ -119,25 +192,21 @@ export async function ensureTrips(): Promise<number> {
               orderBy: { departureAt: "desc" },
             });
             if (outbound?.driverId) {
-              driver = drivers.find((d) => d.id === outbound.driverId) || null;
+              preferredDriverId = drivers.find((d) => d.id === outbound.driverId)?.id || null;
             }
           }
-          if (!driver) {
-            driver = drivers[rr % drivers.length];
-            rr++;
-          }
-          await db.trip.create({
-            data: {
-              routeId: route.id,
-              driverId: driver.id,
-              direction: "FROM_TERMINUS",
-              departureAt: dep,
-              capacity: driver.capacity,
-              source: "schedule",
-              trainId: train.id,
-            },
+          const wasCreated = await createScheduledTrip({
+            routeId: route.id,
+            direction: "FROM_TERMINUS",
+            trainId: train.id,
+            departureAt: dep,
+            routeDurationMinutes: route.durationMinutes,
+            driverIds: orderedDriverIds(preferredDriverId),
           });
-          created++;
+          if (wasCreated) {
+            created++;
+            rr = (rr + 1) % drivers.length;
+          }
         }
       }
     }
