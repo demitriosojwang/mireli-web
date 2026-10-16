@@ -5,6 +5,7 @@ import type {Prisma} from "@prisma/client";
 import {calculateSettlement} from "@/lib/payout-settlement";
 import {DriverError} from "@/lib/driver/errors";
 import { attemptBookingTicketEmail } from "@/lib/booking-ticket-email";
+import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 
 /**
  * The money engine.
@@ -606,7 +607,7 @@ export async function runReconciliationSweep(
     }
   }
 
-  // 2. Refunds stuck in pending — give them a terminal state or flag
+  // 2. Refunds stuck in pending — flag them for a human to reconcile
   const pendingRefunds = await db.refundRecord.findMany({ where: { status: "pending" } });
   for (const r of pendingRefunds) {
     const stuck = now.getTime() - r.initiatedAt.getTime() > cfg.stuckRefundHours * 60 * 60 * 1000;
@@ -618,22 +619,24 @@ export async function runReconciliationSweep(
       summary.flaggedStuckRefunds++;
     }
   }
-  // Prototype: sweep also completes pending reversals/b2c (simulated callback)
-  const completable = await db.refundRecord.findMany({
-    where: { status: "pending", stuckFlaggedAt: null },
-    take: 20,
-  });
-  for (const r of completable) {
-    // Prototype: the refund callback arrives — give it its terminal state.
-    await db.refundRecord.update({
-      where: { id: r.id },
-      data: { status: "completed", mpesaResultCode: daraja.RESULT_CODES.SUCCESS, completedAt: now },
+  // Local demo only: simulate the provider's asynchronous refund callback.
+  // In strict mode, only a correlated Daraja result may complete a refund.
+  if (isLocalDemoEnabled()) {
+    const completable = await db.refundRecord.findMany({
+      where: { status: "pending", stuckFlaggedAt: null },
+      take: 20,
     });
-    await db.ledgerEntry.update({
-      where: { id: r.ledgerEntryId },
-      data: { status: "refunded", statusChangedAt: now },
-    });
-    summary.completedRefunds++;
+    for (const r of completable) {
+      await db.refundRecord.update({
+        where: { id: r.id },
+        data: { status: "completed", mpesaResultCode: daraja.RESULT_CODES.SUCCESS, completedAt: now },
+      });
+      await db.ledgerEntry.update({
+        where: { id: r.ledgerEntryId },
+        data: { status: "refunded", statusChangedAt: now },
+      });
+      summary.completedRefunds++;
+    }
   }
 
   // 3. Expire stale credits

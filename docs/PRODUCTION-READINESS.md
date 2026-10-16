@@ -136,6 +136,15 @@ the intended web/API host; the local Docker stack does not serve production.
 
 ### Payments and settlement
 
+- [x] Restrict simulated refund completion to explicit local demo mode. In strict
+  mode, the reconciliation sweep leaves a pending refund pending until provider
+  confirmation; it cannot report a fake refund as completed.
+- [ ] Add durable, correlated production refund attempts and settle them only from
+  verified Daraja results. The current B2C/reversal callback is audit-only, so
+  live refunds still need end-to-end implementation and provider sandbox tests.
+- [ ] Handle a successful late STK callback after a booking was cancelled or its
+  trip became non-payable. Record the money and raise a visible refund/review
+  exception without confirming the cancelled booking or sending a stale ticket.
 - [ ] Configure and verify production Daraja collection callbacks and
   reconciliation. A successful STK prompt alone must not confirm a booking.
 - [ ] Run sandbox end-to-end cases for payment success, failure, duplicate and
