@@ -9,6 +9,10 @@ approved route data are live.
 ## Latest live verification (16 October 2026)
 
 - [x] Production homepage responds with HTTP 200.
+- [x] The current booking-readiness branch passes TypeScript, ESLint, and all
+  118 Vitest tests. The point-search API is bounded to 12 results, and the
+  booking-create regression test confirms no-driver requests remove the unpaid
+  draft and report that no payment was taken.
 - [x] The public production booking page shows the compact ride-choice layout,
   but the drop-off control reports a load error because `/api/routes` returns
   HTTP 503. The timetable remains unpublished and the page correctly shows zero
@@ -238,4 +242,3 @@ not connect to Mireli's current Mombasa routes. It notes long-distance service
 on Friday, Saturday, and Sunday. Kenya Railways contact details printed on the
 PDF are www.krc.co.ke, info@krc.co.ke, 0709 907 000, and 0709 907 555; these
 are not Mireli customer-support contacts.
-

@@ -24,4 +24,23 @@ describe("simulation boundary", () => {
     expect(resolvePaymentMode(false, false)).toBe("mock");
     expect(resolvePaymentMode(true, false)).toBe("live");
   });
+  it("requires a second opt-in before a production container may simulate", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("MIRELI_DEMO_MODE", "true");
+    vi.stubEnv("MIRELI_ALLOW_UNSAFE_DEMO", "");
+    expect(isLocalDemoEnabled()).toBe(false);
+    expect(() => resolvePaymentMode(false, true)).toThrow();
+    vi.stubEnv("MIRELI_ALLOW_UNSAFE_DEMO", "true");
+    expect(isLocalDemoEnabled()).toBe(true);
+    expect(resolvePaymentMode(false, false)).toBe("mock");
+  });
+  it("keeps the container opt-in unusable on Vercel", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("MIRELI_DEMO_MODE", "true");
+    vi.stubEnv("MIRELI_ALLOW_UNSAFE_DEMO", "true");
+    vi.stubEnv("VERCEL", "1");
+    expect(isLocalDemoEnabled()).toBe(false);
+    expect(() => resolvePaymentMode(false, true)).toThrow();
+  });
 });

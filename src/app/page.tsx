@@ -31,6 +31,7 @@ import {
   TrainPill,
   CharterBadge,
   fmtDateShort,
+  todayStr,
 } from "@/components/app/shared";
 import {
   Anchor,
@@ -110,10 +111,7 @@ export default function Home() {
   const showSplash = splashSeen && !splashDone;
 
   const [direction, setDirection] = useState<"FROM_TERMINUS" | "TO_TERMINUS">("FROM_TERMINUS");
-  const [date, setDate] = useState(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  });
+  const [date, setDate] = useState(() => todayStr());
   const [pointCount, setPointCount] = useState(0);
   const [bookingFeeAmount, setBookingFeeAmount] = useState(DEFAULT_BOOKING_FEE_AMOUNT);
   const [routesStatus, setRoutesStatus] = useState<CatalogueStatus>("loading");
@@ -197,7 +195,7 @@ export default function Home() {
 
   useEffect(() => {
     const query = pointSearch.trim();
-    if (!pointPickerOpen || query.length < 2) return;
+    if (!pointPickerOpen || query.length === 1) return;
 
     const controller = new AbortController();
     const timeout = window.setTimeout(() => {
@@ -217,7 +215,7 @@ export default function Home() {
           setPointSearchHasMore(false);
           setPointSearchStatus("error");
         });
-    }, 250);
+    }, query.length >= 2 ? 250 : 0);
 
     return () => {
       window.clearTimeout(timeout);
@@ -449,20 +447,23 @@ export default function Home() {
               </div>
               {routesStatus === "loading" ? (
                 <Skeleton className="h-11 w-full" />
-              ) : routesStatus === "error" ? (
-                <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-muted-foreground">
-                  {pointLabelCap} points could not load. <button type="button" className="font-medium text-primary underline underline-offset-2" onClick={retryCatalogues}>Try again</button>
-                </div>
-              ) : routesStatus === "empty" || pointCount === 0 ? (
+              ) : routesStatus === "empty" || (routesStatus === "ready" && pointCount === 0) ? (
                 <div className="rounded-xl border border-dashed bg-card px-4 py-3 text-sm text-muted-foreground">
                   {pointLabelCap} points are being set up. Bookings open when the route list is published.
                 </div>
               ) : (
                 <div className="space-y-1.5">
+                  {routesStatus === "error" && (
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950" role="status">
+                      <span>We couldn’t check the full point list. Search to see whether your stop is available.</span>
+                      <button type="button" className="shrink-0 font-medium underline underline-offset-2" onClick={retryCatalogues}>Retry</button>
+                    </div>
+                  )}
                   <Popover
                     open={pointPickerOpen}
                     onOpenChange={(open) => {
                       setPointPickerOpen(open);
+                      setPointSearchStatus(open ? "loading" : "idle");
                       if (!open) {
                         setPointSearch("");
                         setPointMatches([]);
@@ -500,16 +501,19 @@ export default function Home() {
                             setPointSearchStatus(value.trim().length >= 2 ? "loading" : "idle");
                             setPointSearchHasMore(false);
                           }}
-                          placeholder={`Search ${pointLabelCap.toLowerCase()} points…`}
+                          placeholder={`Search ${pointLabelCap.toLowerCase()} points or browse stops…`}
                         />
                         <CommandList className="max-h-60">
-                          {pointSearch.trim().length < 2 && (
+                          {pointSearch.trim().length === 1 && (
                             <p className="px-3 py-5 text-center text-sm text-muted-foreground">
-                              Type at least 2 letters to find a point.
+                              Type one more letter to search, or clear it to browse stops.
                             </p>
                           )}
                           {pointSearchStatus === "loading" && pointSearch.trim().length >= 2 && (
                             <p className="px-3 py-5 text-center text-sm text-muted-foreground">Searching points…</p>
+                          )}
+                          {pointSearchStatus === "loading" && pointSearch.trim().length === 0 && (
+                            <p className="px-3 py-5 text-center text-sm text-muted-foreground">Loading available stops…</p>
                           )}
                           {pointSearchStatus === "error" && (
                             <p className="px-3 py-5 text-center text-sm text-muted-foreground" role="alert">
@@ -518,7 +522,9 @@ export default function Home() {
                           )}
                           {pointSearchStatus === "empty" && (
                             <p className="px-3 py-5 text-center text-sm text-muted-foreground">
-                              No matching point. Try another area or stop name.
+                              {pointSearch.trim()
+                                ? "No matching stop. Try another area or stop name."
+                                : "No stops are published yet. Please check back soon."}
                             </p>
                           )}
                           {pointGroups.map(({ route, coast, points }) => (
@@ -556,7 +562,7 @@ export default function Home() {
                         </CommandList>
                         {pointSearchHasMore && pointSearchStatus === "ready" && (
                           <p className="border-t px-3 py-2 text-xs text-muted-foreground">
-                            Showing 12 matches. Add more letters to narrow your search.
+                            Showing 12 stops. Search by name to find another stop.
                           </p>
                         )}
                       </Command>
@@ -907,4 +913,3 @@ function CabCard({
     </Card>
   );
 }
-

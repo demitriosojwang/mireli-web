@@ -4,7 +4,7 @@ Aligned with the cofounder passenger app at upstream commit
 `687ef7a0b7e14fc97628f578dfafe15a500cd0cc`, with PostgreSQL configuration,
 portable builds and stricter separation of local simulation from production.
 
-Official passenger URL: https://mireli-tau.vercel.app/
+Target passenger URL: https://mirelisgr.duckdns.org (AWS cutover pending).
 
 Company contact: mirelisgr001@gmail.com
 
@@ -29,6 +29,20 @@ npm run preview:local
 
 The isolated synthetic preview runs at http://127.0.0.1:3100. It does not book
 real journeys or transfer money. Your original local project is preserved.
+
+### Containerised local host (Docker)
+
+```sh
+cp .env.docker.example .env.docker   # then set SESSION_SECRET
+docker compose --env-file .env.docker up -d --build
+```
+
+Runs one production container with PostgreSQL 16, versioned migrations applied
+at start, and a healthcheck on `/api/health`. Database and encrypted upload data
+persist in named volumes. Because the image holds no configuration, it moves to
+any VM without a rebuild.
+See [container hosting](docs/DOCKER.md) for configuration, demo versus strict
+production mode, backups and VM migration.
 
 ```sh
 npm run test

@@ -6,6 +6,11 @@ export function nairobiDate(date: Date): string {
   return new Date(date.getTime() + OFFSET).toISOString().slice(0, 10);
 }
 
+/** Return today's or a nearby calendar date in Kenya, independent of device timezone. */
+export function nairobiToday(offsetDays = 0, now = new Date()): string {
+  return nairobiDate(new Date(now.getTime() + offsetDays * DAY));
+}
+
 export function nairobiDayRange(value: string): { start: Date; end: Date } {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error("Invalid travel date");
   const start = new Date(`${value}T00:00:00+03:00`);
@@ -30,4 +35,3 @@ export function nairobiTrainArrivalAt(
   if (!Number.isInteger(destDayOffset) || destDayOffset < 0) throw new Error("Invalid train arrival day offset");
   return nairobiEventAt(base, serviceDayOffset + destDayOffset, hhmm);
 }
-

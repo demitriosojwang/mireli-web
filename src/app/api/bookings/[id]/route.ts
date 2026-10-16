@@ -8,6 +8,7 @@ import {
   resolveRefundTier,
 } from "@/lib/money";
 import * as daraja from "@/lib/daraja";
+import { isBookingReadyForPayment } from "@/lib/booking-payment-eligibility";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -74,6 +75,12 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (booking.status !== "awaiting_payment" || booking.cashDue <= 0) {
       return NextResponse.json({ error: "Nothing to pay on this booking" }, { status: 400 });
     }
+    if (!isBookingReadyForPayment(booking)) {
+      return NextResponse.json(
+        { error: "An active driver and future departure are not secured for this booking. No payment request was sent." },
+        { status: 409 },
+      );
+    }
     const phoneRaw = String(body.phone || "");
     const { normalizePhone } = await import("@/lib/session");
     const phone = normalizePhone(phoneRaw);
@@ -128,6 +135,12 @@ export async function POST(req: NextRequest, { params }: Params) {
   // pending push (Paybill path) the demo simulates the C2B confirmation,
   // live mode waits for the real C2B webhook to land.
   if (action === "verify") {
+    if (booking.status === "awaiting_payment" && !isBookingReadyForPayment(booking)) {
+      return NextResponse.json(
+        { error: "An active driver and future departure are not secured for this booking. Payment cannot be confirmed yet." },
+        { status: 409 },
+      );
+    }
     const tx = await db.mpesaTransaction.findFirst({
       where: { bookingId: booking.id, status: { in: ["stk_push_sent", "pending"] } },
       orderBy: { createdAt: "desc" },

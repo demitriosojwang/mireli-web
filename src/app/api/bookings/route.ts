@@ -6,6 +6,7 @@ import { applyCredits, getConfig, recordCollection } from "@/lib/money";
 import { allocateBooking } from "@/lib/engine";
 import { generateBookingCode, toMpesaMsISDN } from "@/lib/daraja";
 import { nairobiDate, nairobiDayRange } from "@/lib/nairobi-time";
+import { isBookingReadyForPayment } from "@/lib/booking-payment-eligibility";
 
 /** Statuses that count towards the guest booking limit — a cancelled booking
  *  frees the guest to rebook their single no-login seat. */
@@ -74,7 +75,7 @@ export async function GET() {
       ledger: b.ledgerEntry
         ? { status: b.ledgerEntry.status, cash: b.ledgerEntry.cashAmount, credit: b.ledgerEntry.creditApplied, receipt: b.ledgerEntry.mpesaReceipt }
         : null,
-      canPay: b.status === "awaiting_payment" && b.cashDue > 0,
+      canPay: isBookingReadyForPayment(b, now),
       canCancel: ["awaiting_payment", "confirmed", "boarded"].includes(b.status) && b.trip?.status !== "departed" && b.trip?.status !== "completed",
       canCheckIn: b.status === "confirmed" && b.trip && ["scheduled", "locked"].includes(b.trip.status),
       refund: b.refunds.length ? { amount: b.refunds[0].amount, status: b.refunds[0].status, reason: b.refunds[0].reason } : null,
@@ -341,4 +342,3 @@ export async function POST(req: NextRequest) {
     bookingWindowMinutes: cfg.bookingWindowMinutes,
   });
 }
-
