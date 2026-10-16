@@ -74,7 +74,8 @@ RUN apt-get update \
  && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/keyrings/postgresql.asc \
  && echo "deb [signed-by=/usr/share/keyrings/postgresql.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
  && apt-get update \
- && apt-get install -y --no-install-recommends postgresql-16 postgresql-client-16 \
+ && apt-get install -y --no-install-recommends postgresql-16 postgresql-client-16 locales \
+ && localedef -i en_US -f UTF-8 en_US.utf8 \
  && if pg_lsclusters --no-header | grep -q '^16[[:space:]]\+main'; then pg_dropcluster --stop 16 main; fi \
  && apt-get purge -y --auto-remove curl \
  && rm -f /etc/apt/sources.list.d/pgdg.list /usr/share/keyrings/postgresql.asc \
