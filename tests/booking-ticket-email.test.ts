@@ -78,7 +78,9 @@ describe("confirmed booking ticket email", () => {
     expect(payload.to).toEqual([{ email: "amina@example.com" }]);
     expect(payload.subject).toContain("MR-123456");
     expect(payload.textContent).toContain("Mombasa Coast");
-    expect(payload.textContent).toContain("Nyali Centre");
+    expect(payload.textContent).toContain("Drop-off: Nyali Centre");
+    expect(payload.textContent).not.toContain("Pickup: Nyali Centre");
+    expect(payload.htmlContent).toContain(">Drop-off</td>");
     expect(payload.textContent).toContain("QWE1234567");
     expect(payload.htmlContent).toContain("&lt;Passenger&gt;");
     expect(payload.htmlContent).not.toContain("DO-NOT-EMAIL");
@@ -86,6 +88,53 @@ describe("confirmed booking ticket email", () => {
       where: { bookingId: "booking-1" },
       data: expect.objectContaining({ status: "sent", providerMessageId: "provider-message-1" }),
     }));
+  });
+
+  it("uses pickup for a to-terminus ride and keeps the door service label directionally correct", async () => {
+    mocks.findBooking.mockResolvedValueOnce({
+      ...booking,
+      direction: "TO_TERMINUS",
+      stageName: "Home pickup · Nyali Centre area",
+      homePickup: true,
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({ messageId: "provider-message-2" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendBookingTicketEmail("booking-1")).resolves.toEqual({ status: "sent" });
+
+    const [, options] = fetchMock.mock.calls[0];
+    const payload = JSON.parse(options.body);
+    expect(payload.textContent).toContain("Pickup: Door-to-door near Nyali Centre");
+    expect(payload.textContent).not.toContain("Drop-off: Door-to-door");
+    expect(payload.htmlContent).toContain(">Pickup</td>");
+    expect(payload.htmlContent).toContain("Door-to-door near Nyali Centre");
+  });
+
+  it("corrects the legacy home-pickup label on a from-terminus ticket", async () => {
+    mocks.findBooking.mockResolvedValueOnce({
+      ...booking,
+      direction: "FROM_TERMINUS",
+      stageName: "Home pickup · Nyali Centre area",
+      homePickup: true,
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({ messageId: "provider-message-3" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendBookingTicketEmail("booking-1")).resolves.toEqual({ status: "sent" });
+
+    const [, options] = fetchMock.mock.calls[0];
+    const payload = JSON.parse(options.body);
+    expect(payload.textContent).toContain("Drop-off: Door-to-door near Nyali Centre");
+    expect(payload.textContent).not.toContain("Pickup: Door-to-door");
+    expect(payload.htmlContent).toContain(">Drop-off</td>");
   });
 
   it("does not send a ticket while payment is unconfirmed or absent", async () => {

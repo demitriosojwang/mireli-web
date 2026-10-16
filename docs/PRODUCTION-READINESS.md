@@ -13,8 +13,11 @@ end-to-end gates below pass.
   Docker are active on the host.
 - [x] Internal `GET /api/health` returns `{"status":"ok"}`.
 - [x] Internal `GET /api/routes` returns `pointCount: 0` and the confirmed
-  KSh 50 booking fee; `GET /api/trains` returns no trains; a stop search returns
-  no points. The production catalogue is therefore genuinely empty.
+  KSh 50 booking fee; `GET /api/trains` returns no trains; searching Mtwapa
+  returns no points. The production catalogue is therefore genuinely empty.
+- [x] Customer availability `GET /api/trips?date=2026-10-16` returns
+  `{"hasEligibleDrivers":false,"trips":[]}`. The web app shows zero pooled cabs
+  and does not create booking inventory when no eligible driver exists.
 - [x] Driver API is strict (`simulation: false`). Phone/email sign-in,
   registration, and navigation are currently closed.
 - [x] No driver or stop data was added to make the booking UI look populated.
@@ -27,14 +30,11 @@ end-to-end gates below pass.
 - [x] The latest application source commit `1d6b5ae` passed GitHub Actions on
   16 October 2026: application verification, AWS infrastructure validation,
   and AMD64/ARM64 production image builds all succeeded ([run 38946592991](https://github.com/demitriosojwang/mireli-web/actions/runs/38946592991)).
-- [ ] The AWS deployment workflow has not run for this feature branch. Its
-  production gate is restricted to successful builds on `main` with the AWS
-  OIDC deployment flag and role configured; GitHub OIDC deployment remains
-  disabled while AWS project policy denies creation of the OIDC provider.
-- [ ] GitHub OIDC deployment remains disabled because AWS project policy
-  denied `iam:CreateOpenIDConnectProvider`. Do not configure static AWS keys
-  in GitHub; use the documented short-lived AWS CLI/SSM release process until
-  AWS policy is resolved.
+- [ ] AWS deployment has not run for this feature branch. The release workflow
+  requires a successful `main` build plus its deployment flag and role; AWS
+  project policy currently denies creation of the GitHub OIDC provider. Keep
+  static AWS keys out of GitHub and use the reviewed short-lived CLI/SSM release
+  process until the project policy is resolved.
 - [ ] Real passenger/driver authentication, M-Pesa callbacks and reconciliation,
   Brevo ticket delivery, and post-trip payouts are not configured on the VM.
 - [ ] Approved stage catalogue, timetable, and driver supply are missing. The
@@ -69,6 +69,9 @@ the intended web/API host; the local Docker stack does not serve production.
   empty while only the search prompt is empty.
 - [x] Present stage and door-to-door service as explicit, compact choices;
   show the door surcharge with its full driver pass-through before booking.
+- [x] Label the selected stop as a pickup or drop-off according to journey
+  direction in booking records and ticket emails; format legacy door-service
+  bookings correctly when an email is retried.
 - [x] Keep customer stop discovery independent of the booking-fee config read;
   use the confirmed KSh 50 display fee as a discovery fallback and log only a
   sanitized database error code. Trip and booking APIs still require full

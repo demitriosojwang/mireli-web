@@ -53,7 +53,16 @@ function ticketContent(booking: {
   const name = booking.passengerName?.trim() || "traveller";
   const departure = booking.trip ? journeyDate(booking.trip.departureAt) : "Check your booking details";
   const direction = booking.direction === "TO_TERMINUS" ? "to Mombasa Terminus" : "from Mombasa Terminus";
-  const pickup = booking.stageName || "Mombasa Terminus";
+  const stopLabel = booking.direction === "FROM_TERMINUS" ? "Drop-off" : "Pickup";
+  let stopName = booking.stageName || "Mombasa Terminus";
+  if (booking.homePickup) {
+    // Older bookings used "Home pickup" for both directions. Normalize that
+    // stored prefix while formatting so retried tickets show the correct leg.
+    const area = stopName
+      .replace(/^Home (?:pickup|drop-off)\s*·\s*/i, "")
+      .replace(/\s+area$/i, "");
+    stopName = `Door-to-door near ${area}`;
+  }
   const vehicle = booking.isCharter ? "Private charter" : `${booking.seats} seat${booking.seats === 1 ? "" : "s"}`;
   const train = booking.trip?.train?.name || "Madaraka Express connection";
   const driver = booking.trip?.driver
@@ -73,7 +82,7 @@ function ticketContent(booking: {
     `Journey: ${booking.route.name} ${direction}`,
     `Train: ${train}`,
     `Departure: ${departure} (East Africa Time)`,
-    `Pickup: ${pickup}${booking.homePickup ? " · door pickup" : ""}`,
+    `${stopLabel}: ${stopName}`,
     `Ride: ${vehicle}`,
     `Driver: ${driver}`,
     `Total: ${paid}`,
@@ -102,7 +111,7 @@ function ticketContent(booking: {
         <tr><td style="padding:8px 0;color:#64748b">Journey</td><td style="padding:8px 0;text-align:right">${escapeHtml(booking.route.name)} ${escapeHtml(direction)}</td></tr>
         <tr><td style="padding:8px 0;color:#64748b">Train</td><td style="padding:8px 0;text-align:right">${escapeHtml(train)}</td></tr>
         <tr><td style="padding:8px 0;color:#64748b">Departure</td><td style="padding:8px 0;text-align:right">${escapeHtml(departure)} EAT</td></tr>
-        <tr><td style="padding:8px 0;color:#64748b">Pickup</td><td style="padding:8px 0;text-align:right">${escapeHtml(pickup)}${booking.homePickup ? " · door pickup" : ""}</td></tr>
+        <tr><td style="padding:8px 0;color:#64748b">${stopLabel}</td><td style="padding:8px 0;text-align:right">${escapeHtml(stopName)}</td></tr>
         <tr><td style="padding:8px 0;color:#64748b">Ride</td><td style="padding:8px 0;text-align:right">${escapeHtml(vehicle)}</td></tr>
         <tr><td style="padding:8px 0;color:#64748b">Driver</td><td style="padding:8px 0;text-align:right">${escapeHtml(driver)}</td></tr>
         <tr><td style="padding:12px 0 0;border-top:1px solid #e6e1d8;font-weight:bold">Total</td><td style="padding:12px 0 0;border-top:1px solid #e6e1d8;text-align:right;font-weight:bold">${escapeHtml(paid)}</td></tr>

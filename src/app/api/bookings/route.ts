@@ -171,7 +171,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "This stop's fare is not configured for booking yet." }, { status: 503 });
   }
   if (homePickup && (!homeAddress || String(homeAddress).trim().length < 5)) {
-    return NextResponse.json({ error: "Home pickup needs an address" }, { status: 400 });
+    return NextResponse.json({ error: "Door-to-door service needs a pickup or drop-off address" }, { status: 400 });
   }
 
   const tripSeats = isCharter ? 0 : Math.max(1, Math.min(parseInt(seats, 10) || 1, 6));
@@ -217,7 +217,9 @@ export async function POST(req: NextRequest) {
       routeId: route.id,
       direction,
       stageId: stage.id,
-      stageName: homePickup ? `Home pickup · ${stage.name} area` : stage.name,
+      stageName: homePickup
+        ? `${direction === "FROM_TERMINUS" ? "Home drop-off" : "Home pickup"} · ${stage.name} area`
+        : stage.name,
       homePickup,
       homeAddress: homePickup ? String(homeAddress).slice(0, 200) : null,
       seats: isCharter ? 1 : tripSeats,

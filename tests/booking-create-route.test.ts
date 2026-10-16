@@ -257,6 +257,28 @@ describe("booking creation with no driver supply", () => {
     });
   });
 
+  it("labels door service according to the journey direction", async () => {
+    await POST(request(validBookingBody({
+      homePickup: true,
+      homeAddress: "12 Green Street, Nyali",
+    })));
+
+    expect(mocks.bookingCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ stageName: "Home drop-off · Nyali area" }),
+    }));
+
+    mocks.bookingCreate.mockClear();
+    await POST(request(validBookingBody({
+      direction: "TO_TERMINUS",
+      homePickup: true,
+      homeAddress: "12 Green Street, Nyali",
+    })));
+
+    expect(mocks.bookingCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ stageName: "Home pickup · Nyali area" }),
+    }));
+  });
+
   it("never creates a booking when the passenger has no session", async () => {
     mocks.getPassengerSession.mockResolvedValue(null);
 
