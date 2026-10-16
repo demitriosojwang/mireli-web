@@ -1,10 +1,50 @@
 # Mireli booking launch checklist
 
-**Status: not ready to accept customer bookings.** The last recorded production
-check on 8 October 2026 returned empty route and train catalogues and no approved
-driver accounts. Recheck those records before launch if they have since changed.
-The passenger UI should continue to show an honest empty state until the shared
-driver platform and approved route data are live.
+**Status: not ready to accept customer bookings.** The live check on 16 October
+2026 found a failing production route-catalogue endpoint, an empty timetable,
+and no eligible drivers. The passenger UI should continue to show an honest
+empty state until the API issue is resolved and the shared driver platform and
+approved route data are live.
+
+## Latest live verification (16 October 2026)
+
+- [x] Production homepage responds with HTTP 200.
+- [ ] Production `/api/health` currently returns HTTP 404. The local worktree
+  has a health handler, but it is not present in the deployed `main` source yet.
+- [ ] Production `/api/routes` responds with HTTP 503 and
+  `The route catalogue is temporarily unavailable.` The deployed handler
+  converts point-count and fee-config database errors to the same generic
+  response. Production `/api/stages?q=Nyali` and `?q=Malindi` both return HTTP
+  200 with no points, so the stage-search query itself is reachable. A leading,
+  unconfirmed cause is schema drift:
+  `/api/routes` also reads `PlatformConfig.bookingFeeAmount`, which was added
+  by the 11 October migration, while Vercel builds only run migrations when
+  `MIRELI_APPLY_DATABASE_MIGRATIONS=true`. Verify that flag and the production
+  migration status before changing the database. The current local branch now
+  logs only sanitized Prisma error codes and lets stage-count discovery fall
+  back to the confirmed KSh 50 display fee if the fee-config read alone fails;
+  this change has not been deployed or rechecked on Vercel.
+- [ ] Production `/api/trains` responds successfully with an empty train list.
+- [ ] Production `/api/trips` reports `hasEligibleDrivers: false` and no trips.
+  `/api/v1/driver/status` reports strict mode (`simulation: false`), email
+  sign-in open, and new driver registration paused. There is no supply for a
+  customer booking to match against.
+- [x] Local Docker `/api/health` responds `ok`; the route count and train list
+  are empty and local trip availability reports no eligible drivers.
+- [x] The local container is explicitly in simulation mode. Real Africa's
+  Talking, Brevo, and Daraja credentials and `DRIVER_AUTH_SECRET` are absent;
+  local simulation is useful for development but does not verify live sign-in,
+  collection, refunds, or driver payouts.
+- [ ] The last readable Vercel environment listing did not include
+  `MIRELI_API_ORIGIN`; the latest environment query was denied with HTTP 403,
+  so recheck the variable when Vercel access is restored. If it is unset, API
+  calls are not proxying to the shared Docker backend. Before enabling that
+  proxy, provide a stable public HTTPS API origin and set the correct backend
+  for each Vercel environment. A local Docker address is not reachable from
+  Vercel.
+- [ ] Investigate the production `/api/routes` runtime error, then load only the
+  approved stage catalogue and timetable and complete a real staging booking
+  through driver assignment and payment reconciliation.
 
 ## Completed in this change
 
@@ -23,6 +63,10 @@ driver platform and approved route data are live.
   limit availability reads to approved-driver and booking-display fields.
 - [x] Return only the active customer-point count on initial booking load;
   search at most 12 matching points on demand instead of downloading every stage.
+- [x] Keep customer stop discovery independent of the booking-fee config read;
+  use the confirmed KSh 50 display fee as a discovery fallback and log only a
+  sanitized database error code. Trip and booking APIs still require full
+  operating settings before they can proceed.
 - [x] Allocate eligible drivers across every active route, matching the
   current operating policy.
 - [x] Show the flat booking fee in the fare preview and booking total.
@@ -117,6 +161,44 @@ driver platform and approved route data are live.
   mode after deployment. Do not announce bookings until one real staging
   journey succeeds end to end.
 
+## Candidate Mombasa stage and fare note (not production-approved)
+
+The supplied `DOC20261012_10575504_0232.pdf` is a handwritten, one-page scan
+that appears to list passenger fares for 4- and 7-seater cabs. Its metadata
+gives a creation date of 12 October 2026, but the page has no effective date,
+author/sign-off, route origin, or coordinates. Treat this as a working
+transcription, not an active catalogue.
+
+The North Coast list brackets entries 1-16 at KSh 400: Kiembeni Mwisho,
+Kiembeni Police, Ananda Magaya, San Sera, Green Estate, Kona Kiembeni,
+Bamburi Mwisho, Bamburi Naivas, Total Bamburi, Fisheries, Mwenbeni, GCC
+Junction, Nyali Centre, VOK, Bambolulu, and Lights. The spelling of Ananda
+Magaya, San Sera, and Mwenbeni should be confirmed; entry 8 has a crossed-out
+word before “Naivas.”
+
+The remaining listed North Coast fares are Mtwapa KSh 400, Malindi KSh 700,
+Changamwe KSh 200, Mikindani KSh 250, Miritini KSh 250, and Town (CBD)/Mwembe
+Tayari KSh 300. The South Coast list gives Likoni Ferry Container KSh 400,
+Kona Mpya (Fayaz) KSh 400, Shika Adabu (Checkpoint) KSh 400, and Diani Naivas
+KSh 500.
+
+The note says 10/11-seater fares should be reduced by “a minimum of KSh 50”; it
+does not say whether that is an exact discount or a floor. It also says the
+platform “bags” the listed fares, which is not precise enough to define driver
+settlement. Do not interpret that wording as Mireli commission: the confirmed
+policy remains a KSh 50 booking fee on each booking, 10% commission only on a
+private charter, and the full door-to-door surcharge paid to the driver.
+
+The current fare model has one per-seat fare per stage and multiplies it by the
+number of booked seats; it has no vehicle-capacity fare tier. Therefore, the
+10/11-seater discount cannot be represented accurately until its rule is
+confirmed and the fare model and customer preview support capacity-based fares.
+
+Before entering these values, confirm the service origin/direction, whether
+each amount is per passenger and applies to both 4- and 7-seaters, the exact
+10/11-seater discount, spelling/aliases, and stage coordinates. The list does
+not establish train times, driver availability, or a successful booking path.
+
 ## Timetable extracted from the supplied PDF
 
 All times are local Kenya time. `NTM` is Nairobi Terminus and `MTM` is Mombasa
@@ -145,4 +227,3 @@ not connect to Mireli's current Mombasa routes. It notes long-distance service
 on Friday, Saturday, and Sunday. Kenya Railways contact details printed on the
 PDF are www.krc.co.ke, info@krc.co.ke, 0709 907 000, and 0709 907 555; these
 are not Mireli customer-support contacts.
-
