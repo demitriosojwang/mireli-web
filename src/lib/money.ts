@@ -354,10 +354,17 @@ export async function executeCancellation(params: {
       // Commission reversal is proportional — the platform never keeps a
       // commission on a refunded fare.
       const cfgC = await getConfig();
-      const commissionableFare = Math.max(0, entry.totalAmount - entry.homeSurchargeAmount - entry.platformFeeAmount);
       const refundedShare = entry.totalAmount > 0 ? Math.min(1, amount / entry.totalAmount) : 0;
+      const split = calculateSettlement(
+        entry.totalAmount,
+        entry.homeSurchargeAmount,
+        entry.platformFeeAmount,
+        Math.round(cfgC.commissionRate * 10000),
+        booking.isCharter,
+      );
+      const platformRetained = split.commission + split.platformFee;
       const commissionReversed = booking.isCharter
-        ? Math.round(commissionableFare * refundedShare * cfgC.commissionRate)
+        ? Math.round(platformRetained * refundedShare)
         : 0;
       const driverClawback = amount - commissionReversed;
       await db.refundRecord.update({

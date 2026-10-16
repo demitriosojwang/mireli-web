@@ -21,6 +21,7 @@ import {
 import { api, useMe } from "@/lib/client";
 import { fmtTime, ksh } from "@/lib/format";
 import { DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
+import { calculateCharterFare } from "@/lib/charter-pricing";
 import { SplashScreen, useSplashOnce } from "@/components/app/splash-screen";
 import {
   DatePicker,
@@ -339,13 +340,24 @@ export default function Home() {
   // Live fare preview
   const previewStage = selectedPoint?.point;
   const farePreview = (() => {
+    const charterFares = charter && previewStage
+      ? visibleTrips
+          .filter((trip) => trip.routeId === selectedPoint?.route.id)
+          .map((trip) => calculateCharterFare(trip.capacity, previewStage.fare))
+      : [];
     const base = charter
-      ? selectedPoint?.route.charterPrice ?? 0
+      ? charterFares.length > 0 ? Math.min(...charterFares) : 0
       : (previewStage?.fare || 0) * seats;
     const surcharge = homePickup
       ? (charter ? previewStage?.homeSurcharge || 0 : (previewStage?.homeSurcharge || 0) * seats)
       : 0;
-    return { base, surcharge, platformFee: selectedPoint ? bookingFeeAmount : 0, total: base + surcharge + (selectedPoint ? bookingFeeAmount : 0) };
+    return {
+      base,
+      surcharge,
+      platformFee: selectedPoint ? bookingFeeAmount : 0,
+      hasCharterCab: charterFares.length > 0,
+      total: base + surcharge + (selectedPoint && !charter ? bookingFeeAmount : 0),
+    };
   })();
 
   /* ─── Splash (after all hooks) ───────────────────────────────────────────── */
@@ -640,11 +652,21 @@ export default function Home() {
                 <span>
                   <span className="block text-xs text-muted-foreground">Estimated total{charter ? " · whole cab" : seats > 1 ? ` · ${seats} seats` : ""}</span>
                   <span className="block text-[11px] text-muted-foreground">
-                    {selectedPoint ? `Includes ${ksh(bookingFeeAmount)} booking fee` : "Final amount shown before payment"}
+                    {selectedPoint
+                      ? charter
+                        ? `${ksh(bookingFeeAmount)} booking fee included in Mireli's 10% share`
+                        : `Includes ${ksh(bookingFeeAmount)} booking fee`
+                      : "Final amount shown before payment"}
                   </span>
                 </span>
                 <span className="text-lg font-bold tabular-nums text-primary">
-                  {selectedPoint ? ksh(farePreview.total) : "Choose a point"}
+                  {!selectedPoint
+                    ? "Choose a point"
+                    : charter && !farePreview.hasCharterCab
+                      ? "No cabs available"
+                      : charter && visibleTrips.some((trip) => trip.capacity !== visibleTrips[0]?.capacity)
+                        ? `From ${ksh(farePreview.total)}`
+                        : ksh(farePreview.total)}
                 </span>
               </div>
             </section>
@@ -833,9 +855,11 @@ function CabCard({
   onBook: () => void;
 }) {
   const booked = trip.capacity - trip.seatsLeft;
-  const baseFare = charter ? trip.charterPrice : (pointFare ?? trip.minFare) * seats;
+  const baseFare = charter
+    ? calculateCharterFare(trip.capacity, pointFare ?? trip.minFare)
+    : (pointFare ?? trip.minFare) * seats;
   const surcharge = homePickup ? (pointSurcharge ?? 0) * (charter ? 1 : seats) : 0;
-  const fare = baseFare + surcharge + (hasPoint ? trip.platformFeeAmount : 0);
+  const fare = baseFare + surcharge + (hasPoint && !charter ? trip.platformFeeAmount : 0);
   const full = trip.seatsLeft <= 0 || !trip.bookable;
 
   return (
@@ -872,7 +896,11 @@ function CabCard({
               {charter ? "Charter" : seats > 1 ? `${seats} seats` : "Fare"}
             </div>
             <div className="font-bold tabular-nums text-primary">{ksh(fare)}</div>
-            {hasPoint && <div className="text-[10px] text-muted-foreground">includes {ksh(trip.platformFeeAmount)} fee</div>}
+            {hasPoint && (
+              <div className="text-[10px] text-muted-foreground">
+                {charter ? `${ksh(trip.platformFeeAmount)} fee included` : `includes ${ksh(trip.platformFeeAmount)} fee`}
+              </div>
+            )}
             {!charter && seats === 1 && pointFare != null && pointFare !== trip.minFare && (
               <div className="text-[10px] text-muted-foreground">from {ksh(trip.minFare)}</div>
             )}

@@ -3,7 +3,8 @@
 Updated 16 October 2026. This guide is for the developer or agent building Mireli Driver and working on the shared API. The Android app stays in its own repository; this repository contains the shared backend and web application.
 
 For Android API setup and flavor rules, read
-[DRIVER-SHARED-BACKEND-SETUP.md](DRIVER-SHARED-BACKEND-SETUP.md) first.
+[DRIVER-SHARED-BACKEND-SETUP.md](DRIVER-SHARED-BACKEND-SETUP.md) and the focused
+[driver agent VM handoff](DRIVER-AGENT-VM-HANDOFF.md) first.
 
 ## Live AWS target
 

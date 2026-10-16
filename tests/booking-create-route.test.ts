@@ -8,7 +8,10 @@ const mocks = vi.hoisted(() => ({
   passengerUpdate: vi.fn(),
   bookingCount: vi.fn(),
   bookingCreate: vi.fn(),
+  bookingFindUnique: vi.fn(),
+  bookingUpdate: vi.fn(),
   bookingDelete: vi.fn(),
+  tripFindUnique: vi.fn(),
   getConfig: vi.fn(),
   allocateBooking: vi.fn(),
   audit: vi.fn(),
@@ -24,8 +27,11 @@ vi.mock("@/lib/db", () => ({
     booking: {
       count: mocks.bookingCount,
       create: mocks.bookingCreate,
+      findUnique: mocks.bookingFindUnique,
+      update: mocks.bookingUpdate,
       delete: mocks.bookingDelete,
     },
+    trip: { findUnique: mocks.tripFindUnique },
   },
 }));
 vi.mock("@/lib/session", () => ({ getPassengerSession: mocks.getPassengerSession }));
@@ -55,7 +61,7 @@ const request = (body: unknown) => new NextRequest("https://mireli.test/api/book
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getPassengerSession.mockResolvedValue({ id: "guest-1", name: "Amina Wanjiru" });
-  mocks.getConfig.mockResolvedValue({ bookingFeeAmount: 50 });
+  mocks.getConfig.mockResolvedValue({ bookingFeeAmount: 50, commissionRate: 0.1 });
   mocks.routeFindUnique.mockResolvedValue({
     id: "route-1",
     charterPrice: 4200,
@@ -64,7 +70,10 @@ beforeEach(() => {
   mocks.passengerFindUnique.mockResolvedValue({ id: "guest-1", phone: "guest-local-1" });
   mocks.bookingCount.mockResolvedValue(0);
   mocks.bookingCreate.mockResolvedValue({ id: "booking-1", code: "MR-ABC123" });
+  mocks.bookingFindUnique.mockResolvedValue(null);
+  mocks.bookingUpdate.mockResolvedValue({ id: "booking-1" });
   mocks.bookingDelete.mockResolvedValue({ id: "booking-1" });
+  mocks.tripFindUnique.mockResolvedValue({ capacity: 4 });
   mocks.allocateBooking.mockResolvedValue({ tripId: null, note: "No eligible drivers." });
 });
 
@@ -93,6 +102,63 @@ describe("booking creation with no driver supply", () => {
     expect(mocks.allocateBooking).toHaveBeenCalledOnce();
     expect(mocks.bookingDelete).toHaveBeenCalledWith({ where: { id: "booking-1" } });
     expect(mocks.audit).not.toHaveBeenCalled();
+  });
+
+  it("prices a charter using the assigned vehicle capacity with the fee inside the total", async () => {
+    mocks.passengerFindUnique.mockResolvedValue({ id: "passenger-1", phone: "+254712345678" });
+    mocks.routeFindUnique.mockResolvedValue({
+      id: "route-1",
+      charterPrice: 4200,
+      stages: [{ id: "stage-1", name: "Nyali", fare: 400, homeSurcharge: 150 }],
+    });
+    mocks.allocateBooking.mockResolvedValue({ tripId: "trip-1", note: "Charter allocated" });
+    mocks.bookingFindUnique.mockResolvedValue({
+      id: "booking-1",
+      code: "MR-ABC123",
+      status: "awaiting_payment",
+      fareAmount: 2000,
+      platformFeeAmount: 50,
+      homeSurcharge: 0,
+      creditApplied: 0,
+      cashDue: 2000,
+      stageName: "Nyali",
+      seats: 1,
+      isCharter: true,
+      passengerName: "Amina Wanjiru",
+      passengerPhone: "+254712345678",
+      allocationNote: "Charter allocated",
+      trip: { id: "trip-1", departureAt: new Date("2026-10-16T09:00:00.000Z"), status: "scheduled", route: { name: "Route 1" }, driver: null },
+    });
+
+    const response = await POST(request({
+      routeId: "route-1",
+      stageId: "stage-1",
+      direction: "FROM_TERMINUS",
+      travelDate: "2026-10-16",
+      passengerName: "Amina Wanjiru",
+      passengerPhone: "0712345678",
+      passengerEmail: "amina@example.com",
+      passengerIdType: "id",
+      passengerIdNumber: "12345678",
+      passengerNationality: "Kenyan",
+      passengerGender: "female",
+      seats: 1,
+      isCharter: true,
+    }));
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.booking.fareAmount).toBe(2000);
+    expect(payload.booking.platformFeeAmount).toBe(50);
+    expect(payload.booking.cashDue).toBe(2000);
+    expect(mocks.bookingUpdate).toHaveBeenCalledWith({
+      where: { id: "booking-1" },
+      data: { fareAmount: 2000, cashDue: 2000, homeSurcharge: 0, platformFeeAmount: 50 },
+    });
+    expect(mocks.tripFindUnique).toHaveBeenCalledWith({
+      where: { id: "trip-1" },
+      select: { capacity: true },
+    });
   });
 
   it("never creates a booking when the passenger has no session", async () => {

@@ -10,6 +10,8 @@ Mireli AWS VM. Android is a client of that API; it does not connect directly to
 PostgreSQL and must not create a second driver, booking, payment, or payout
 store. The authoritative endpoint contract is
 [DRIVER-INTEGRATION.md](DRIVER-INTEGRATION.md).
+For AWS team access and the current safe VM status snapshot, read the focused
+[driver agent VM handoff](DRIVER-AGENT-VM-HANDOFF.md).
 
 The AWS pilot VM is:
 

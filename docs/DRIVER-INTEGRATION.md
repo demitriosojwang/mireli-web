@@ -9,6 +9,23 @@ and approved supply are ready. Follow
 [DRIVER-SHARED-BACKEND-SETUP.md](DRIVER-SHARED-BACKEND-SETUP.md) for the current
 VM access, build-flavor, and release rules.
 
+## Confirmed fares and driver earnings
+
+- Shared ride: stage fare × booked seats, plus the flat KSh 50 booking fee.
+  There is no percentage commission on shared rides.
+- Private charter: assigned vehicle capacity × (selected stage fare + KSh 100
+  per vehicle seat). The KSh 50 fee is included inside Mireli's 10% share; it
+  is not added again. For a 4-seat vehicle and KSh 400 stage fare, the total is
+  KSh 2,000, Mireli's total share is KSh 200, and the driver receives KSh 1,800.
+- Door-to-door surcharge passes to the driver in full for both service types.
+- Driver payout is created and dispatched only after trip completion. The API's
+  server-calculated earnings and payout fields are authoritative; Android must
+  not recalculate fares, commission, or net payout locally.
+- Earnings lines expose `grossMinor`, `platformFeeMinor`, `commissionMinor`,
+  `surchargeMinor`, and `netMinor`. The payout reconciles as gross minus the
+  separately recorded fee and commission; the full home surcharge is already
+  part of gross and remains in net.
+
 ## Implemented contract — 6 October 2026
 
 - `/api/v1/driver/status` returns separate `phoneSignInOpen` and

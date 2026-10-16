@@ -22,7 +22,8 @@ AWS site stays online when a developer's computer is off.
 
 See [AWS migration and launch gates](docs/AWS-MIGRATION.md),
 [the production checklist](docs/PRODUCTION-READINESS.md), and the
-[VM/driver handoff](docs/VM-AGENT-HANDOFF.md).
+[VM/driver handoff](docs/VM-AGENT-HANDOFF.md) or the focused
+[Mireli Driver agent VM handoff](docs/DRIVER-AGENT-VM-HANDOFF.md).
 
 ## Local Docker test environment
 
@@ -66,7 +67,8 @@ are documented in [AWS migration](docs/AWS-MIGRATION.md).
 The driver app uses `/api/v1/driver/*` on the same service and PostgreSQL data;
 it never connects to the database directly. Give the Android agent
 [DRIVER-SHARED-BACKEND-SETUP.md](docs/DRIVER-SHARED-BACKEND-SETUP.md) and
-[DRIVER-INTEGRATION.md](docs/DRIVER-INTEGRATION.md). VM access is through
+[DRIVER-INTEGRATION.md](docs/DRIVER-INTEGRATION.md) and
+[DRIVER-AGENT-VM-HANDOFF.md](docs/DRIVER-AGENT-VM-HANDOFF.md). VM access is through
 individual AWS team membership and SSM, not shared SSH keys. The public driver
 URL stays blocked until DNS and TLS work.
 

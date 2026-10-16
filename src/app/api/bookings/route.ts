@@ -8,6 +8,7 @@ import { generateBookingCode, toMpesaMsISDN } from "@/lib/daraja";
 import { nairobiDate, nairobiDayRange } from "@/lib/nairobi-time";
 import { isBookingReadyForPayment } from "@/lib/booking-payment-eligibility";
 import { attemptBookingTicketEmail } from "@/lib/booking-ticket-email";
+import { calculateCharterFare, calculateCharterPlatformShare } from "@/lib/charter-pricing";
 
 /** Statuses that count towards the guest booking limit — a cancelled booking
  *  frees the guest to rebook their single no-login seat. */
@@ -160,10 +161,10 @@ export async function POST(req: NextRequest) {
   }
 
   const tripSeats = isCharter ? 0 : Math.max(1, Math.min(parseInt(seats, 10) || 1, 6));
-  const fare = isCharter ? route.charterPrice : stage.fare * tripSeats;
+  let fare = isCharter ? 0 : stage.fare * tripSeats;
   const homeSurcharge = homePickup ? (isCharter ? stage.homeSurcharge : stage.homeSurcharge * tripSeats) : 0;
   const platformFeeAmount = cfg.bookingFeeAmount;
-  const total = fare + homeSurcharge + platformFeeAmount;
+  let total = fare + homeSurcharge + (isCharter ? 0 : platformFeeAmount);
 
   // ── Guest rule: 1 seat, 1 booking — no login required. Anything more needs
   // a Mi-Reli account created with the exact same details. ─────────────────
@@ -207,7 +208,9 @@ export async function POST(req: NextRequest) {
       homeAddress: homePickup ? String(homeAddress).slice(0, 200) : null,
       seats: isCharter ? 1 : tripSeats,
       isCharter,
-      fareAmount: total, // total charged (fare + home surcharge + flat platform fee)
+      // Charter fare is provisional until allocation identifies the vehicle
+      // capacity; no payment can begin before the fare is recalculated.
+      fareAmount: total,
       platformFeeAmount,
       homeSurcharge,
       creditApplied: 0,
@@ -250,6 +253,33 @@ export async function POST(req: NextRequest) {
       { error: "No approved driver and cab are available for this journey yet. No payment was taken; please try another date later." },
       { status: 409 },
     );
+  }
+
+  if (isCharter) {
+    // Quote and charge from the vehicle that was actually assigned. The KSh 50
+    // fee is accounted for within Mireli's 10% share, not added a second time.
+    try {
+      const assignedTrip = await db.trip.findUnique({
+        where: { id: allocation.tripId },
+        select: { capacity: true },
+      });
+      if (!assignedTrip) throw new Error("Allocated vehicle not found");
+      fare = calculateCharterFare(assignedTrip.capacity, stage.fare);
+      if (calculateCharterPlatformShare(fare, Math.round(cfg.commissionRate * 10000)) < platformFeeAmount) {
+        throw new Error("Charter fare cannot cover the embedded booking fee within the platform share");
+      }
+      total = fare + homeSurcharge;
+      await db.booking.update({
+        where: { id: booking.id },
+        data: { fareAmount: total, cashDue: total, homeSurcharge, platformFeeAmount },
+      });
+    } catch {
+      await db.booking.delete({ where: { id: booking.id } }).catch(() => undefined);
+      return NextResponse.json(
+        { error: "We couldn't confirm the assigned vehicle's fare. No payment was requested; please try again." },
+        { status: 503 },
+      );
+    }
   }
 
   // Credit offer — the passenger chooses; partial use supported

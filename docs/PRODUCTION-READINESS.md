@@ -59,9 +59,10 @@ the intended web/API host; the local Docker stack does not serve production.
 - [x] Allocate eligible drivers across every active route, matching the
   current operating policy.
 - [x] Show the flat booking fee in the fare preview and booking total.
-- [x] Apply the 10% commission only to a private charter's fare. Pass the full
-  door-to-door surcharge to the driver and retain the KSh 50 booking fee for
-  each booking.
+- [x] Price a private charter as vehicle capacity × (selected stage fare +
+  KSh 100 per vehicle seat). Include the KSh 50 booking fee inside Mireli's
+  10% share; pass the rest of the charter fare and the full door-to-door
+  surcharge to the driver.
 - [x] Create/dispatch a driver payout after trip completion; retain queued and
   failed transfers for recovery.
 - [x] Restrict simulated callback and injected failure controls to local demo
@@ -78,13 +79,14 @@ the intended web/API host; the local Docker stack does not serve production.
 ### Approved route catalogue
 
 - [ ] Publish the approved routes and stage names, in order, with coordinates,
-  per-stage fare, charter fare, and door-to-door surcharge.
+  per-stage fare, and door-to-door surcharge. Charter fares are calculated from
+  the assigned vehicle capacity and per-stage fare.
 - [ ] Add a protected admin route/stage directory or a reviewed data-entry
   workflow. There is no customer-facing source for this catalogue today.
 - [ ] Check each route for at least one non-terminus stage, valid fares, and
   coordinates before making it active.
-- [ ] Confirm the current flat booking fee is KSh 50 and that displayed totals
-  match the amount sent to M-Pesa.
+- [ ] Confirm the current flat booking fee is KSh 50 and verify shared-ride
+  totals add it once while charter totals include it inside Mireli's 10% share.
 
 ### Madaraka Express timetable
 
@@ -118,9 +120,10 @@ the intended web/API host; the local Docker stack does not serve production.
 - [ ] Run sandbox end-to-end cases for payment success, failure, duplicate and
   missing callbacks, refund/credit, and passenger cancellation cutoffs.
 - [ ] Verify completed-trip settlement with real examples: shared ride has no
-  percentage commission; private charter commission is 10% of charter fare;
-  the full home surcharge goes to the driver; the booking fee is retained by
-  Mireli; payout dispatch begins only after trip completion.
+  percentage commission; a 4-seat charter at KSh 400 per seat totals KSh 2,000,
+  including the booking fee; Mireli retains KSh 200 total (including KSh 50 fee)
+  and the driver receives KSh 1,800 plus any full home surcharge. Payout
+  dispatch begins only after trip completion.
 - [ ] Approve and verify each driver's B2C payout destination, then test
   completed, failed, ambiguous, and retried payout outcomes. Keep live payouts
   disabled until reconciliation is proven.
@@ -184,14 +187,14 @@ KSh 500.
 The note says 10/11-seater fares should be reduced by “a minimum of KSh 50”; it
 does not say whether that is an exact discount or a floor. It also says the
 platform “bags” the listed fares, which is not precise enough to define driver
-settlement. Do not interpret that wording as Mireli commission: the confirmed
-policy remains a KSh 50 booking fee on each booking, 10% commission only on a
-private charter, and the full door-to-door surcharge paid to the driver.
+settlement. Do not interpret that wording as Mireli commission. The confirmed
+charter rule is vehicle capacity × (selected stage fare + KSh 100 per seat),
+with Mireli retaining 10% of the charter fare (including the KSh 50 flat fee)
+and the driver receiving the rest plus the full door-to-door surcharge.
 
-The current fare model has one per-seat fare per stage and multiplies it by the
-number of booked seats; it has no vehicle-capacity fare tier. Therefore, the
-10/11-seater discount cannot be represented accurately until its rule is
-confirmed and the fare model and customer preview support capacity-based fares.
+The booking and settlement model now uses assigned vehicle capacity for charter
+pricing. The separate 10/11-seater discount in the supplied note remains
+unresolved, and no discount is inferred from the wording.
 
 Before entering these values, confirm the service origin/direction, whether
 each amount is per passenger and applies to both 4- and 7-seaters, the exact

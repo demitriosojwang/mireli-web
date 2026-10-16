@@ -27,6 +27,7 @@ import { api, useMe, detailsComplete, type PassengerDetails } from "@/lib/client
 import { ksh, fmtTime } from "@/lib/format";
 import { NATIONALITIES, DEFAULT_NATIONALITY } from "@/lib/nationalities";
 import { DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
+import { calculateCharterFare } from "@/lib/charter-pricing";
 import { Crown, Home, Loader2, MapPin, Ticket as TicketIcon, TrainFront, UserRound, AlarmClock, LogIn } from "lucide-react";
 import { DotBadge, Stars } from "@/components/app/shared";
 
@@ -86,6 +87,7 @@ interface CreateResponse {
     code: string;
     status: string;
     fareAmount: number;
+    isCharter: boolean;
     platformFeeAmount: number;
     creditApplied: number;
     cashDue: number;
@@ -181,10 +183,10 @@ function BookingSheetContent({
   const isGuest = me?.passenger?.isGuest ?? true;
   const guestUsed = me?.passenger?.guestUsed ?? false;
 
-  const fare = trip ? (draft?.charter ? trip.charterPrice : (stage?.fare || 0) * (draft?.seats || 1)) : 0;
+  const fare = trip ? (draft?.charter ? calculateCharterFare(trip.capacity, stage?.fare || 0) : (stage?.fare || 0) * (draft?.seats || 1)) : 0;
   const surcharge = draft?.homePickup ? (draft?.charter ? stage?.homeSurcharge || 0 : (stage?.homeSurcharge || 0) * (draft?.seats || 1)) : 0;
   const platformFeeAmount = trip?.platformFeeAmount ?? DEFAULT_BOOKING_FEE_AMOUNT;
-  const total = fare + surcharge + platformFeeAmount;
+  const total = fare + surcharge + (draft?.charter ? 0 : platformFeeAmount);
   const creditApplied = useCredit ? Math.min(creditBalance, total) : 0;
   const cashDue = total - creditApplied;
   const detailsOk = detailsComplete(details);
@@ -275,8 +277,15 @@ function BookingSheetContent({
                   {isCharter ? "Total fare" : draft.seats > 1 ? `${draft.seats} seats` : "Fare"}
                 </div>
                 <div className="text-2xl font-bold tabular-nums text-primary">{ksh(total)}</div>
-                <div className="text-[10px] text-muted-foreground">Includes {ksh(platformFeeAmount)} booking fee</div>
+                <div className="text-[10px] text-muted-foreground">
+                  {isCharter ? `${ksh(platformFeeAmount)} booking fee included in Mireli's 10% share` : `Includes ${ksh(platformFeeAmount)} booking fee`}
+                </div>
                 {surcharge > 0 && <div className="text-[10px] text-muted-foreground">Includes {ksh(surcharge)} door-to-door surcharge</div>}
+                {isCharter && (
+                  <div className="text-[10px] text-muted-foreground">
+                    {trip.capacity} seats × ({ksh(stage?.fare || 0)} stage fare + KSh 100 per seat)
+                  </div>
+                )}
                 {!isCharter && draft.seats > 1 && (
                   <div className="text-[10px] text-muted-foreground">
                     {draft.seats} × {ksh(stage?.fare || 0)}
@@ -305,7 +314,7 @@ function BookingSheetContent({
                   <span className="font-medium">{ksh(created.fareAmount)}</span>
                 </div>
                 <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>Booking fee</span>
+                  <span>{created.isCharter ? "Booking fee (included)" : "Booking fee"}</span>
                   <span>{ksh(created.platformFeeAmount)}</span>
                 </div>
                 {created.creditApplied > 0 && (
