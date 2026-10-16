@@ -99,6 +99,9 @@ RUN mkdir -p /app/.local /var/lib/postgresql/data \
  && chown postgres:postgres /var/lib/postgresql/data
 
 COPY --chmod=0755 docker/entrypoint.sh /usr/local/bin/mireli-entrypoint.sh
+# A Windows checkout can preserve CRLF in shell scripts. Normalize it in the
+# Linux image so the kernel can resolve the entrypoint's shebang.
+RUN sed -i 's/\r$//' /usr/local/bin/mireli-entrypoint.sh
 COPY --chown=nextjs:nodejs docker/bootstrap-platform-config.mjs /app/mireli-bootstrap.mjs
 
 EXPOSE 3000
