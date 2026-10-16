@@ -24,9 +24,13 @@ end-to-end gates below pass.
   than EIP `13.53.183.149`; a public HTTPS health request timed out. Rotate the
   exposed DuckDNS token, update its A record, then verify Caddy TLS and public
   health/status checks from outside AWS.
-- [ ] Confirm the full GitHub CI run for the latest commit, including both
-  application verification and the deployable ARM64 container build, before
-  releasing it.
+- [x] The latest application source commit `1d6b5ae` passed GitHub Actions on
+  16 October 2026: application verification, AWS infrastructure validation,
+  and AMD64/ARM64 production image builds all succeeded ([run 38946592991](https://github.com/demitriosojwang/mireli-web/actions/runs/38946592991)).
+- [ ] The AWS deployment workflow has not run for this feature branch. Its
+  production gate is restricted to successful builds on `main` with the AWS
+  OIDC deployment flag and role configured; GitHub OIDC deployment remains
+  disabled while AWS project policy denies creation of the OIDC provider.
 - [ ] GitHub OIDC deployment remains disabled because AWS project policy
   denied `iam:CreateOpenIDConnectProvider`. Do not configure static AWS keys
   in GitHub; use the documented short-lived AWS CLI/SSM release process until

@@ -21,6 +21,33 @@ and inbound SSH is intentionally closed. Use the individually authorized AWS
 Systems Manager (SSM) path below. Do not share a teammate's AWS profile, open
 port 22, or copy a private key to the VM.
 
+## Latest connection check after EC2 access validation (16 October 2026)
+
+- AWS CLI authentication succeeded for the Mireli project in `eu-north-1`.
+- EC2 reports this instance as `running`, at `13.53.183.149`, with no key pair
+  (`KeyName` is unset), and instance profile
+  `mireli-sgr-pilot-AppInstanceProfile-dqfW7OaoQlbY`.
+- The one SSH attempt from the development workstation to
+  `ec2-user@13.53.183.149` timed out on port 22. This is a network-path timeout,
+  not a rejected SSH key. The validation email did not change the instance key
+  pair or SSH ingress.
+- SSM reports the instance `Online` on Amazon Linux 2023, agent `3.3.5390.0`;
+  the last heartbeat returned by AWS was 16 October at 21:38 East Africa Time.
+- This workstation does not have `session-manager-plugin`, so an interactive
+  CLI session was not opened. Use the AWS Management Console's Session Manager
+  for a browser terminal, or install the official plugin before running
+  `aws ssm start-session`. Read-only SSM Run Command health checks succeeded
+  earlier on 16 October; no application or host changes were made in this
+  connection attempt.
+
+For another developer to use the same VM, invite them as an AWS project team
+member and grant only the SSM session permissions they need. They must use
+their own AWS sign-in. The VM is shared runtime infrastructure, not a shared
+development checkout; coordinate deployments and avoid editing the live
+container. Session Manager is the supported path. Only switch to SSH if the
+owner deliberately provisions a key pair and narrowly scopes TCP 22 to the
+developer's current IP.
+
 ## Connect with an individual AWS identity
 
 The VM is an SSM managed node and reported `Online` at the last check. Each
