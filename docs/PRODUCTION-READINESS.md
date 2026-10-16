@@ -9,6 +9,10 @@ approved route data are live.
 ## Latest live verification (16 October 2026)
 
 - [x] Production homepage responds with HTTP 200.
+- [x] The public production booking page shows the compact ride-choice layout,
+  but the drop-off control reports a load error because `/api/routes` returns
+  HTTP 503. The timetable remains unpublished and the page correctly shows zero
+  bookable cabs.
 - [ ] Production `/api/health` currently returns HTTP 404. The local worktree
   has a health handler, but it is not present in the deployed `main` source yet.
 - [ ] Production `/api/routes` responds with HTTP 503 and
@@ -20,10 +24,14 @@ approved route data are live.
   `/api/routes` also reads `PlatformConfig.bookingFeeAmount`, which was added
   by the 11 October migration, while Vercel builds only run migrations when
   `MIRELI_APPLY_DATABASE_MIGRATIONS=true`. Verify that flag and the production
-  migration status before changing the database. The current local branch now
-  logs only sanitized Prisma error codes and lets stage-count discovery fall
-  back to the confirmed KSh 50 display fee if the fee-config read alone fails;
-  this change has not been deployed or rechecked on Vercel.
+  migration status before changing the database. PR #4 now logs only sanitized
+  Prisma error codes and lets stage-count discovery fall back to the confirmed
+  KSh 50 display fee if the fee-config read alone fails; booking and trip APIs
+  still require full operating settings. GitHub Actions and the Vercel Preview
+  status passed for commit `568c349`, but the Preview is protected and the
+  connected Vercel account was denied team access (HTTP 403), so its API
+  behavior could not be independently verified. Production still runs the old
+  handler until the PR is merged and deployed.
 - [ ] Production `/api/trains` responds successfully with an empty train list.
 - [ ] Production `/api/trips` reports `hasEligibleDrivers: false` and no trips.
   `/api/v1/driver/status` reports strict mode (`simulation: false`), email
@@ -42,6 +50,9 @@ approved route data are live.
   proxy, provide a stable public HTTPS API origin and set the correct backend
   for each Vercel environment. A local Docker address is not reachable from
   Vercel.
+- [ ] Reconnect Vercel access for the project team, then inspect the protected
+  Preview and confirm its route, timetable, point-search, and driver-availability
+  responses before promoting the fix.
 - [ ] Investigate the production `/api/routes` runtime error, then load only the
   approved stage catalogue and timetable and complete a real staging booking
   through driver assignment and payment reconciliation.
@@ -227,3 +238,4 @@ not connect to Mireli's current Mombasa routes. It notes long-distance service
 on Friday, Saturday, and Sunday. Kenya Railways contact details printed on the
 PDF are www.krc.co.ke, info@krc.co.ke, 0709 907 000, and 0709 907 555; these
 are not Mireli customer-support contacts.
+
