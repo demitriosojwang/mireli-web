@@ -16,7 +16,9 @@ export default function robots(): MetadataRoute.Robots {
     rules: {
       userAgent: "*",
       allow: "/",
-      disallow: ["/admin/", "/api/", "/bookings/", "/credits/", "/login/"],
+      // These route roots have no trailing slash in Next.js; disallowing the
+      // prefix also covers nested admin/API/account paths.
+      disallow: ["/admin", "/api", "/bookings", "/credits", "/login"],
     },
     sitemap: `${SITE_ORIGIN}/sitemap.xml`,
   };
