@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   mpesaTransactionFindFirst: vi.fn(),
   mpesaTransactionCreate: vi.fn(),
   stkPush: vi.fn(),
+  resolveDaraja: vi.fn(),
   audit: vi.fn(),
 }));
 
@@ -29,7 +30,7 @@ vi.mock("@/lib/money", () => ({
   executeCancellation: vi.fn(),
   resolveRefundTier: vi.fn(),
 }));
-vi.mock("@/lib/daraja", () => ({ stkPush: mocks.stkPush }));
+vi.mock("@/lib/daraja", () => ({ stkPush: mocks.stkPush, resolveDaraja: mocks.resolveDaraja }));
 
 import { POST } from "@/app/api/bookings/[id]/route";
 
@@ -62,6 +63,7 @@ beforeEach(() => {
   mocks.mpesaTransactionFindFirst.mockResolvedValue(null);
   mocks.mpesaTransactionCreate.mockResolvedValue({ checkoutRequestId: "checkout-1" });
   mocks.stkPush.mockResolvedValue({ ok: true, checkoutRequestId: "checkout-1", merchantRequestId: "merchant-1" });
+  mocks.resolveDaraja.mockResolvedValue({ mode: "live" });
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -94,5 +96,20 @@ describe("booking payment route assignment guard", () => {
     expect(response.status).toBe(200);
     expect(mocks.stkPush).toHaveBeenCalledWith("+254712345678", 500, "MR-ABC123");
     expect(mocks.mpesaTransactionCreate).toHaveBeenCalledOnce();
+  });
+
+  it("tells the passenger not to pay again when Paybill reports an amount mismatch", async () => {
+    mocks.mpesaTransactionFindFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ amount: 600, merchantRequestId: "c2b-20261016120000" });
+
+    const response = await callPost({ action: "verify" });
+
+    expect(response.status).toBe(409);
+    const payload = await response.json();
+    expect(payload.paymentNeedsReview).toBe(true);
+    expect(payload.error).toContain("received a Paybill payment of KSh 600");
+    expect(payload.error).toContain("before paying again");
+    expect(mocks.resolveDaraja).not.toHaveBeenCalled();
   });
 });

@@ -150,6 +150,17 @@ export async function POST(req: NextRequest, { params }: Params) {
       if (booking.status === "confirmed" && booking.ledgerEntry) {
         return NextResponse.json({ ok: true, alreadyConfirmed: true, receipt: booking.ledgerEntry.mpesaReceipt, driver: driverContact() });
       }
+      const unmatchedPaybill = await db.mpesaTransaction.findFirst({
+        where: { bookingId: booking.id, merchantRequestId: { startsWith: "c2b-" }, status: "failed" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (unmatchedPaybill) {
+        const supportEmail = process.env.MIRELI_SUPPORT_EMAIL?.trim() || "mirelisgr001@gmail.com";
+        const error = unmatchedPaybill.amount > 0
+          ? `We received a Paybill payment of KSh ${unmatchedPaybill.amount}, but this booking requires exactly KSh ${booking.cashDue}. Please contact ${supportEmail} with reference ${booking.code} before paying again.`
+          : `We received a Paybill receipt for this booking that could not be matched to its fare. Please contact ${supportEmail} with reference ${booking.code} before paying again.`;
+        return NextResponse.json({ error, paymentNeedsReview: true }, { status: 409 });
+      }
       const creds = await daraja.resolveDaraja();
       if (creds.mode === "mock") {
         const receipt = daraja.generateMpesaReceipt();
