@@ -28,7 +28,11 @@ ENV NEXT_TELEMETRY_DISABLED=1 \
 # Prisma's engine download happens later, explicitly, in the build stage.
 FROM base AS deps
 COPY package.json package-lock.json ./
-RUN npm ci --ignore-scripts
+RUN npm ci --ignore-scripts --no-audit --no-fund \
+      --fetch-retries=5 \
+      --fetch-retry-mintimeout=20000 \
+      --fetch-retry-maxtimeout=120000 \
+      --fetch-timeout=300000
 
 # --- build ------------------------------------------------------------------
 FROM base AS build
