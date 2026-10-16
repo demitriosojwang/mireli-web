@@ -62,8 +62,9 @@ the intended web/API host; the local Docker stack does not serve production.
 - [x] Keep available cabs at zero when there are no active, approved drivers.
 - [x] Return that empty supply state before running the scheduling tick, and
   limit availability reads to approved-driver and booking-display fields.
-- [x] Return only the active customer-point count on initial booking load;
-  search at most 12 matching points on demand instead of downloading every stage.
+- [x] Count and search only active customer stops with a positive fare and a
+  non-negative door surcharge; return only that count on initial load and search
+  at most 12 matching points on demand instead of downloading every stage.
 - [x] Keep the stop picker request-free until the passenger enters at least two
   letters; opening it no longer sends a blank query or claims the catalogue is
   empty while only the search prompt is empty.

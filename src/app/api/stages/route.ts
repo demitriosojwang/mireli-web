@@ -18,6 +18,8 @@ export async function GET(req: NextRequest) {
     const matches = await db.routeStage.findMany({
       where: {
         order: { gt: 0 },
+        fare: { gt: 0 },
+        homeSurcharge: { gte: 0 },
         route: { is: { active: true } },
         OR: [
           { name: { contains: query, mode: "insensitive" } },

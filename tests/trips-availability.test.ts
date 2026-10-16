@@ -96,7 +96,38 @@ describe("customer trip availability", () => {
     expect(mocks.driverFindMany.mock.calls[0][0].select.application.select.documents.select)
       .toEqual({ type: true, state: true, scanState: true, expiresAt: true });
     expect(mocks.tripFindMany.mock.calls[0][0].select.route.select.stages.select)
-      .toEqual({ order: true, fare: true });
+      .toEqual({ order: true, fare: true, homeSurcharge: true });
+  });
+
+  it("hides active-driver trips that have no customer-bookable fare point", async () => {
+    mocks.driverFindMany.mockResolvedValue([eligibleDriver]);
+    mocks.tripFindMany.mockResolvedValue([{
+      id: "trip-invalid-stage",
+      routeId: "route-1",
+      driverId: eligibleDriver.id,
+      direction: "FROM_TERMINUS",
+      departureAt: new Date(Date.now() + 60 * 60 * 1000),
+      status: "scheduled",
+      capacity: 4,
+      route: {
+        id: "route-1",
+        name: "Mombasa Terminus ↔ North Coast",
+        durationMinutes: 90,
+        charterPrice: 4000,
+        stages: [
+          { id: "stage-0", name: "Mombasa Terminus", order: 0, fare: 0, homeSurcharge: 0 },
+          { id: "stage-1", name: "Unpriced stop", order: 1, fare: 0, homeSurcharge: 0 },
+        ],
+      },
+      driver: { name: "Approved Driver", plate: "KAA 123A", cabType: "Van", rating: 4.8 },
+      train: null,
+      bookings: [],
+    }]);
+
+    const response = await GET(request());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ hasEligibleDrivers: true, trips: [] });
   });
 
   it("returns a clear setup response instead of an unhandled error when booking settings are absent", async () => {

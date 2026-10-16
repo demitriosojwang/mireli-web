@@ -15,7 +15,12 @@ describe("public route catalogue on a fresh platform", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({bookingFeeAmount: 50, pointCount: 0});
     expect(query.pointCount).toHaveBeenCalledWith({
-      where: {order: {gt: 0}, route: {is: {active: true}}},
+      where: {
+        order: {gt: 0},
+        fare: {gt: 0},
+        homeSurcharge: {gte: 0},
+        route: {is: {active: true}},
+      },
     });
   });
   it("returns only the active customer-point count and configured booking fee", async () => {

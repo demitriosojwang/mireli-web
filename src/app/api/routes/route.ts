@@ -18,7 +18,12 @@ export async function GET() {
   try {
     // Stage details are fetched on demand by the bounded point-search endpoint.
     pointCount = await db.routeStage.count({
-      where: { order: { gt: 0 }, route: { is: { active: true } } },
+      where: {
+        order: { gt: 0 },
+        fare: { gt: 0 },
+        homeSurcharge: { gte: 0 },
+        route: { is: { active: true } },
+      },
     });
   } catch (error) {
     logCatalogueDatabaseError("point count", error);
