@@ -21,18 +21,18 @@ and inbound SSH is intentionally closed. Use the individually authorized AWS
 Systems Manager (SSM) path below. Do not share a teammate's AWS profile, open
 port 22, or copy a private key to the VM.
 
-## Latest connection check after EC2 access validation (16 October 2026)
+## Latest connection check after EC2 access validation (16 October 2026, 22:18 EAT)
 
 - AWS CLI authentication succeeded for the Mireli project in `eu-north-1`.
 - EC2 reports this instance as `running`, at `13.53.183.149`, with no key pair
   (`KeyName` is unset), and instance profile
   `mireli-sgr-pilot-AppInstanceProfile-dqfW7OaoQlbY`.
-- The one SSH attempt from the development workstation to
-  `ec2-user@13.53.183.149` timed out on port 22. This is a network-path timeout,
-  not a rejected SSH key. The validation email did not change the instance key
-  pair or SSH ingress.
+- A fresh SSH attempt from the development workstation to
+  `ec2-user@13.53.183.149` timed out on port 22. AWS reports no EC2 key pair,
+  and the security group allows inbound TCP 80 and 443 only; SSH is intentionally
+  closed. The validation email did not change the instance key pair or ingress.
 - SSM reports the instance `Online` on Amazon Linux 2023, agent `3.3.5390.0`;
-  the last heartbeat returned by AWS was 16 October at 21:38 East Africa Time.
+  the latest heartbeat returned by AWS was 16 October at 22:18 East Africa Time.
 - This workstation does not have `session-manager-plugin`, so an interactive
   CLI session was not opened. Use the AWS Management Console's Session Manager
   for a browser terminal, or install the official plugin before running
@@ -87,13 +87,15 @@ role and must never be copied into Android.
 
 ## Verified VM state
 
-On 16 October 2026, read-only SSM Run Command checks succeeded. Docker, Caddy,
-and `mireli-app` were active. The single Mireli container was healthy on image
-tag `794fb87`; `/api/health` returned `{"status":"ok"}`. Driver status returned
-strict mode (`simulation: false`), while phone sign-in, email sign-in,
-registration, and navigation were all closed. The interactive CLI shell could
-not start from the current workstation because its Session Manager plugin is
-not installed; SSM Run Command itself worked.
+On 16 October 2026 at 22:18 EAT, read-only SSM Run Command checks succeeded.
+Docker, Caddy, and `mireli-app` were active; `/api/health` returned
+`{"status":"ok"}`. Driver status returned strict mode (`simulation: false`),
+while phone sign-in, email sign-in, registration, and navigation were all
+closed; the API message says driver email sign-in is not configured. `/api/routes`
+reported `pointCount: 0`, and `/api/trains` returned an empty list, so there is
+no bookable production catalogue yet. The interactive CLI shell could not start
+from the current workstation because its Session Manager plugin is not
+installed; SSM Run Command itself worked. No VM or application changes were made.
 
 The public hostname still resolves to an old IP, not the VM's EIP, and public
 TLS has not been verified. The DuckDNS token previously shown in a screenshot
