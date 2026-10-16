@@ -76,8 +76,8 @@ if [ ! -s "$PGDATA/PG_VERSION" ]; then
   log "initializing PostgreSQL 16 data directory..."
   password_file=$(mktemp)
   chmod 0600 "$password_file"
-  chown postgres:postgres "$password_file"
   printf '%s\n' "$POSTGRES_PASSWORD" > "$password_file"
+  chown postgres:postgres "$password_file"
   if ! gosu postgres /usr/lib/postgresql/16/bin/initdb \
       --pgdata="$PGDATA" \
       --username="$POSTGRES_USER" \
