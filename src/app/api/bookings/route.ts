@@ -150,12 +150,26 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
+  if (typeof routeId !== "string" || routeId.length === 0 || typeof stageId !== "string" || stageId.length === 0) {
+    return NextResponse.json({ error: "Choose a published route and stop." }, { status: 400 });
+  }
+  if (typeof homePickup !== "boolean" || typeof isCharter !== "boolean" || typeof applyCredit !== "boolean") {
+    return NextResponse.json({ error: "Review your ride options and try again." }, { status: 400 });
+  }
 
   const cfg = await getConfig();
   const route = await db.route.findUnique({ where: { id: routeId }, include: { stages: true } });
-  if (!route) return NextResponse.json({ error: "Route not found" }, { status: 400 });
-  const stage = route.stages.find((s) => s.id === stageId);
-  if (!stage) return NextResponse.json({ error: "Pickup stage required" }, { status: 400 });
+  if (!route || !route.active) {
+    return NextResponse.json({ error: "This route is not currently open for booking." }, { status: 409 });
+  }
+  const stage = route.stages.find((s) => s.id === stageId && s.order > 0);
+  if (!stage) {
+    return NextResponse.json({ error: "Choose a published pickup or drop-off stop." }, { status: 409 });
+  }
+  if (!Number.isSafeInteger(stage.fare) || stage.fare <= 0 ||
+      !Number.isSafeInteger(stage.homeSurcharge) || stage.homeSurcharge < 0) {
+    return NextResponse.json({ error: "This stop's fare is not configured for booking yet." }, { status: 503 });
+  }
   if (homePickup && (!homeAddress || String(homeAddress).trim().length < 5)) {
     return NextResponse.json({ error: "Home pickup needs an address" }, { status: 400 });
   }

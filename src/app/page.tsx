@@ -22,6 +22,7 @@ import { api, useMe } from "@/lib/client";
 import { fmtTime, ksh } from "@/lib/format";
 import { DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
 import { calculateCharterFare } from "@/lib/charter-pricing";
+import { MAX_STAGE_SEARCH_LENGTH, MIN_STAGE_SEARCH_LENGTH, isStageSearchReady, shouldSearchStagePoints } from "@/lib/stage-search";
 import { SplashScreen, useSplashOnce } from "@/components/app/splash-screen";
 import {
   DatePicker,
@@ -196,7 +197,10 @@ export default function Home() {
 
   useEffect(() => {
     const query = pointSearch.trim();
-    if (!pointPickerOpen || query.length === 1) return;
+    // The public search endpoint deliberately requires at least two
+    // characters and caps its response. Never request the full catalogue when
+    // the picker opens with an empty query.
+    if (!shouldSearchStagePoints(query, pointPickerOpen)) return;
 
     const controller = new AbortController();
     const timeout = window.setTimeout(() => {
@@ -452,7 +456,7 @@ export default function Home() {
                   <MapPin className="h-3.5 w-3.5" /> {pointLabelCap} point
                 </div>
                 {selectedPoint && (
-                  <button onClick={() => setSelectedPoint(null)} className="text-[11px] text-primary hover:underline">
+                  <button onClick={() => { setSelectedPoint(null); setHomePickup(false); }} className="text-[11px] text-primary hover:underline">
                     Clear selection
                   </button>
                 )}
@@ -475,11 +479,10 @@ export default function Home() {
                     open={pointPickerOpen}
                     onOpenChange={(open) => {
                       setPointPickerOpen(open);
-                      setPointSearchStatus(open ? "loading" : "idle");
+                      setPointSearchStatus("idle");
                       if (!open) {
                         setPointSearch("");
                         setPointMatches([]);
-                        setPointSearchStatus("idle");
                         setPointSearchHasMore(false);
                       }
                     }}
@@ -507,25 +510,28 @@ export default function Home() {
                       <Command shouldFilter={false}>
                         <CommandInput
                           value={pointSearch}
+                          maxLength={MAX_STAGE_SEARCH_LENGTH}
                           onValueChange={(value) => {
                             setPointSearch(value);
                             setPointMatches([]);
-                            setPointSearchStatus(value.trim().length >= 2 ? "loading" : "idle");
+                            setPointSearchStatus(isStageSearchReady(value) ? "loading" : "idle");
                             setPointSearchHasMore(false);
                           }}
-                          placeholder={`Search ${pointLabelCap.toLowerCase()} points or browse stops…`}
+                          placeholder={`Search ${pointLabelCap.toLowerCase()} stops by name or area`}
                         />
                         <CommandList className="max-h-60">
-                          {pointSearch.trim().length === 1 && (
-                            <p className="px-3 py-5 text-center text-sm text-muted-foreground">
-                              Type one more letter to search, or clear it to browse stops.
+                          {pointSearch.trim().length === 0 && (
+                            <p className="px-3 py-5 text-center text-sm text-muted-foreground" role="status">
+                              Type at least two letters to find a stop.
                             </p>
                           )}
-                          {pointSearchStatus === "loading" && pointSearch.trim().length >= 2 && (
-                            <p className="px-3 py-5 text-center text-sm text-muted-foreground">Searching points…</p>
+                          {pointSearch.trim().length > 0 && pointSearch.trim().length < MIN_STAGE_SEARCH_LENGTH && (
+                            <p className="px-3 py-5 text-center text-sm text-muted-foreground" role="status">
+                              Type one more letter to search.
+                            </p>
                           )}
-                          {pointSearchStatus === "loading" && pointSearch.trim().length === 0 && (
-                            <p className="px-3 py-5 text-center text-sm text-muted-foreground">Loading available stops…</p>
+                          {pointSearchStatus === "loading" && pointSearch.trim().length >= MIN_STAGE_SEARCH_LENGTH && (
+                            <p className="px-3 py-5 text-center text-sm text-muted-foreground">Searching points…</p>
                           )}
                           {pointSearchStatus === "error" && (
                             <p className="px-3 py-5 text-center text-sm text-muted-foreground" role="alert">
@@ -534,9 +540,7 @@ export default function Home() {
                           )}
                           {pointSearchStatus === "empty" && (
                             <p className="px-3 py-5 text-center text-sm text-muted-foreground">
-                              {pointSearch.trim()
-                                ? "No matching stop. Try another area or stop name."
-                                : "No stops are published yet. Please check back soon."}
+                              No matching stop. Try another area or stop name.
                             </p>
                           )}
                           {pointGroups.map(({ route, coast, points }) => (
@@ -589,7 +593,7 @@ export default function Home() {
               )}
             </div>
 
-            {/* Ride type and door service: a single compact choice step. */}
+            {/* Ride type and door service: compact choices with explicit states. */}
             <section className="space-y-2.5" aria-labelledby="ride-options-title">
               <div className="flex items-baseline justify-between">
                 <h2 id="ride-options-title" className="text-sm font-semibold">Choose your ride</h2>
@@ -626,27 +630,44 @@ export default function Home() {
                 </button>
               </div>
 
-              <button
-                type="button"
-                aria-pressed={homePickup}
-                disabled={!selectedPoint}
-                onClick={() => setHomePickup((selected) => !selected)}
-                className={cn("flex w-full items-center gap-3 rounded-xl border bg-card p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60", homePickup && "border-primary/50 bg-primary/5")}
-              >
-                <span className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded border", homePickup ? "border-primary bg-primary text-primary-foreground" : "border-input bg-background")}>
-                  {homePickup && <Check className="h-3.5 w-3.5" />}
-                </span>
-                <HomeIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium">Door-to-door {direction === "FROM_TERMINUS" ? "drop-off" : "pickup"}</span>
-                  <span className="block text-[11px] text-muted-foreground">
-                    {selectedPoint
-                      ? `Add ${ksh((selectedPoint.point.homeSurcharge || 0) * (charter ? 1 : seats))} · paid to your driver`
-                      : "Choose a point to see this option"}
-                  </span>
-                </span>
-                <span className="sr-only">{homePickup ? "Selected" : "Not selected"}</span>
-              </button>
+              <fieldset className="space-y-2">
+                <legend className="text-xs font-medium text-muted-foreground">
+                  {direction === "FROM_TERMINUS" ? "Where should we drop you?" : "Where should we pick you up?"}
+                </legend>
+                <div role="group" aria-label={`${pointLabelCap} preference`} className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    aria-pressed={!homePickup}
+                    onClick={() => setHomePickup(false)}
+                    className={cn("min-h-[76px] rounded-xl border bg-card p-3 text-left transition-colors", !homePickup ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
+                  >
+                    <span className="flex items-center gap-1.5 text-sm font-medium">
+                      <MapPin className="h-3.5 w-3.5 shrink-0 text-primary" /> At the stage
+                    </span>
+                    <span className="mt-1 block truncate text-[11px] text-muted-foreground">
+                      {selectedPoint?.point.name ?? "Choose a stop first"}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={homePickup}
+                    disabled={!selectedPoint}
+                    onClick={() => setHomePickup(true)}
+                    className={cn("min-h-[76px] rounded-xl border bg-card p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-55", homePickup ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
+                  >
+                    <span className="flex items-center gap-1.5 text-sm font-medium">
+                      <HomeIcon className="h-3.5 w-3.5 shrink-0 text-primary" /> Door-to-door
+                    </span>
+                    <span className="mt-1 block text-[11px] text-muted-foreground">
+                      {selectedPoint
+                        ? (selectedPoint.point.homeSurcharge > 0
+                          ? `+${ksh(selectedPoint.point.homeSurcharge * (charter ? 1 : seats))} · paid to driver`
+                          : "No extra charge")
+                        : "Choose a stop first"}
+                    </span>
+                  </button>
+                </div>
+              </fieldset>
 
               <div className="flex items-center justify-between rounded-xl border bg-card px-3.5 py-3">
                 <span>

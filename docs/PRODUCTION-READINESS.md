@@ -6,22 +6,27 @@ is empty, there is no approved driver, and live payment/email credentials have
 not been installed. Keep pooled cabs at zero and do not accept payment until the
 end-to-end gates below pass.
 
-## AWS deployment state (16 October 2026)
+## AWS deployment state (read-only SSM verification, 16 October 2026)
 
 - [x] EC2 `i-097df027e02b0708f` is running in `eu-north-1`, with SSM Online.
-- [x] The one `mireli` container runs the web frontend, API, and PostgreSQL on
-  image `794fb87`; Caddy and Docker are active on the host.
+- [x] One `mireli` Docker container is healthy on image `794fb87`; Caddy and
+  Docker are active on the host.
 - [x] Internal `GET /api/health` returns `{"status":"ok"}`.
+- [x] Internal `GET /api/routes` returns `pointCount: 0` and the confirmed
+  KSh 50 booking fee; `GET /api/trains` returns no trains; a stop search returns
+  no points. The production catalogue is therefore genuinely empty.
 - [x] Driver API is strict (`simulation: false`). Phone/email sign-in,
   registration, and navigation are currently closed.
+- [x] No driver or stop data was added to make the booking UI look populated.
 - [x] Local Docker is a test environment only. The AWS VM continues serving
   independently when the developer's computer is off.
 - [ ] `mirelisgr.duckdns.org` still resolves to old IP `105.161.112.67` rather
-  than EIP `13.53.183.149`. Rotate the exposed DuckDNS token, update its A
-  record, then verify Caddy TLS and public health/status checks.
-- [ ] Workflow run `38899005958` passed application and AWS-template checks
-  for commit `54dc413`; its ARM64 release-image check was still running at the
-  last check. Confirm completion before releasing it.
+  than EIP `13.53.183.149`; a public HTTPS health request timed out. Rotate the
+  exposed DuckDNS token, update its A record, then verify Caddy TLS and public
+  health/status checks from outside AWS.
+- [ ] Confirm the full GitHub CI run for the latest commit, including both
+  application verification and the deployable ARM64 container build, before
+  releasing it.
 - [ ] GitHub OIDC deployment remains disabled because AWS project policy
   denied `iam:CreateOpenIDConnectProvider`. Do not configure static AWS keys
   in GitHub; use the documented short-lived AWS CLI/SSM release process until
@@ -47,11 +52,19 @@ the intended web/API host; the local Docker stack does not serve production.
   show a retryable booking-session error and block booking submission when
   passenger identity could not be initialized.
 - [x] Require an explicit pickup/drop-off point before a cab can be booked.
+- [x] Revalidate the route is active and the selected stage is a published
+  non-terminus stop in the booking API; reject malformed ride-option booleans
+  and invalid fare data before writing a booking.
 - [x] Keep available cabs at zero when there are no active, approved drivers.
 - [x] Return that empty supply state before running the scheduling tick, and
   limit availability reads to approved-driver and booking-display fields.
 - [x] Return only the active customer-point count on initial booking load;
   search at most 12 matching points on demand instead of downloading every stage.
+- [x] Keep the stop picker request-free until the passenger enters at least two
+  letters; opening it no longer sends a blank query or claims the catalogue is
+  empty while only the search prompt is empty.
+- [x] Present stage and door-to-door service as explicit, compact choices;
+  show the door surcharge with its full driver pass-through before booking.
 - [x] Keep customer stop discovery independent of the booking-fee config read;
   use the confirmed KSh 50 display fee as a discovery fallback and log only a
   sanitized database error code. Trip and booking APIs still require full

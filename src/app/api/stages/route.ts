@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { MAX_STAGE_SEARCH_LENGTH, isStageSearchReady } from "@/lib/stage-search";
 
 const SEARCH_LIMIT = 12;
-const MIN_QUERY_LENGTH = 2;
 
 /** Search active route stops on demand instead of sending the whole network to every customer. */
 export async function GET(req: NextRequest) {
   const query = req.nextUrl.searchParams.get("q")?.trim() ?? "";
-  if (query.length > 80) {
+  if (query.length > MAX_STAGE_SEARCH_LENGTH) {
     return NextResponse.json({ error: "Point search is too long." }, { status: 400 });
   }
-  if (query.length < MIN_QUERY_LENGTH) {
+  if (!isStageSearchReady(query)) {
     return NextResponse.json({ points: [], hasMore: false });
   }
 

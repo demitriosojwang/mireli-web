@@ -58,14 +58,31 @@ const request = (body: unknown) => new NextRequest("https://mireli.test/api/book
   headers: { "content-type": "application/json" },
 });
 
+const validBookingBody = (overrides: Record<string, unknown> = {}) => ({
+  routeId: "route-1",
+  stageId: "stage-1",
+  direction: "FROM_TERMINUS",
+  travelDate: "2026-10-16",
+  passengerName: "Amina Wanjiru",
+  passengerPhone: "0712345678",
+  passengerEmail: "amina@example.com",
+  passengerIdType: "id",
+  passengerIdNumber: "12345678",
+  passengerNationality: "Kenyan",
+  passengerGender: "female",
+  seats: 1,
+  ...overrides,
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getPassengerSession.mockResolvedValue({ id: "guest-1", name: "Amina Wanjiru" });
   mocks.getConfig.mockResolvedValue({ bookingFeeAmount: 50, commissionRate: 0.1 });
   mocks.routeFindUnique.mockResolvedValue({
     id: "route-1",
+    active: true,
     charterPrice: 4200,
-    stages: [{ id: "stage-1", name: "Nyali", fare: 500, homeSurcharge: 150 }],
+    stages: [{ id: "stage-1", name: "Nyali", order: 1, fare: 500, homeSurcharge: 150 }],
   });
   mocks.passengerFindUnique.mockResolvedValue({ id: "guest-1", phone: "guest-local-1" });
   mocks.bookingCount.mockResolvedValue(0);
@@ -80,6 +97,84 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("booking creation with no driver supply", () => {
+  it("rejects malformed ride-option flags before loading booking configuration", async () => {
+    const response = await POST(request(validBookingBody({ homePickup: "true" })));
+
+    expect(response.status).toBe(400);
+    expect(mocks.getConfig).not.toHaveBeenCalled();
+    expect(mocks.routeFindUnique).not.toHaveBeenCalled();
+    expect(mocks.bookingCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects an inactive route before creating a booking", async () => {
+    mocks.routeFindUnique.mockResolvedValue({
+      id: "route-1",
+      active: false,
+      stages: [{ id: "stage-1", name: "Nyali", order: 1, fare: 500, homeSurcharge: 150 }],
+    });
+
+    const response = await POST(request({
+      routeId: "route-1",
+      stageId: "stage-1",
+      travelDate: "2026-10-16",
+      passengerName: "Amina Wanjiru",
+      passengerPhone: "0712345678",
+      passengerEmail: "amina@example.com",
+      passengerIdType: "id",
+      passengerIdNumber: "12345678",
+      passengerNationality: "Kenyan",
+      passengerGender: "female",
+      seats: 1,
+    }));
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toContain("not currently open");
+    expect(mocks.bookingCreate).not.toHaveBeenCalled();
+    expect(mocks.allocateBooking).not.toHaveBeenCalled();
+  });
+
+  it("rejects a published stop with invalid fare data before creating a booking", async () => {
+    mocks.routeFindUnique.mockResolvedValue({
+      id: "route-1",
+      active: true,
+      stages: [{ id: "stage-1", name: "Nyali", order: 1, fare: 0, homeSurcharge: 150 }],
+    });
+
+    const response = await POST(request(validBookingBody()));
+
+    expect(response.status).toBe(503);
+    expect((await response.json()).error).toContain("fare is not configured");
+    expect(mocks.bookingCreate).not.toHaveBeenCalled();
+    expect(mocks.allocateBooking).not.toHaveBeenCalled();
+  });
+
+  it("rejects the terminus row because it is not a customer-selectable stop", async () => {
+    mocks.routeFindUnique.mockResolvedValue({
+      id: "route-1",
+      active: true,
+      stages: [{ id: "terminus", name: "Mombasa Terminus", order: 0, fare: 0, homeSurcharge: 0 }],
+    });
+
+    const response = await POST(request({
+      routeId: "route-1",
+      stageId: "terminus",
+      travelDate: "2026-10-16",
+      passengerName: "Amina Wanjiru",
+      passengerPhone: "0712345678",
+      passengerEmail: "amina@example.com",
+      passengerIdType: "id",
+      passengerIdNumber: "12345678",
+      passengerNationality: "Kenyan",
+      passengerGender: "female",
+      seats: 1,
+    }));
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toContain("published pickup or drop-off");
+    expect(mocks.bookingCreate).not.toHaveBeenCalled();
+    expect(mocks.allocateBooking).not.toHaveBeenCalled();
+  });
+
   it("removes the unpaid draft and tells the passenger no payment was taken", async () => {
     const response = await POST(request({
       routeId: "route-1",
@@ -108,8 +203,9 @@ describe("booking creation with no driver supply", () => {
     mocks.passengerFindUnique.mockResolvedValue({ id: "passenger-1", phone: "+254712345678" });
     mocks.routeFindUnique.mockResolvedValue({
       id: "route-1",
+      active: true,
       charterPrice: 4200,
-      stages: [{ id: "stage-1", name: "Nyali", fare: 400, homeSurcharge: 150 }],
+      stages: [{ id: "stage-1", name: "Nyali", order: 1, fare: 400, homeSurcharge: 150 }],
     });
     mocks.allocateBooking.mockResolvedValue({ tripId: "trip-1", note: "Charter allocated" });
     mocks.bookingFindUnique.mockResolvedValue({
