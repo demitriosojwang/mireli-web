@@ -9,9 +9,9 @@ import { resolveDaraja, RESULT_CODES, generateMpesaReceipt } from "@/lib/daraja"
  *
  * This is what fires when a passenger pays the platform Pay Bill manually
  * (the "Pay bill" option in the Pay Sheet). BillRefNumber carries the Mi-Reli
- * booking code (the account number the passenger typed). An exact-amount
- * payment confirms the booking into the ledger; an underpayment is recorded
- * and surfaces in Admin → Reconciliation for a human decision.
+ * booking code (the account number the passenger typed). Only an exact-amount
+ * payment confirms a booking; underpayments, overpayments, and payments for
+ * closed bookings stay visible for finance review.
  */
 export async function POST(req: NextRequest) {
   const accepted = NextResponse.json({ ResultCode: 0, ResultDesc: "Accepted" });
@@ -63,8 +63,10 @@ export async function POST(req: NextRequest) {
     const existing = await db.mpesaTransaction.findUnique({ where: { checkoutRequestId: transId } }).catch(() => null);
     if (existing) return accepted;
 
-    const amount = Math.round(Number(body.TransAmount || 0));
-    const enough = amount >= booking.cashDue && booking.status === "awaiting_payment" && !booking.ledgerEntry;
+    const receivedAmount = Number(body.TransAmount);
+    const validAmount = Number.isSafeInteger(receivedAmount) && receivedAmount > 0;
+    const amount = validAmount ? receivedAmount : 0;
+    const enough = validAmount && amount === booking.cashDue && booking.status === "awaiting_payment" && !booking.ledgerEntry;
     const receipt = transId; // C2B confirmations carry the real M-Pesa receipt
 
     await db.mpesaTransaction.create({
@@ -78,7 +80,11 @@ export async function POST(req: NextRequest) {
         resultCode: enough ? RESULT_CODES.SUCCESS : "4001",
         resultDesc: enough
           ? "C2B confirmation — paybill payment matched to booking"
-          : `C2B received KSh ${amount} but ${booking.status === "awaiting_payment" ? `booking needs KSh ${booking.cashDue}` : `booking is ${booking.status}`}`,
+          : !validAmount
+            ? "C2B payment has an invalid amount and needs finance review"
+            : amount !== booking.cashDue
+              ? `C2B amount mismatch: received KSh ${amount}; booking requires exactly KSh ${booking.cashDue}`
+              : `C2B payment received but booking is ${booking.status}`,
         mpesaReceipt: receipt,
         confirmedAt: enough ? new Date() : null,
       },
@@ -106,7 +112,7 @@ export async function POST(req: NextRequest) {
         action: "payment.c2b_mismatch",
         entity: "booking",
         entityId: booking.id,
-        metadata: { code: booking.code, receipt, amount, bookingStatus: booking.status },
+        metadata: { code: booking.code, receipt, amount: validAmount ? amount : null, bookingStatus: booking.status },
       });
     }
   } catch {

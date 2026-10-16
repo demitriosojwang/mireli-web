@@ -142,6 +142,9 @@ the intended web/API host; the local Docker stack does not serve production.
 - [x] Recover confirmed M-Pesa transactions whose ledger write failed. A capture
   arriving after a cancelled/no-show booking is kept in the held ledger, does not
   reopen the booking or send a ticket, and appears in the admin exceptions view.
+- [x] Confirm Paybill bookings only when the received amount exactly matches the
+  amount due. Mismatched receipts stay unconfirmed and appear in the admin
+  exceptions view with received and expected amounts.
 - [ ] Add durable, correlated production refund attempts and settle them only from
   verified Daraja results. The current B2C/reversal callback is audit-only, so
   live refunds still need end-to-end implementation and provider sandbox tests.

@@ -26,6 +26,7 @@ interface Overview {
     failedRefunds: { id: string; code: string; amount: number; reason: string | null }[];
     ambiguousPayments: number;
     closedBookingCaptures: { id: string; code: string; amount: number; status: string }[];
+    paybillMismatches: { id: string; code: string; received: number; expected: number }[];
     unallocatedBookings: number;
     creditLiability: number;
     activeCredits: number;
@@ -43,6 +44,7 @@ export default function AdminOverview() {
     data.alerts.failedPayouts.length +
     data.alerts.failedRefunds.length +
     data.alerts.closedBookingCaptures.length +
+    data.alerts.paybillMismatches.length +
     (data.alerts.ambiguousPayments > 0 ? 1 : 0) +
     (data.alerts.unallocatedBookings > 0 ? 1 : 0);
 
@@ -102,8 +104,8 @@ export default function AdminOverview() {
         <CardContent className="space-y-3">
           {alertCount === 0 && (
             <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-900">
-              All clear — no stuck refunds, failed transfers, ambiguous payments, late captures or
-              unallocated bookings.
+              All clear — no stuck refunds, failed transfers, ambiguous payments, late captures,
+              Paybill mismatches or unallocated bookings.
             </p>
           )}
           {data.alerts.stuckRefunds.length > 0 && (
@@ -144,6 +146,14 @@ export default function AdminOverview() {
               detail={data.alerts.closedBookingCaptures.map((p) => `${p.code} (${ksh(p.amount)} · ${p.status})`).join(", ")}
               href="/admin/bookings"
               cta="Review captured payments"
+            />
+          )}
+          {data.alerts.paybillMismatches.length > 0 && (
+            <AlertRow
+              title={`${data.alerts.paybillMismatches.length} Paybill payment(s) need amount review`}
+              detail={data.alerts.paybillMismatches.map((p) => `${p.code}: received ${ksh(p.received)}, due ${ksh(p.expected)}`).join(" · ")}
+              href="/admin/reconciliation"
+              cta="Review payment receipts"
             />
           )}
           {data.alerts.unallocatedBookings > 0 && (

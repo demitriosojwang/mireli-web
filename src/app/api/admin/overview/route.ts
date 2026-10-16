@@ -73,6 +73,12 @@ export async function GET() {
     take: 50,
     include: { booking: true },
   });
+  const paybillMismatches = await db.mpesaTransaction.findMany({
+    where: { status: "failed", merchantRequestId: { startsWith: "c2b-" } },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+    include: { booking: true },
+  });
   const unallocated = await db.booking.findMany({
     where: { tripId: null, status: { in: ["awaiting_payment", "confirmed"] } },
   });
@@ -112,6 +118,12 @@ export async function GET() {
         code: tx.booking.code,
         amount: tx.amount,
         status: tx.booking.status,
+      })),
+      paybillMismatches: paybillMismatches.map((tx) => ({
+        id: tx.id,
+        code: tx.booking.code,
+        received: tx.amount,
+        expected: tx.booking.cashDue,
       })),
       unallocatedBookings: unallocated.length,
       creditLiability: activeCredits.reduce((s, c) => s + c.amount, 0),
