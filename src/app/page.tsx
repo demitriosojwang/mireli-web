@@ -21,6 +21,8 @@ import {
 import { api, useMe } from "@/lib/client";
 import { fmtTime, ksh } from "@/lib/format";
 import { DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
+import { calculateCharterFare } from "@/lib/charter-pricing";
+import { MAX_STAGE_SEARCH_LENGTH, MIN_STAGE_SEARCH_LENGTH, isStageSearchReady, shouldSearchStagePoints } from "@/lib/stage-search";
 import { SplashScreen, useSplashOnce } from "@/components/app/splash-screen";
 import {
   DatePicker,
@@ -31,6 +33,7 @@ import {
   TrainPill,
   CharterBadge,
   fmtDateShort,
+  todayStr,
 } from "@/components/app/shared";
 import {
   Anchor,
@@ -110,10 +113,7 @@ export default function Home() {
   const showSplash = splashSeen && !splashDone;
 
   const [direction, setDirection] = useState<"FROM_TERMINUS" | "TO_TERMINUS">("FROM_TERMINUS");
-  const [date, setDate] = useState(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  });
+  const [date, setDate] = useState(() => todayStr());
   const [pointCount, setPointCount] = useState(0);
   const [bookingFeeAmount, setBookingFeeAmount] = useState(DEFAULT_BOOKING_FEE_AMOUNT);
   const [routesStatus, setRoutesStatus] = useState<CatalogueStatus>("loading");
@@ -197,7 +197,10 @@ export default function Home() {
 
   useEffect(() => {
     const query = pointSearch.trim();
-    if (!pointPickerOpen || query.length < 2) return;
+    // The public search endpoint deliberately requires at least two
+    // characters and caps its response. Never request the full catalogue when
+    // the picker opens with an empty query.
+    if (!shouldSearchStagePoints(query, pointPickerOpen)) return;
 
     const controller = new AbortController();
     const timeout = window.setTimeout(() => {
@@ -217,7 +220,7 @@ export default function Home() {
           setPointSearchHasMore(false);
           setPointSearchStatus("error");
         });
-    }, 250);
+    }, query.length >= 2 ? 250 : 0);
 
     return () => {
       window.clearTimeout(timeout);
@@ -341,13 +344,24 @@ export default function Home() {
   // Live fare preview
   const previewStage = selectedPoint?.point;
   const farePreview = (() => {
+    const charterFares = charter && previewStage
+      ? visibleTrips
+          .filter((trip) => trip.routeId === selectedPoint?.route.id)
+          .map((trip) => calculateCharterFare(trip.capacity, previewStage.fare))
+      : [];
     const base = charter
-      ? selectedPoint?.route.charterPrice ?? 0
+      ? charterFares.length > 0 ? Math.min(...charterFares) : 0
       : (previewStage?.fare || 0) * seats;
     const surcharge = homePickup
       ? (charter ? previewStage?.homeSurcharge || 0 : (previewStage?.homeSurcharge || 0) * seats)
       : 0;
-    return { base, surcharge, platformFee: selectedPoint ? bookingFeeAmount : 0, total: base + surcharge + (selectedPoint ? bookingFeeAmount : 0) };
+    return {
+      base,
+      surcharge,
+      platformFee: selectedPoint ? bookingFeeAmount : 0,
+      hasCharterCab: charterFares.length > 0,
+      total: base + surcharge + (selectedPoint && !charter ? bookingFeeAmount : 0),
+    };
   })();
 
   /* ─── Splash (after all hooks) ───────────────────────────────────────────── */
@@ -442,31 +456,33 @@ export default function Home() {
                   <MapPin className="h-3.5 w-3.5" /> {pointLabelCap} point
                 </div>
                 {selectedPoint && (
-                  <button onClick={() => setSelectedPoint(null)} className="text-[11px] text-primary hover:underline">
+                  <button onClick={() => { setSelectedPoint(null); setHomePickup(false); }} className="text-[11px] text-primary hover:underline">
                     Clear selection
                   </button>
                 )}
               </div>
               {routesStatus === "loading" ? (
                 <Skeleton className="h-11 w-full" />
-              ) : routesStatus === "error" ? (
-                <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-muted-foreground">
-                  {pointLabelCap} points could not load. <button type="button" className="font-medium text-primary underline underline-offset-2" onClick={retryCatalogues}>Try again</button>
-                </div>
-              ) : routesStatus === "empty" || pointCount === 0 ? (
+              ) : routesStatus === "empty" || (routesStatus === "ready" && pointCount === 0) ? (
                 <div className="rounded-xl border border-dashed bg-card px-4 py-3 text-sm text-muted-foreground">
                   {pointLabelCap} points are being set up. Bookings open when the route list is published.
                 </div>
               ) : (
                 <div className="space-y-1.5">
+                  {routesStatus === "error" && (
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950" role="status">
+                      <span>We couldn’t check the full point list. Search to see whether your stop is available.</span>
+                      <button type="button" className="shrink-0 font-medium underline underline-offset-2" onClick={retryCatalogues}>Retry</button>
+                    </div>
+                  )}
                   <Popover
                     open={pointPickerOpen}
                     onOpenChange={(open) => {
                       setPointPickerOpen(open);
+                      setPointSearchStatus("idle");
                       if (!open) {
                         setPointSearch("");
                         setPointMatches([]);
-                        setPointSearchStatus("idle");
                         setPointSearchHasMore(false);
                       }
                     }}
@@ -494,21 +510,27 @@ export default function Home() {
                       <Command shouldFilter={false}>
                         <CommandInput
                           value={pointSearch}
+                          maxLength={MAX_STAGE_SEARCH_LENGTH}
                           onValueChange={(value) => {
                             setPointSearch(value);
                             setPointMatches([]);
-                            setPointSearchStatus(value.trim().length >= 2 ? "loading" : "idle");
+                            setPointSearchStatus(isStageSearchReady(value) ? "loading" : "idle");
                             setPointSearchHasMore(false);
                           }}
-                          placeholder={`Search ${pointLabelCap.toLowerCase()} points…`}
+                          placeholder={`Search ${pointLabelCap.toLowerCase()} stops by name or area`}
                         />
                         <CommandList className="max-h-60">
-                          {pointSearch.trim().length < 2 && (
-                            <p className="px-3 py-5 text-center text-sm text-muted-foreground">
-                              Type at least 2 letters to find a point.
+                          {pointSearch.trim().length === 0 && (
+                            <p className="px-3 py-5 text-center text-sm text-muted-foreground" role="status">
+                              Type at least two letters to find a stop.
                             </p>
                           )}
-                          {pointSearchStatus === "loading" && pointSearch.trim().length >= 2 && (
+                          {pointSearch.trim().length > 0 && pointSearch.trim().length < MIN_STAGE_SEARCH_LENGTH && (
+                            <p className="px-3 py-5 text-center text-sm text-muted-foreground" role="status">
+                              Type one more letter to search.
+                            </p>
+                          )}
+                          {pointSearchStatus === "loading" && pointSearch.trim().length >= MIN_STAGE_SEARCH_LENGTH && (
                             <p className="px-3 py-5 text-center text-sm text-muted-foreground">Searching points…</p>
                           )}
                           {pointSearchStatus === "error" && (
@@ -518,7 +540,7 @@ export default function Home() {
                           )}
                           {pointSearchStatus === "empty" && (
                             <p className="px-3 py-5 text-center text-sm text-muted-foreground">
-                              No matching point. Try another area or stop name.
+                              No matching stop. Try another area or stop name.
                             </p>
                           )}
                           {pointGroups.map(({ route, coast, points }) => (
@@ -556,7 +578,7 @@ export default function Home() {
                         </CommandList>
                         {pointSearchHasMore && pointSearchStatus === "ready" && (
                           <p className="border-t px-3 py-2 text-xs text-muted-foreground">
-                            Showing 12 matches. Add more letters to narrow your search.
+                            Showing 12 stops. Search by name to find another stop.
                           </p>
                         )}
                       </Command>
@@ -571,7 +593,7 @@ export default function Home() {
               )}
             </div>
 
-            {/* Ride type and door service: a single compact choice step. */}
+            {/* Ride type and door service: compact choices with explicit states. */}
             <section className="space-y-2.5" aria-labelledby="ride-options-title">
               <div className="flex items-baseline justify-between">
                 <h2 id="ride-options-title" className="text-sm font-semibold">Choose your ride</h2>
@@ -608,37 +630,64 @@ export default function Home() {
                 </button>
               </div>
 
-              <button
-                type="button"
-                aria-pressed={homePickup}
-                disabled={!selectedPoint}
-                onClick={() => setHomePickup((selected) => !selected)}
-                className={cn("flex w-full items-center gap-3 rounded-xl border bg-card p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60", homePickup && "border-primary/50 bg-primary/5")}
-              >
-                <span className={cn("flex h-5 w-5 shrink-0 items-center justify-center rounded border", homePickup ? "border-primary bg-primary text-primary-foreground" : "border-input bg-background")}>
-                  {homePickup && <Check className="h-3.5 w-3.5" />}
-                </span>
-                <HomeIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium">Door-to-door {direction === "FROM_TERMINUS" ? "drop-off" : "pickup"}</span>
-                  <span className="block text-[11px] text-muted-foreground">
-                    {selectedPoint
-                      ? `Add ${ksh((selectedPoint.point.homeSurcharge || 0) * (charter ? 1 : seats))} · paid to your driver`
-                      : "Choose a point to see this option"}
-                  </span>
-                </span>
-                <span className="sr-only">{homePickup ? "Selected" : "Not selected"}</span>
-              </button>
+              <fieldset className="space-y-2">
+                <legend className="text-xs font-medium text-muted-foreground">
+                  {direction === "FROM_TERMINUS" ? "Where should we drop you?" : "Where should we pick you up?"}
+                </legend>
+                <div role="group" aria-label={`${pointLabelCap} preference`} className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    aria-pressed={!homePickup}
+                    onClick={() => setHomePickup(false)}
+                    className={cn("min-h-[76px] rounded-xl border bg-card p-3 text-left transition-colors", !homePickup ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
+                  >
+                    <span className="flex items-center gap-1.5 text-sm font-medium">
+                      <MapPin className="h-3.5 w-3.5 shrink-0 text-primary" /> At the stage
+                    </span>
+                    <span className="mt-1 block truncate text-[11px] text-muted-foreground">
+                      {selectedPoint?.point.name ?? "Choose a stop first"}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={homePickup}
+                    disabled={!selectedPoint}
+                    onClick={() => setHomePickup(true)}
+                    className={cn("min-h-[76px] rounded-xl border bg-card p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-55", homePickup ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
+                  >
+                    <span className="flex items-center gap-1.5 text-sm font-medium">
+                      <HomeIcon className="h-3.5 w-3.5 shrink-0 text-primary" /> Door-to-door
+                    </span>
+                    <span className="mt-1 block text-[11px] text-muted-foreground">
+                      {selectedPoint
+                        ? (selectedPoint.point.homeSurcharge > 0
+                          ? `+${ksh(selectedPoint.point.homeSurcharge * (charter ? 1 : seats))} · paid to driver`
+                          : "No extra charge")
+                        : "Choose a stop first"}
+                    </span>
+                  </button>
+                </div>
+              </fieldset>
 
               <div className="flex items-center justify-between rounded-xl border bg-card px-3.5 py-3">
                 <span>
                   <span className="block text-xs text-muted-foreground">Estimated total{charter ? " · whole cab" : seats > 1 ? ` · ${seats} seats` : ""}</span>
                   <span className="block text-[11px] text-muted-foreground">
-                    {selectedPoint ? `Includes ${ksh(bookingFeeAmount)} booking fee` : "Final amount shown before payment"}
+                    {selectedPoint
+                      ? charter
+                        ? `${ksh(bookingFeeAmount)} booking fee included in Mireli's 10% share`
+                        : `Includes ${ksh(bookingFeeAmount)} booking fee`
+                      : "Final amount shown before payment"}
                   </span>
                 </span>
                 <span className="text-lg font-bold tabular-nums text-primary">
-                  {selectedPoint ? ksh(farePreview.total) : "Choose a point"}
+                  {!selectedPoint
+                    ? "Choose a point"
+                    : charter && !farePreview.hasCharterCab
+                      ? "No cabs available"
+                      : charter && visibleTrips.some((trip) => trip.capacity !== visibleTrips[0]?.capacity)
+                        ? `From ${ksh(farePreview.total)}`
+                        : ksh(farePreview.total)}
                 </span>
               </div>
             </section>
@@ -827,9 +876,11 @@ function CabCard({
   onBook: () => void;
 }) {
   const booked = trip.capacity - trip.seatsLeft;
-  const baseFare = charter ? trip.charterPrice : (pointFare ?? trip.minFare) * seats;
+  const baseFare = charter
+    ? calculateCharterFare(trip.capacity, pointFare ?? trip.minFare)
+    : (pointFare ?? trip.minFare) * seats;
   const surcharge = homePickup ? (pointSurcharge ?? 0) * (charter ? 1 : seats) : 0;
-  const fare = baseFare + surcharge + (hasPoint ? trip.platformFeeAmount : 0);
+  const fare = baseFare + surcharge + (hasPoint && !charter ? trip.platformFeeAmount : 0);
   const full = trip.seatsLeft <= 0 || !trip.bookable;
 
   return (
@@ -866,7 +917,11 @@ function CabCard({
               {charter ? "Charter" : seats > 1 ? `${seats} seats` : "Fare"}
             </div>
             <div className="font-bold tabular-nums text-primary">{ksh(fare)}</div>
-            {hasPoint && <div className="text-[10px] text-muted-foreground">includes {ksh(trip.platformFeeAmount)} fee</div>}
+            {hasPoint && (
+              <div className="text-[10px] text-muted-foreground">
+                {charter ? `${ksh(trip.platformFeeAmount)} fee included` : `includes ${ksh(trip.platformFeeAmount)} fee`}
+              </div>
+            )}
             {!charter && seats === 1 && pointFare != null && pointFare !== trip.minFare && (
               <div className="text-[10px] text-muted-foreground">from {ksh(trip.minFare)}</div>
             )}
@@ -907,4 +962,3 @@ function CabCard({
     </Card>
   );
 }
-

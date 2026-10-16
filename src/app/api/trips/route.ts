@@ -76,7 +76,7 @@ export async function GET(req: NextRequest) {
             charterPrice: true,
             stages: {
               orderBy: { order: "asc" },
-              select: { order: true, fare: true },
+              select: { order: true, fare: true, homeSurcharge: true },
             },
           },
         },
@@ -96,11 +96,15 @@ export async function GET(req: NextRequest) {
     // A stale trip row or an active route without any customer-selectable
     // point cannot be booked. Do not present either as available supply.
     trips: trips
-      .filter((t) => !!t.driver && t.route.stages.some((stage) => stage.order > 0))
+      .filter((t) => !!t.driver && t.route.stages.some((stage) =>
+        stage.order > 0 && stage.fare > 0 && stage.homeSurcharge >= 0,
+      ))
       .map((t) => {
       const relevantBooked = t.bookings.reduce((s, b) => s + b.seats, 0);
       const seatsLeft = Math.max(t.capacity - relevantBooked, 0);
-      const nonTerminusStages = t.route.stages.filter((s) => s.order > 0);
+      const nonTerminusStages = t.route.stages.filter((s) =>
+        s.order > 0 && s.fare > 0 && s.homeSurcharge >= 0,
+      );
       const isFromTerminus = t.direction === "FROM_TERMINUS";
       const train = t.train
         ? {

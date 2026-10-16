@@ -3,6 +3,7 @@ import * as daraja from "@/lib/daraja";
 import {randomBytes,createHash} from "node:crypto";
 import {isLocalDemoEnabled} from "@/lib/runtime-mode";
 import {DriverError} from "@/lib/driver/errors";
+import {calculateCharterPlatformShare} from "@/lib/charter-pricing";
 
 export function classifySubmission(result:daraja.DarajaResultCode):"completed"|"processing"|"failed"|"ambiguous" {
   if(result.settled && result.resultCode==="0" && result.receipt) return "completed";
@@ -13,12 +14,17 @@ export function classifySubmission(result:daraja.DarajaResultCode):"completed"|"
 export function calculateSettlement(total:number,surcharge:number,platformFee:number,rateBps:number,isCharter:boolean) {
   if(!Number.isSafeInteger(total) || total<0 || !Number.isSafeInteger(surcharge) || surcharge<0 || surcharge>total ||
     !Number.isSafeInteger(platformFee) || platformFee<0 || platformFee>total-surcharge || !Number.isInteger(rateBps) ||
-    rateBps<0 || rateBps>10000 || !Number.isSafeInteger((total-surcharge-platformFee)*rateBps))
+    rateBps<0 || rateBps>10000 || !Number.isSafeInteger((total-surcharge)*rateBps))
     throw new DriverError(409,"INVALID_LEDGER","Settlement requires finance review.");
-  const gross=total-platformFee;
-  const commissionableFare=isCharter ? gross-surcharge : 0;
-  const commission=Math.round(commissionableFare*rateBps/10000);
-  return {gross,surcharge,platformFee,commission,net:gross-commission};
+  const gross=total;
+  // The charter's platform share is calculated on the entire charter fare,
+  // including the flat fee already embedded in it. Record that fee separately
+  // and deduct it from commission so the passenger is never charged twice.
+  const platformShare=isCharter ? calculateCharterPlatformShare(total-surcharge,rateBps) : platformFee;
+  if(isCharter && platformShare<platformFee)
+    throw new DriverError(409,"INVALID_LEDGER","Charter fare is too low to include the flat booking fee within the platform share.");
+  const commission=isCharter ? Math.max(0,platformShare-platformFee) : 0;
+  return {gross,surcharge,platformFee,commission,net:gross-platformFee-commission};
 }
 export async function sendPayout(payoutId:string):Promise<boolean> {
   const payout=await db.payoutRecord.findUnique({where:{id:payoutId},include:{driver:true}});

@@ -8,6 +8,7 @@ import {
   resolveRefundTier,
 } from "@/lib/money";
 import * as daraja from "@/lib/daraja";
+import { isBookingReadyForPayment } from "@/lib/booking-payment-eligibility";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -74,6 +75,12 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (booking.status !== "awaiting_payment" || booking.cashDue <= 0) {
       return NextResponse.json({ error: "Nothing to pay on this booking" }, { status: 400 });
     }
+    if (!isBookingReadyForPayment(booking)) {
+      return NextResponse.json(
+        { error: "An active driver and future departure are not secured for this booking. No payment request was sent." },
+        { status: 409 },
+      );
+    }
     const phoneRaw = String(body.phone || "");
     const { normalizePhone } = await import("@/lib/session");
     const phone = normalizePhone(phoneRaw);
@@ -128,6 +135,12 @@ export async function POST(req: NextRequest, { params }: Params) {
   // pending push (Paybill path) the demo simulates the C2B confirmation,
   // live mode waits for the real C2B webhook to land.
   if (action === "verify") {
+    if (booking.status === "awaiting_payment" && !isBookingReadyForPayment(booking)) {
+      return NextResponse.json(
+        { error: "An active driver and future departure are not secured for this booking. Payment cannot be confirmed yet." },
+        { status: 409 },
+      );
+    }
     const tx = await db.mpesaTransaction.findFirst({
       where: { bookingId: booking.id, status: { in: ["stk_push_sent", "pending"] } },
       orderBy: { createdAt: "desc" },
@@ -136,6 +149,17 @@ export async function POST(req: NextRequest, { params }: Params) {
       // Maybe already confirmed (sweep or webhook got there first)
       if (booking.status === "confirmed" && booking.ledgerEntry) {
         return NextResponse.json({ ok: true, alreadyConfirmed: true, receipt: booking.ledgerEntry.mpesaReceipt, driver: driverContact() });
+      }
+      const unmatchedPaybill = await db.mpesaTransaction.findFirst({
+        where: { bookingId: booking.id, merchantRequestId: { startsWith: "c2b-" }, status: "failed" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (unmatchedPaybill) {
+        const supportEmail = process.env.MIRELI_SUPPORT_EMAIL?.trim() || "mirelisgr001@gmail.com";
+        const error = unmatchedPaybill.amount > 0
+          ? `We received a Paybill payment of KSh ${unmatchedPaybill.amount}, but this booking requires exactly KSh ${booking.cashDue}. Please contact ${supportEmail} with reference ${booking.code} before paying again.`
+          : `We received a Paybill receipt for this booking that could not be matched to its fare. Please contact ${supportEmail} with reference ${booking.code} before paying again.`;
+        return NextResponse.json({ error, paymentNeedsReview: true }, { status: 409 });
       }
       const creds = await daraja.resolveDaraja();
       if (creds.mode === "mock") {

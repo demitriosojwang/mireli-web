@@ -1,0 +1,36 @@
+# Mireli runs as one container and one image. PostgreSQL 16 is installed into
+# that image so the local booking API has a private, persistent database.
+#
+#   Copy .env.docker.example to .env.docker, set the required secrets, then:
+#   docker compose --env-file .env.docker up -d --build
+#   open http://localhost:3000
+
+name: mireli
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mireli-web:${MIRELI_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file:
+      - path: .env.docker
+        required: false
+    environment:
+      PGDATA: /var/lib/postgresql/data
+    ports:
+      - "${MIRELI_PORT:-3000}:3000"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - app-state:/app/.local
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  db-data:
+  app-state:

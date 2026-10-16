@@ -74,7 +74,7 @@ model Route {
   id             String       @id @default(cuid())
   name           String
   durationMinutes Int
-  charterPrice   Int
+  charterPrice   Int // Legacy only; customer charter pricing uses assigned capacity and stage fare
   active         Boolean      @default(true)
   stages         RouteStage[]
   trips          Trip[]
@@ -136,8 +136,8 @@ model Booking {
   homeAddress   String?
   seats         Int       @default(1)
   isCharter     Boolean   @default(false)
-  fareAmount    Int // total charged: fare + door surcharge + flat platform fee
-  platformFeeAmount Int @default(0) // flat fee retained by Mi-Reli; not paid to the driver
+  fareAmount    Int // total charged: shared fare + surcharge + fee; charter fare + surcharge with fee embedded in platform share
+  platformFeeAmount Int @default(0) // pooled: added fee; charter: included within the platform's 10% share
   homeSurcharge Int // total home surcharge for this booking
   creditApplied Int // portion covered by travel credit (never cash)
   cashDue       Int // portion to collect via M-Pesa STK
@@ -161,9 +161,27 @@ model Booking {
   passengerNationality String?
   passengerGender      String?
   ledgerEntry   LedgerEntry?
+  ticketEmailDelivery BookingTicketEmailDelivery?
   refunds       RefundRecord[]
   mpesaTransactions MpesaTransaction[]
   createdAt     DateTime  @default(now())
+}
+
+// Durable delivery state for the customer ticket. A unique row per booking
+// prevents duplicate webhook callbacks from sending duplicate tickets.
+model BookingTicketEmailDelivery {
+  id                String   @id @default(cuid())
+  bookingId         String   @unique
+  booking           Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  status            String   @default("pending") // pending | sending | sent | failed | blocked | uncertain
+  attempts          Int      @default(0)
+  providerMessageId String?
+  lastErrorCode     String?
+  lastAttemptAt     DateTime?
+  sentAt            DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  @@index([status, updatedAt])
 }
 
 // ─── Money (the ledger) ──────────────────────────────────────────────────────
@@ -178,7 +196,7 @@ model LedgerEntry {
   cashAmount          Int // actually collected via STK push
   creditApplied       Int // portion paid with travel credit
   homeSurchargeAmount Int // tracked separately — passes to driver in full
-  platformFeeAmount   Int      @default(0) // flat booking fee retained by Mi-Reli
+  platformFeeAmount   Int      @default(0) // pooled: added fee; charter: included within the platform's 10% share
   mpesaReceipt        String?
   collectedAt         DateTime?
   status              String   @default("held") // held | driver_payable | commission_taken | refunded | partially_refunded | converted_to_credit | forfeited
@@ -195,7 +213,7 @@ model RefundRecord {
   booking            Booking  @relation(fields: [bookingId], references: [id])
   amount             Int // cash returned to passenger
   creditRestored     Int      @default(0) // credit portion restored as travel credit (info)
-  commissionReversed Int      @default(0) // platform commission given back on refunded fare
+  commissionReversed Int      @default(0) // charter platform share (commission plus embedded fee) reversed
   driverClawback     Int      @default(0) // driver share to recover (from future payout)
   reason             String // cancelled_early | cancelled_late | no_show_partial | admin_override | platform_cancelled
   method             String // reversal | b2c
@@ -213,10 +231,10 @@ model PayoutRecord {
   driver              Driver    @relation(fields: [driverId], references: [id])
   tripId              String?
   trip                Trip?     @relation(fields: [tripId], references: [id])
-  grossFareTotal      Int
-  commissionAmount    Int
+  grossFareTotal      Int // customer total before separately itemized platform fee and commission
+  commissionAmount    Int // charter percentage share minus its separately recorded embedded booking fee
   homeSurchargeAmount Int // passes through in full — not part of commission base
-  platformFeeAmount   Int      @default(0) // recorded separately; excluded from driver gross
+  platformFeeAmount   Int      @default(0) // separate platform take; deducted from gross before driver net
   netPayoutAmount     Int
   method              String    @default("b2c")
   mpesaResultCode     String?

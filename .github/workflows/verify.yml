@@ -1,7 +1,12 @@
 name: Verify Mireli Web
 on:
   push:
+    branches: ['**']
   pull_request:
+    branches: ['**']
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -24,3 +29,70 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run build
+
+  container:
+    name: Build production container (AMD64 + ARM64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and test the Linux application image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: test
+          platforms: linux/amd64
+          push: false
+          tags: mireli-web:ci-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Build the deployable image for the VM architecture
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runner
+          platforms: linux/amd64,linux/arm64
+          push: false
+          tags: mireli-web:ci-release-check
+          cache-from: type=gha
+
+  aws-infrastructure:
+    name: Validate AWS VM infrastructure
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned CloudFormation linter
+        run: python -m pip install --disable-pip-version-check --no-cache-dir cfn-lint==1.57.2
+      - name: Lint the eu-north-1 VM template
+        run: cfn-lint --format json --regions eu-north-1 -- infra/aws/mireli-vm.yaml
+      - name: Install pinned AWS CloudFormation Guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/cfn-guard-v3.2.1-linux.tar.gz"
+          curl --fail --location --silent --show-error \
+            https://github.com/aws-cloudformation/cloudformation-guard/releases/download/3.2.1/cfn-guard-v3-x86_64-linux-latest.tar.gz \
+            --output "$archive"
+          echo '8c66efb19c63e6c2bf26b9a41bbcf2f85baa8a937b01d350940194faaf64cf1d  '"$archive" | sha256sum --check --status
+          extract="$RUNNER_TEMP/cfn-guard-extract"
+          bin="$RUNNER_TEMP/cfn-guard-bin"
+          mkdir -p "$extract" "$bin"
+          tar -xzf "$archive" -C "$extract"
+          guard=$(find "$extract" -type f -name cfn-guard -print -quit)
+          test -n "$guard"
+          install -m 0755 "$guard" "$bin/cfn-guard"
+          echo "$bin" >> "$GITHUB_PATH"
+      - name: Check the template against the AWS CIS Foundations Level 1 rules
+        run: >-
+          cfn-guard validate
+          --rules infra/aws/guard-rules/cis-aws-benchmark-level-1.guard
+          --data infra/aws/mireli-vm.yaml
+          --output-format json

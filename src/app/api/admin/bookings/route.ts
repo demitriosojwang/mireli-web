@@ -4,6 +4,7 @@ import { getAdminSession } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import { executeCancellation } from "@/lib/money";
 import { runOperationalTick } from "@/lib/engine";
+import { sendBookingTicketEmail } from "@/lib/booking-ticket-email";
 
 /** All bookings — oversight view with allocation + money state. */
 export async function GET(req: NextRequest) {
@@ -22,6 +23,7 @@ export async function GET(req: NextRequest) {
       passenger: true,
       trip: { include: { driver: true, route: true } },
       ledgerEntry: true,
+      ticketEmailDelivery: true,
     },
   });
 
@@ -57,6 +59,14 @@ export async function GET(req: NextRequest) {
       tripStatus: b.trip?.status || null,
       driver: b.trip?.driver ? { name: b.trip.driver.name, plate: b.trip.driver.plate } : null,
       allocationNote: b.allocationNote,
+      ticketEmail: b.ticketEmailDelivery
+        ? {
+            status: b.ticketEmailDelivery.status,
+            attempts: b.ticketEmailDelivery.attempts,
+            sentAt: b.ticketEmailDelivery.sentAt,
+            lastErrorCode: b.ticketEmailDelivery.lastErrorCode,
+          }
+        : null,
       ledger: b.ledgerEntry
         ? {
             status: b.ledgerEntry.status,
@@ -77,6 +87,32 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const { bookingId, action } = body;
   const actor = { id: session.id, name: session.name, role: "admin" as const };
+
+  if (action === "retry_ticket_email") {
+    const booking = await db.booking.findUnique({
+      where: { id: bookingId },
+      include: { ledgerEntry: true, ticketEmailDelivery: true },
+    });
+    if (!booking || !booking.ledgerEntry || !["confirmed", "boarded", "completed"].includes(booking.status)) {
+      return NextResponse.json({ error: "Only paid, confirmed bookings have a ticket to send" }, { status: 409 });
+    }
+    if (booking.ticketEmailDelivery?.status === "uncertain") {
+      return NextResponse.json({
+        error: "Delivery is uncertain. Check the Brevo transactional log before retrying to avoid sending a duplicate ticket.",
+      }, { status: 409 });
+    }
+    const delivery = await sendBookingTicketEmail(booking.id);
+    await audit({
+      actorId: actor.id,
+      actorName: actor.name,
+      actorRole: actor.role,
+      action: "booking.ticket_email_retry",
+      entity: "booking",
+      entityId: booking.id,
+      metadata: { status: delivery.status, errorCode: delivery.lastErrorCode || null },
+    });
+    return NextResponse.json({ ok: delivery.status === "sent", ticketEmail: delivery });
+  }
 
   if (action === "platform_cancel") {
     const booking = await db.booking.findUnique({ where: { id: bookingId } });

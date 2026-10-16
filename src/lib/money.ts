@@ -4,6 +4,8 @@ import * as daraja from "@/lib/daraja";
 import type {Prisma} from "@prisma/client";
 import {calculateSettlement} from "@/lib/payout-settlement";
 import {DriverError} from "@/lib/driver/errors";
+import { attemptBookingTicketEmail } from "@/lib/booking-ticket-email";
+import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 
 /**
  * The money engine.
@@ -353,10 +355,17 @@ export async function executeCancellation(params: {
       // Commission reversal is proportional — the platform never keeps a
       // commission on a refunded fare.
       const cfgC = await getConfig();
-      const commissionableFare = Math.max(0, entry.totalAmount - entry.homeSurchargeAmount - entry.platformFeeAmount);
       const refundedShare = entry.totalAmount > 0 ? Math.min(1, amount / entry.totalAmount) : 0;
+      const split = calculateSettlement(
+        entry.totalAmount,
+        entry.homeSurchargeAmount,
+        entry.platformFeeAmount,
+        Math.round(cfgC.commissionRate * 10000),
+        booking.isCharter,
+      );
+      const platformRetained = split.commission + split.platformFee;
       const commissionReversed = booking.isCharter
-        ? Math.round(commissionableFare * refundedShare * cfgC.commissionRate)
+        ? Math.round(platformRetained * refundedShare)
         : 0;
       const driverClawback = amount - commissionReversed;
       await db.refundRecord.update({
@@ -561,6 +570,27 @@ export async function runReconciliationSweep(
     expiredCredits: 0,
   };
 
+  // A webhook/verify request can mark the provider transaction confirmed and
+  // then fail before creating its ledger entry. Recover those captures from
+  // the stored receipt; never query or re-charge the provider for a terminal
+  // success. The relation filter keeps normal completed payments out of every
+  // nightly run.
+  const confirmedWithoutLedger = await db.mpesaTransaction.findMany({
+    where: {
+      status: "confirmed",
+      booking: { is: { ledgerEntry: null } },
+    },
+    orderBy: { createdAt: "asc" },
+    take: 100,
+  });
+  for (const tx of confirmedWithoutLedger) {
+    const applied = await confirmBookingPayment(tx.bookingId, {
+      receipt: tx.mpesaReceipt || tx.checkoutRequestId,
+      checkoutRequestId: tx.checkoutRequestId,
+    });
+    if (applied) summary.recoveredPayments++;
+  }
+
   // 1. Ambiguous STK pushes older than the sweep threshold
   const cutoff = new Date(now.getTime() - cfg.sweepPendingMinutes * 60 * 1000);
   const ambiguous = await db.mpesaTransaction.findMany({
@@ -598,7 +628,7 @@ export async function runReconciliationSweep(
     }
   }
 
-  // 2. Refunds stuck in pending — give them a terminal state or flag
+  // 2. Refunds stuck in pending — flag them for a human to reconcile
   const pendingRefunds = await db.refundRecord.findMany({ where: { status: "pending" } });
   for (const r of pendingRefunds) {
     const stuck = now.getTime() - r.initiatedAt.getTime() > cfg.stuckRefundHours * 60 * 60 * 1000;
@@ -610,22 +640,24 @@ export async function runReconciliationSweep(
       summary.flaggedStuckRefunds++;
     }
   }
-  // Prototype: sweep also completes pending reversals/b2c (simulated callback)
-  const completable = await db.refundRecord.findMany({
-    where: { status: "pending", stuckFlaggedAt: null },
-    take: 20,
-  });
-  for (const r of completable) {
-    // Prototype: the refund callback arrives — give it its terminal state.
-    await db.refundRecord.update({
-      where: { id: r.id },
-      data: { status: "completed", mpesaResultCode: daraja.RESULT_CODES.SUCCESS, completedAt: now },
+  // Local demo only: simulate the provider's asynchronous refund callback.
+  // In strict mode, only a correlated Daraja result may complete a refund.
+  if (isLocalDemoEnabled()) {
+    const completable = await db.refundRecord.findMany({
+      where: { status: "pending", stuckFlaggedAt: null },
+      take: 20,
     });
-    await db.ledgerEntry.update({
-      where: { id: r.ledgerEntryId },
-      data: { status: "refunded", statusChangedAt: now },
-    });
-    summary.completedRefunds++;
+    for (const r of completable) {
+      await db.refundRecord.update({
+        where: { id: r.id },
+        data: { status: "completed", mpesaResultCode: daraja.RESULT_CODES.SUCCESS, completedAt: now },
+      });
+      await db.ledgerEntry.update({
+        where: { id: r.ledgerEntryId },
+        data: { status: "refunded", statusChangedAt: now },
+      });
+      summary.completedRefunds++;
+    }
   }
 
   // 3. Expire stale credits
@@ -658,13 +690,14 @@ export async function confirmBookingPayment(
     include: { ledgerEntry: true },
   });
   if (!booking) return false;
-  if (booking.status === "awaiting_payment") {
+  const wasAwaitingPayment = booking.status === "awaiting_payment";
+  if (wasAwaitingPayment) {
     await db.booking.update({
       where: { id: bookingId },
       data: { status: "confirmed" },
     });
   }
-  await recordCollection({
+  const ledgerEntry = await recordCollection({
     bookingId: booking.id,
     tripId: booking.tripId,
     totalAmount: booking.fareAmount,
@@ -674,14 +707,23 @@ export async function confirmBookingPayment(
     platformFeeAmount: booking.platformFeeAmount,
     mpesaReceipt: tx.receipt,
   });
+  const arrivedAfterClosure = ["cancelled", "no_show"].includes(booking.status);
   await audit({
     actorId: booking.passengerId,
     actorName: "Passenger",
     actorRole: "passenger",
-    action: "payment.confirm",
+    action: arrivedAfterClosure ? "payment.capture_after_closed_booking" : "payment.confirm",
     entity: "booking",
     entityId: booking.id,
-    metadata: { receipt: tx.receipt, amount: booking.cashDue },
+    metadata: {
+      receipt: tx.receipt,
+      amount: booking.cashDue,
+      ledgerEntryId: ledgerEntry.id,
+      bookingStatus: booking.status,
+    },
   });
+  // A late capture on a cancelled/no-show booking belongs in the ledger for
+  // finance review, but must not confirm the ride or send a stale ticket.
+  if (!arrivedAfterClosure) await attemptBookingTicketEmail(booking.id);
   return true;
 }

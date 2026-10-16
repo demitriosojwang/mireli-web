@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { isStageSearchReady, shouldSearchStagePoints } from "@/lib/stage-search";
 
 const findMany = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/db", () => ({db: {routeStage: {findMany}}}));
@@ -26,8 +27,25 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("public stage point search", () => {
+  it("searches only while open with a trimmed query between two and eighty characters", () => {
+    expect(shouldSearchStagePoints("", true)).toBe(false);
+    expect(shouldSearchStagePoints("  ", true)).toBe(false);
+    expect(shouldSearchStagePoints("m", true)).toBe(false);
+    expect(shouldSearchStagePoints("Mtwapa", false)).toBe(false);
+    expect(shouldSearchStagePoints(" Mtwapa ", true)).toBe(true);
+    expect(isStageSearchReady("x".repeat(81))).toBe(false);
+  });
+
   it("does not query the database until the passenger enters at least two characters", async () => {
     const response = await GET(request("q=m"));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({points: [], hasMore: false});
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it("returns an empty search response for blank input without querying the database", async () => {
+    const response = await GET(request("q=%20%20"));
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({points: [], hasMore: false});

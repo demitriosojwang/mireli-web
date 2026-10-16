@@ -18,7 +18,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/client";
 import { fmtDate, fmtDateTime, ksh, TIER_LABELS } from "@/lib/format";
-import { Ban, Search, Undo2 } from "lucide-react";
+import { Ban, Mail, Search, Undo2 } from "lucide-react";
 
 interface AdminBooking {
   id: string;
@@ -42,6 +42,7 @@ interface AdminBooking {
   tripStatus: string | null;
   driver: { name: string; plate: string } | null;
   allocationNote: string | null;
+  ticketEmail: { status: string; attempts: number; sentAt: string | null; lastErrorCode: string | null } | null;
   ledger: { status: string; cash: number; credit: number; homeSurcharge: number; receipt: string | null } | null;
 }
 
@@ -93,6 +94,28 @@ export default function AdminBookings() {
       refresh();
     } catch (e) {
       toast({ title: "Failed", description: e instanceof Error ? e.message : "Try again", variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function retryTicketEmail(b: AdminBooking) {
+    setBusy(true);
+    try {
+      const result = await api<{ ok: boolean; ticketEmail: { status: string; lastErrorCode?: string | null } }>("/api/admin/bookings", {
+        body: { bookingId: b.id, action: "retry_ticket_email" },
+      });
+      toast({
+        title: result.ticketEmail.status === "sent" ? "Ticket email accepted" : "Ticket email needs attention",
+        description:
+          result.ticketEmail.status === "sent"
+            ? "The email provider accepted the ticket. Check its delivery log if the passenger does not receive it."
+            : `${result.ticketEmail.status.replaceAll("_", " ")}${result.ticketEmail.lastErrorCode ? ` · ${result.ticketEmail.lastErrorCode}` : ""}`,
+        variant: result.ticketEmail.status === "sent" ? "default" : "destructive",
+      });
+      refresh();
+    } catch (e) {
+      toast({ title: "Ticket email not sent", description: e instanceof Error ? e.message : "Try again", variant: "destructive" });
     } finally {
       setBusy(false);
     }
@@ -183,6 +206,23 @@ export default function AdminBookings() {
                 >
                   <Undo2 className="h-4 w-4" /> Override refund (dispute)
                 </Button>
+                {b.ticketEmail && (
+                  <span className="self-center text-xs text-muted-foreground" role="status">
+                    Ticket email: {b.ticketEmail.status.replaceAll("_", " ")}
+                    {b.ticketEmail.sentAt ? ` · ${fmtDateTime(b.ticketEmail.sentAt)}` : ""}
+                  </span>
+                )}
+                {["confirmed", "boarded", "completed"].includes(b.status) &&
+                  b.ticketEmail?.status !== "sent" && b.ticketEmail?.status !== "uncertain" && (
+                    <Button size="sm" variant="outline" onClick={() => retryTicketEmail(b)} disabled={busy}>
+                      <Mail className="h-4 w-4" /> {b.ticketEmail ? "Retry ticket email" : "Send ticket email"}
+                    </Button>
+                  )}
+                {b.ticketEmail?.status === "uncertain" && (
+                  <span className="self-center text-xs text-amber-800">
+                    Check Brevo’s delivery log before retrying to avoid a duplicate.
+                  </span>
+                )}
               </div>
             </CardContent>
           </Card>

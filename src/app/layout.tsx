@@ -5,6 +5,7 @@ import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 import { connection } from "next/server";
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.MIRELI_PUBLIC_ORIGIN?.replace(/\/$/, "") || "https://mirelisgr.duckdns.org"),
   title: "Mi-Reli — Reliable rides from the SGR terminus",
   description:
     "Mi-Reli shuttles SGR passengers between Mombasa Terminus (MTM) and the coast: shared-ride pickup and drop-off points across the North Coast (Bamburi, Nyali, Mtwapa, Malindi) and South Coast (Likoni, Diani) — every cab timed to a Madaraka Express departure or arrival. Pay with M-Pesa.",
