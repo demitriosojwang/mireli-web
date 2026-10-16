@@ -25,6 +25,7 @@ interface Overview {
     failedPayouts: { id: string; driver: string; amount: number; reason: string | null }[];
     failedRefunds: { id: string; code: string; amount: number; reason: string | null }[];
     ambiguousPayments: number;
+    closedBookingCaptures: { id: string; code: string; amount: number; status: string }[];
     unallocatedBookings: number;
     creditLiability: number;
     activeCredits: number;
@@ -41,6 +42,7 @@ export default function AdminOverview() {
     data.alerts.stuckRefunds.length +
     data.alerts.failedPayouts.length +
     data.alerts.failedRefunds.length +
+    data.alerts.closedBookingCaptures.length +
     (data.alerts.ambiguousPayments > 0 ? 1 : 0) +
     (data.alerts.unallocatedBookings > 0 ? 1 : 0);
 
@@ -100,8 +102,8 @@ export default function AdminOverview() {
         <CardContent className="space-y-3">
           {alertCount === 0 && (
             <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-900">
-              All clear — no stuck refunds, failed transfers, ambiguous payments or unallocated
-              bookings.
+              All clear — no stuck refunds, failed transfers, ambiguous payments, late captures or
+              unallocated bookings.
             </p>
           )}
           {data.alerts.stuckRefunds.length > 0 && (
@@ -134,6 +136,14 @@ export default function AdminOverview() {
               detail="A webhook may have been missed — run the reconciliation sweep to resolve via Transaction Status."
               href="/admin/reconciliation"
               cta="Open reconciliation"
+            />
+          )}
+          {data.alerts.closedBookingCaptures.length > 0 && (
+            <AlertRow
+              title={`${data.alerts.closedBookingCaptures.length} payment(s) arrived after booking closure`}
+              detail={data.alerts.closedBookingCaptures.map((p) => `${p.code} (${ksh(p.amount)} · ${p.status})`).join(", ")}
+              href="/admin/bookings"
+              cta="Review captured payments"
             />
           )}
           {data.alerts.unallocatedBookings > 0 && (

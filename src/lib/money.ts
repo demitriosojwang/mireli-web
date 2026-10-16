@@ -570,6 +570,27 @@ export async function runReconciliationSweep(
     expiredCredits: 0,
   };
 
+  // A webhook/verify request can mark the provider transaction confirmed and
+  // then fail before creating its ledger entry. Recover those captures from
+  // the stored receipt; never query or re-charge the provider for a terminal
+  // success. The relation filter keeps normal completed payments out of every
+  // nightly run.
+  const confirmedWithoutLedger = await db.mpesaTransaction.findMany({
+    where: {
+      status: "confirmed",
+      booking: { is: { ledgerEntry: null } },
+    },
+    orderBy: { createdAt: "asc" },
+    take: 100,
+  });
+  for (const tx of confirmedWithoutLedger) {
+    const applied = await confirmBookingPayment(tx.bookingId, {
+      receipt: tx.mpesaReceipt || tx.checkoutRequestId,
+      checkoutRequestId: tx.checkoutRequestId,
+    });
+    if (applied) summary.recoveredPayments++;
+  }
+
   // 1. Ambiguous STK pushes older than the sweep threshold
   const cutoff = new Date(now.getTime() - cfg.sweepPendingMinutes * 60 * 1000);
   const ambiguous = await db.mpesaTransaction.findMany({
@@ -669,13 +690,14 @@ export async function confirmBookingPayment(
     include: { ledgerEntry: true },
   });
   if (!booking) return false;
-  if (booking.status === "awaiting_payment") {
+  const wasAwaitingPayment = booking.status === "awaiting_payment";
+  if (wasAwaitingPayment) {
     await db.booking.update({
       where: { id: bookingId },
       data: { status: "confirmed" },
     });
   }
-  await recordCollection({
+  const ledgerEntry = await recordCollection({
     bookingId: booking.id,
     tripId: booking.tripId,
     totalAmount: booking.fareAmount,
@@ -685,15 +707,23 @@ export async function confirmBookingPayment(
     platformFeeAmount: booking.platformFeeAmount,
     mpesaReceipt: tx.receipt,
   });
+  const arrivedAfterClosure = ["cancelled", "no_show"].includes(booking.status);
   await audit({
     actorId: booking.passengerId,
     actorName: "Passenger",
     actorRole: "passenger",
-    action: "payment.confirm",
+    action: arrivedAfterClosure ? "payment.capture_after_closed_booking" : "payment.confirm",
     entity: "booking",
     entityId: booking.id,
-    metadata: { receipt: tx.receipt, amount: booking.cashDue },
+    metadata: {
+      receipt: tx.receipt,
+      amount: booking.cashDue,
+      ledgerEntryId: ledgerEntry.id,
+      bookingStatus: booking.status,
+    },
   });
-  await attemptBookingTicketEmail(booking.id);
+  // A late capture on a cancelled/no-show booking belongs in the ledger for
+  // finance review, but must not confirm the ride or send a stale ticket.
+  if (!arrivedAfterClosure) await attemptBookingTicketEmail(booking.id);
   return true;
 }
