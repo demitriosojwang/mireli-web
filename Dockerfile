@@ -48,7 +48,12 @@ RUN CLI_VERSION="$(node -p "require('./package.json').devDependencies.prisma")" 
  && mkdir -p /opt/prisma-cli \
  && cd /opt/prisma-cli \
  && npm init -y > /dev/null \
- && npm install --no-audit --no-fund "prisma@${CLI_VERSION}" \
+ && npm install --no-audit --no-fund \
+      --fetch-retries=5 \
+      --fetch-retry-mintimeout=20000 \
+      --fetch-retry-maxtimeout=120000 \
+      --fetch-timeout=300000 \
+      "prisma@${CLI_VERSION}" \
  && node node_modules/prisma/build/index.js migrate diff \
       --from-empty --to-schema-datamodel /app/prisma/schema.prisma --script > /dev/null
 
