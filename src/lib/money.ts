@@ -4,6 +4,7 @@ import * as daraja from "@/lib/daraja";
 import type {Prisma} from "@prisma/client";
 import {calculateSettlement} from "@/lib/payout-settlement";
 import {DriverError} from "@/lib/driver/errors";
+import { attemptBookingTicketEmail } from "@/lib/booking-ticket-email";
 
 /**
  * The money engine.
@@ -683,5 +684,6 @@ export async function confirmBookingPayment(
     entityId: booking.id,
     metadata: { receipt: tx.receipt, amount: booking.cashDue },
   });
+  await attemptBookingTicketEmail(booking.id);
   return true;
 }

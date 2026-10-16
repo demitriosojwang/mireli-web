@@ -1,10 +1,17 @@
 # Running Mireli with Docker
 
+Docker on a developer computer is only for local testing before a change is
+pushed. Production web pages and API run on the AWS VM; the VM does not depend
+on the developer computer or its Docker daemon. Keep local demo data separate
+from the strict AWS database.
+
 Mireli runs as one container and one built image. The image contains the
 Next.js server and PostgreSQL 16; the database listens only on container
 loopback, so only the web port is published. Database files and encrypted
 driver documents remain in separate named volumes and survive image rebuilds.
 Runtime secrets and settings stay in `.env.docker` rather than image layers.
+For Android/shared-backend configuration, see
+[DRIVER-SHARED-BACKEND-SETUP.md](DRIVER-SHARED-BACKEND-SETUP.md).
 
 ```sh
 cp .env.docker.example .env.docker   # then edit the required secrets

@@ -1,60 +1,80 @@
 # Mireli Web
 
-Aligned with the cofounder passenger app at upstream commit
-`687ef7a0b7e14fc97628f578dfafe15a500cd0cc`, with PostgreSQL configuration,
-portable builds and stricter separation of local simulation from production.
+Mireli Web is the customer booking site and shared API for Mireli Driver. The
+production target is a single AWS EC2 VM in `eu-north-1`; its one immutable
+container contains the Next.js frontend, API, and PostgreSQL. Caddy terminates
+HTTPS on the host. Local Docker is for development and release testing only; the
+AWS site stays online when a developer's computer is off.
 
-Target passenger URL: https://mirelisgr.duckdns.org (AWS cutover pending).
+## Current AWS state
 
-Company contact: mirelisgr001@gmail.com
+- EC2: `i-097df027e02b0708f` (`t4g.small`, ARM64), Elastic IP `13.53.183.149`.
+- The VM's app and API are healthy internally on image `794fb87`.
+- The intended hostname is `https://mirelisgr.duckdns.org`, but it still
+  resolves to the old IP `105.161.112.67`. Rotate the exposed DuckDNS token,
+  update its A record to the EIP, and verify public TLS before calling the site
+  live for customers.
+- Production uses strict mode. The stage/timetable catalogue is empty and no
+  driver is approved, so available pooled cabs correctly remain at zero.
+- Real customer/driver authentication, Daraja collection and reconciliation,
+  Brevo ticket delivery, and post-trip payout credentials are not configured.
+  The app is not ready to accept customer bookings.
 
-**Development integration copy; not approved for deployment.** Passenger and
-administrator production sign-in remain disabled until verified authentication
-is configured. Driver SMS authentication is implemented; live setup is pending.
-No live database has been connected or migrated.
+See [AWS migration and launch gates](docs/AWS-MIGRATION.md),
+[the production checklist](docs/PRODUCTION-READINESS.md), and the
+[VM/driver handoff](docs/VM-AGENT-HANDOFF.md).
 
-The implemented driver API is `/api/v1/driver`: verified session access, separate
-existing-driver sign-in and new-application availability, private
-onboarding, compliance review, assigned-trip commands, statement/beneficiary review
-and support. Driver operations use the same passenger bookings and payment ledger.
-Accepted B2C requests remain processing until a correlated settlement result.
-Payouts require beneficiary approval; live sending defaults to disabled.
-Local HTTP and isolated PostgreSQL concurrency tests passed. Production storage,
-SMS/admin authentication, refund settlement and provider verification remain gates.
+## Local Docker test environment
 
-```sh
-npm ci --ignore-scripts
-npm run preview:local
-```
-
-The isolated synthetic preview runs at http://127.0.0.1:3100. It does not book
-real journeys or transfer money. Your original local project is preserved.
-
-### Containerised local host (Docker)
-
-```sh
-cp .env.docker.example .env.docker   # then set SESSION_SECRET
+```powershell
+if (!(Test-Path .env.docker)) { Copy-Item .env.docker.example .env.docker }
+# Set unique local-only secrets in .env.docker before first start.
 docker compose --env-file .env.docker up -d --build
+docker compose --env-file .env.docker ps
+curl.exe http://127.0.0.1:3000/api/health
 ```
 
-Runs one production container with PostgreSQL 16, versioned migrations applied
-at start, and a healthcheck on `/api/health`. Database and encrypted upload data
-persist in named volumes. Because the image holds no configuration, it moves to
-any VM without a rebuild.
-See [container hosting](docs/DOCKER.md) for configuration, demo versus strict
-production mode, backups and VM migration.
+The health response should be `{"status":"ok"}`. The Compose app is one
+container with embedded PostgreSQL and persistent named volumes. Local demo
+mode is labelled and must never be used for real fares, passenger data, or
+production credentials. Do not use `docker compose down -v`; it deletes the
+database volume. See [Docker operations](docs/DOCKER.md).
 
-```sh
-npm run test
+## Verify a change before pushing
+
+```powershell
+npm ci --ignore-scripts --no-audit --no-fund
+npm run db:validate
 npm run db:generate
+npm test
 npm run typecheck
+npm run lint
 npm run build
+docker compose --env-file .env.docker up -d --build
+curl.exe http://127.0.0.1:3000/api/health
 ```
 
-See [alignment and deployment gates](docs/ALIGNMENT.md) and
-[driver integration contract](docs/DRIVER-INTEGRATION.md), plus
-[local validation evidence and limitations](docs/VALIDATION.md).
+Push the reviewed commit only after local verification. GitHub Actions repeats
+the application checks, Linux container build, and CloudFormation/Guard
+validation. The AWS OIDC deploy job remains disabled because the AWS project
+policy currently denies creation of GitHub's OIDC provider. Do not use
+long-lived AWS keys in GitHub. The tested release procedure and current blocker
+are documented in [AWS migration](docs/AWS-MIGRATION.md).
 
-Stop the preview before running a PostgreSQL build: the preview generates a
-SQLite-specific Prisma client, while `npm run build` regenerates the PostgreSQL
-client. Restart `npm run preview:local` when returning to the synthetic demo.
+## Mireli Driver shared backend
+
+The driver app uses `/api/v1/driver/*` on the same service and PostgreSQL data;
+it never connects to the database directly. Give the Android agent
+[DRIVER-SHARED-BACKEND-SETUP.md](docs/DRIVER-SHARED-BACKEND-SETUP.md) and
+[DRIVER-INTEGRATION.md](docs/DRIVER-INTEGRATION.md). VM access is through
+individual AWS team membership and SSM, not shared SSH keys. The public driver
+URL stays blocked until DNS and TLS work.
+
+## Customer ticket email
+
+After a booking is confirmed and ledgered, the server sends a branded Brevo
+ticket email and records its delivery state so duplicate payment callbacks do
+not send duplicate tickets. Configure `BREVO_API_KEY`,
+`BREVO_SENDER_EMAIL`, and optional sender/support names in AWS Secrets Manager;
+verify the sender/domain and a real inbox delivery before opening bookings.
+Provider acceptance alone is not proof of delivery.

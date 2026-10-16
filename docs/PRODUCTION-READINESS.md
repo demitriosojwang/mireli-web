@@ -1,65 +1,39 @@
 # Mireli booking launch checklist
 
-**Status: not ready to accept customer bookings.** The live check on 16 October
-2026 found a failing production route-catalogue endpoint, an empty timetable,
-and no eligible drivers. The passenger UI should continue to show an honest
-empty state until the API issue is resolved and the shared driver platform and
-approved route data are live.
+**Status: not ready to accept customer bookings.** The AWS VM and shared API are
+healthy internally, but public DNS/TLS is not cut over. The production catalogue
+is empty, there is no approved driver, and live payment/email credentials have
+not been installed. Keep pooled cabs at zero and do not accept payment until the
+end-to-end gates below pass.
 
-## Latest live verification (16 October 2026)
+## AWS deployment state (16 October 2026)
 
-- [x] Production homepage responds with HTTP 200.
-- [x] The current booking-readiness branch passes TypeScript, ESLint, and all
-  118 Vitest tests. The point-search API is bounded to 12 results, and the
-  booking-create regression test confirms no-driver requests remove the unpaid
-  draft and report that no payment was taken.
-- [x] The public production booking page shows the compact ride-choice layout,
-  but the drop-off control reports a load error because `/api/routes` returns
-  HTTP 503. The timetable remains unpublished and the page correctly shows zero
-  bookable cabs.
-- [ ] Production `/api/health` currently returns HTTP 404. The local worktree
-  has a health handler, but it is not present in the deployed `main` source yet.
-- [ ] Production `/api/routes` responds with HTTP 503 and
-  `The route catalogue is temporarily unavailable.` The deployed handler
-  converts point-count and fee-config database errors to the same generic
-  response. Production `/api/stages?q=Nyali` and `?q=Malindi` both return HTTP
-  200 with no points, so the stage-search query itself is reachable. A leading,
-  unconfirmed cause is schema drift:
-  `/api/routes` also reads `PlatformConfig.bookingFeeAmount`, which was added
-  by the 11 October migration, while Vercel builds only run migrations when
-  `MIRELI_APPLY_DATABASE_MIGRATIONS=true`. Verify that flag and the production
-  migration status before changing the database. PR #4 now logs only sanitized
-  Prisma error codes and lets stage-count discovery fall back to the confirmed
-  KSh 50 display fee if the fee-config read alone fails; booking and trip APIs
-  still require full operating settings. GitHub Actions and the Vercel Preview
-  status passed for commit `568c349`, but the Preview is protected and the
-  connected Vercel account was denied team access (HTTP 403), so its API
-  behavior could not be independently verified. Production still runs the old
-  handler until the PR is merged and deployed.
-- [ ] Production `/api/trains` responds successfully with an empty train list.
-- [ ] Production `/api/trips` reports `hasEligibleDrivers: false` and no trips.
-  `/api/v1/driver/status` reports strict mode (`simulation: false`), email
-  sign-in open, and new driver registration paused. There is no supply for a
-  customer booking to match against.
-- [x] Local Docker `/api/health` responds `ok`; the route count and train list
-  are empty and local trip availability reports no eligible drivers.
-- [x] The local container is explicitly in simulation mode. Real Africa's
-  Talking, Brevo, and Daraja credentials and `DRIVER_AUTH_SECRET` are absent;
-  local simulation is useful for development but does not verify live sign-in,
-  collection, refunds, or driver payouts.
-- [ ] The last readable Vercel environment listing did not include
-  `MIRELI_API_ORIGIN`; the latest environment query was denied with HTTP 403,
-  so recheck the variable when Vercel access is restored. If it is unset, API
-  calls are not proxying to the shared Docker backend. Before enabling that
-  proxy, provide a stable public HTTPS API origin and set the correct backend
-  for each Vercel environment. A local Docker address is not reachable from
-  Vercel.
-- [ ] Reconnect Vercel access for the project team, then inspect the protected
-  Preview and confirm its route, timetable, point-search, and driver-availability
-  responses before promoting the fix.
-- [ ] Investigate the production `/api/routes` runtime error, then load only the
-  approved stage catalogue and timetable and complete a real staging booking
-  through driver assignment and payment reconciliation.
+- [x] EC2 `i-097df027e02b0708f` is running in `eu-north-1`, with SSM Online.
+- [x] The one `mireli` container runs the web frontend, API, and PostgreSQL on
+  image `794fb87`; Caddy and Docker are active on the host.
+- [x] Internal `GET /api/health` returns `{"status":"ok"}`.
+- [x] Driver API is strict (`simulation: false`). Phone/email sign-in,
+  registration, and navigation are currently closed.
+- [x] Local Docker is a test environment only. The AWS VM continues serving
+  independently when the developer's computer is off.
+- [ ] `mirelisgr.duckdns.org` still resolves to old IP `105.161.112.67` rather
+  than EIP `13.53.183.149`. Rotate the exposed DuckDNS token, update its A
+  record, then verify Caddy TLS and public health/status checks.
+- [ ] Workflow run `38899005958` passed application and AWS-template checks
+  for commit `54dc413`; its ARM64 release-image check was still running at the
+  last check. Confirm completion before releasing it.
+- [ ] GitHub OIDC deployment remains disabled because AWS project policy
+  denied `iam:CreateOpenIDConnectProvider`. Do not configure static AWS keys
+  in GitHub; use the documented short-lived AWS CLI/SSM release process until
+  AWS policy is resolved.
+- [ ] Real passenger/driver authentication, M-Pesa callbacks and reconciliation,
+  Brevo ticket delivery, and post-trip payouts are not configured on the VM.
+- [ ] Approved stage catalogue, timetable, and driver supply are missing. The
+  passenger UI must keep its honest empty state; no customer booking can yet be
+  matched successfully.
+
+Previous Vercel checks in older project notes are historical only. AWS EC2 is
+the intended web/API host; the local Docker stack does not serve production.
 
 ## Completed in this change
 
@@ -167,8 +141,18 @@ approved route data are live.
 - [ ] Add booking lookup by booking ID/phone and test it with support scenarios.
 - [ ] Verify SMS/email delivery, privacy/terms links, and secure document storage
   before opening driver registration.
-- [ ] Run the GitHub CI workflow and Vercel Preview build from the committed
-  branch. Apply migrations only through the approved deployment setting.
+- [x] Add `/sitemap.xml` for the public booking homepage and `robots.txt` that
+  blocks indexing of admin, API, account, and local-demo routes.
+- [ ] After DNS/TLS cutover, verify `/sitemap.xml`, `/robots.txt`, canonical
+  metadata, and the favicon from the public hostname; do not submit a sitemap
+  while the production hostname points elsewhere.
+- [ ] Configure the Brevo sender and runtime secret on the AWS VM, authenticate
+  the owned mail domain with SPF/DKIM/DMARC, and verify a paid test booking
+  reaches a real passenger inbox. Confirm a duplicate callback does not resend
+  the ticket and review failures in the admin booking view.
+- [ ] Run the GitHub CI workflow for the committed branch and verify the ARM64
+  image build. Deploy only an immutable image through the AWS VM release
+  procedure; apply migrations only through the reviewed deployment setting.
 - [ ] Complete a full customer-to-driver journey in staging: choose route,
   point, date/train and cab; pay; receive confirmation; board with PIN; complete
   trip; confirm driver payout and ledger entries.

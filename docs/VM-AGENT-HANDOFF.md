@@ -2,6 +2,9 @@
 
 Updated 16 October 2026. This guide is for the developer or agent building Mireli Driver and working on the shared API. The Android app stays in its own repository; this repository contains the shared backend and web application.
 
+For Android API setup and flavor rules, read
+[DRIVER-SHARED-BACKEND-SETUP.md](DRIVER-SHARED-BACKEND-SETUP.md) first.
+
 ## Live AWS target
 
 - AWS project plan: Free, temporary pilot only. Region: `eu-north-1`.
@@ -11,7 +14,9 @@ Updated 16 October 2026. This guide is for the developer or agent building Mirel
 - ECR repository: `036834403673.dkr.ecr.eu-north-1.amazonaws.com/mireli-sgr-pilot-appimagerepository-juxctzu7badb`.
 - Intended public hostname: `mirelisgr.duckdns.org`; DNS has not been pointed to this VM and HTTPS has not been verified. The old DuckDNS token was exposed in a screenshot; the owner must rotate it before changing DNS.
 - Security group opens only inbound TCP 80/443. Port 22 is not open. The web app binds to host loopback port 3000 behind Caddy.
-- Docker and Caddy are active. `mireli-app` and `mireli-backup.timer` are enabled. The app waits for an image at the initial `bootstrap` tag; do not call it healthy until `/api/health` passes.
+- Latest SSM health check (16 October 2026): Docker, Caddy, and `mireli-app` are active; the single `mireli` container is healthy on image tag `794fb87`; `http://127.0.0.1:3000/api/health` returns `{"status":"ok"}`.
+- Driver status is strict (`simulation: false`), but phone/email sign-in, registration, and navigation are closed because production provider credentials and approved drivers are absent.
+- DuckDNS currently resolves to `105.161.112.67`, not the VM's EIP. HTTPS and public driver API access are unverified. Rotate the exposed token and point the A record to `13.53.183.149` before treating the site as online for customers.
 - Runtime database is PostgreSQL 16 embedded in the one Mireli image and persisted on the VM volume. Daily `pg_dump` backups are sent to the private, versioned S3 bucket `mireli-sgr-pilot-036834403673-db-backups-eu-north-1`, with 30-day expiry.
 
 The first cloud-init run failed because Amazon Linux `curl-minimal` conflicts with installing `curl`, and an unquoted heredoc expanded a database variable too early. Both issues are fixed in the template and the resolved user-data script was successfully rerun through SSM. Cloud-init still records the first run's error; the current systemd, Docker, SSM, and HTTP health checks are authoritative. Do not reset cloud-init or replace the VM to clear that historical error.

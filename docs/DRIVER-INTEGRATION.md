@@ -1,8 +1,13 @@
 # Connect Mireli Driver to this backend
 
-The driver API below is now implemented locally, with native Android integration
-and isolated PostgreSQL verification. It is not deployed to the official website.
-Only the server uses Prisma/PostgreSQL; Android uses authenticated HTTPS.
+The driver API runs on the same AWS VM as Mireli Web; Android uses the API over
+HTTPS and never connects to PostgreSQL directly. The internal VM health check
+passed on 16 October 2026, but the public DuckDNS record still points to the old
+IP and public TLS has not been verified. The API is strict mode but driver
+sign-in and registration remain closed until real credentials, staff review,
+and approved supply are ready. Follow
+[DRIVER-SHARED-BACKEND-SETUP.md](DRIVER-SHARED-BACKEND-SETUP.md) for the current
+VM access, build-flavor, and release rules.
 
 ## Implemented contract — 6 October 2026
 

@@ -19,6 +19,8 @@ Metadata:
       - Do not allow inbound SSH or expose the application port to the internet.
       - Do not switch customer DNS until DNS, TLS, booking, payment, driver,
         backup, and recovery checks pass.
+      - Read optional Brevo transactional-email settings only from the runtime
+        secret; keep credentials out of templates, images, and logs.
     mutability:
       AppInstance: replace-with-care
       DatabaseBackupBucket: retain-data
@@ -52,10 +54,10 @@ Resources:
     Type: AWS::SecretsManager::Secret
     Metadata:
       com.aws.cloudformation.Context:
-        why: Generate the embedded PostgreSQL password without placing it in user data or template outputs.
+        why: Keep database and provider credentials out of user data, template outputs, and image layers; expose only an explicit one-line runtime allowlist.
         must:
           - Only the EC2 instance role may read this secret.
-          - Use an alphanumeric value compatible with the container's environment file.
+          - Keep manually added values one line and compatible with the protected host runtime environment file.
     Properties:
       Description: Generated database password for the Mireli single-host pilot.
       GenerateSecretString:
@@ -430,6 +432,13 @@ Resources:
               docker pull "$ECR_URI:$IMAGE_TAG"
               umask 077
               printf 'POSTGRES_USER=mireli\nPOSTGRES_PASSWORD=%s\nPOSTGRES_DB=mireli\nSESSION_SECRET=%s\nNODE_OPTIONS=--max-old-space-size=768\nMIRELI_DATABASE_MODE=embedded\nMIRELI_DEMO_MODE=false\nMIRELI_ALLOW_UNSAFE_DEMO=false\nMIRELI_APPLY_DATABASE_MIGRATIONS=true\nMIRELI_BOOTSTRAP_PLATFORM_CONFIG=true\nMIRELI_PUBLIC_ORIGIN=https://%s\nTZ=Africa/Nairobi\n' "$DB_PASSWORD" "$SESSION_SECRET" "$PUBLIC_HOSTNAME" > /etc/mireli/runtime.env
+              for key in DRIVER_AUTH_SECRET AT_USERNAME AT_API_KEY AT_SENDER_ID BREVO_API_KEY BREVO_SENDER_EMAIL BREVO_SENDER_NAME MIRELI_SUPPORT_EMAIL VALHALLA_URL VALHALLA_API_TOKEN DRIVER_DOCUMENT_BUCKET DRIVER_SCAN_COMMAND DRIVER_COMPLIANCE_REVIEWERS DRIVER_SUPPORT_REVIEWERS DRIVER_FINANCE_REVIEWERS DRIVER_POLICY_VERSION DRIVER_PRIVACY_URL DRIVER_TERMS_URL MPESA_ENVIRONMENT MPESA_CONSUMER_KEY MPESA_CONSUMER_SECRET MPESA_SHORTCODE MPESA_PASSKEY MPESA_CALLBACK_BASE_URL MPESA_B2C_SHORTCODE MPESA_INITIATOR_NAME MPESA_INITIATOR_PASSWORD MPESA_SECURITY_CREDENTIAL MPESA_LIVE_PAYOUTS_ENABLED; do
+                value=$(printf '%s' "$DB_SECRET_JSON" | jq -r --arg name "$key" 'if .[$name] == null then empty elif (.[$name] | type) == "string" then .[$name] else error("optional runtime values must be strings") end')
+                if [[ -n "$value" ]]; then
+                  [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]]
+                  printf '%s=%s\n' "$key" "$value" >> /etc/mireli/runtime.env
+                fi
+              done
               chmod 0600 /etc/mireli/runtime.env
               exec docker run --rm --name mireli \
                 --publish 127.0.0.1:3000:3000 \
