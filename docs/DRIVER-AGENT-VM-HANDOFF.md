@@ -21,24 +21,25 @@ and inbound SSH is intentionally closed. Use the individually authorized AWS
 Systems Manager (SSM) path below. Do not share a teammate's AWS profile, open
 port 22, or copy a private key to the VM.
 
-## Latest connection check after EC2 access validation (16 October 2026, 22:18 EAT)
+## Latest connection attempt (17 October 2026)
 
-- AWS CLI authentication succeeded for the Mireli project in `eu-north-1`.
-- EC2 reports this instance as `running`, at `13.53.183.149`, with no key pair
-  (`KeyName` is unset), and instance profile
-  `mireli-sgr-pilot-AppInstanceProfile-dqfW7OaoQlbY`.
-- A fresh SSH attempt from the development workstation to
-  `ec2-user@13.53.183.149` timed out on port 22. AWS reports no EC2 key pair,
-  and the security group allows inbound TCP 80 and 443 only; SSH is intentionally
-  closed. The validation email did not change the instance key pair or ingress.
-- SSM reports the instance `Online` on Amazon Linux 2023, agent `3.3.5390.0`;
-  the latest heartbeat returned by AWS was 16 October at 22:18 East Africa Time.
-- This workstation does not have `session-manager-plugin`, so an interactive
-  CLI session was not opened. Use the AWS Management Console's Session Manager
-  for a browser terminal, or install the official plugin before running
-  `aws ssm start-session`. Read-only SSM Run Command health checks succeeded
-  earlier on 16 October; no application or host changes were made in this
-  connection attempt.
+- AWS emailed that the request for EC2 in Europe (Stockholm) requiring
+  additional validation was validated. This is an account-access validation;
+  it does not create an instance key pair, add SSH ingress, or itself provide
+  local CLI credentials.
+- AWS CLI v2.38.1 is installed but was not on this shell's PATH. The `mireli`
+  profile currently has no usable credentials (`NoCredentials`). The `aws
+  login --profile mireli --region eu-north-1` browser flow was started and is
+  awaiting completion.
+- A direct, batch-mode SSH attempt to `ec2-user@13.53.183.149` timed out on
+  TCP port 22. The last AWS control-plane inspection (16 October) reported no
+  EC2 key pair and a security group that permits inbound TCP 80/443 only. No
+  VM or application changes were made in this attempt.
+- The last successful SSM report (16 October, 22:18 EAT) showed the instance
+  `Online` on Amazon Linux 2023 with agent `3.3.5390.0`. The interactive CLI
+  session could not be opened because `session-manager-plugin` is missing.
+  After the AWS login completes, retry the read-only SSM status check; use the
+  AWS Console Session Manager as the browser-terminal fallback.
 
 For another developer to use the same VM, invite them as an AWS project team
 member and grant only the SSM session permissions they need. They must use
