@@ -60,6 +60,7 @@ const request = (body: unknown) => new NextRequest("https://mireli.test/api/book
 
 const validBookingBody = (overrides: Record<string, unknown> = {}) => ({
   routeId: "route-1",
+  tripId: "trip-1",
   stageId: "stage-1",
   direction: "FROM_TERMINUS",
   travelDate: "2026-10-16",
@@ -106,6 +107,24 @@ describe("booking creation with no driver supply", () => {
     expect(mocks.bookingCreate).not.toHaveBeenCalled();
   });
 
+  it("requires the exact cab selected by the passenger", async () => {
+    const response = await POST(request(validBookingBody({ tripId: null })));
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain("available cab");
+    expect(mocks.getConfig).not.toHaveBeenCalled();
+    expect(mocks.bookingCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects more than six pooled seats instead of silently changing the booking", async () => {
+    const response = await POST(request(validBookingBody({ seats: 7 })));
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain("1 and 6 seats");
+    expect(mocks.getConfig).not.toHaveBeenCalled();
+    expect(mocks.bookingCreate).not.toHaveBeenCalled();
+  });
+
   it("rejects an inactive route before creating a booking", async () => {
     mocks.routeFindUnique.mockResolvedValue({
       id: "route-1",
@@ -115,6 +134,7 @@ describe("booking creation with no driver supply", () => {
 
     const response = await POST(request({
       routeId: "route-1",
+      tripId: "trip-1",
       stageId: "stage-1",
       travelDate: "2026-10-16",
       passengerName: "Amina Wanjiru",
@@ -157,6 +177,7 @@ describe("booking creation with no driver supply", () => {
 
     const response = await POST(request({
       routeId: "route-1",
+      tripId: "trip-1",
       stageId: "terminus",
       travelDate: "2026-10-16",
       passengerName: "Amina Wanjiru",
@@ -178,6 +199,7 @@ describe("booking creation with no driver supply", () => {
   it("removes the unpaid draft and tells the passenger no payment was taken", async () => {
     const response = await POST(request({
       routeId: "route-1",
+      tripId: "trip-1",
       stageId: "stage-1",
       direction: "FROM_TERMINUS",
       travelDate: "2026-10-16",
@@ -195,6 +217,7 @@ describe("booking creation with no driver supply", () => {
     expect((await response.json()).error).toContain("No payment was taken");
     expect(mocks.bookingCreate).toHaveBeenCalledOnce();
     expect(mocks.allocateBooking).toHaveBeenCalledOnce();
+    expect(mocks.allocateBooking).toHaveBeenCalledWith(expect.objectContaining({ selectedTripId: "trip-1" }));
     expect(mocks.bookingDelete).toHaveBeenCalledWith({ where: { id: "booking-1" } });
     expect(mocks.audit).not.toHaveBeenCalled();
   });
@@ -228,6 +251,7 @@ describe("booking creation with no driver supply", () => {
 
     const response = await POST(request({
       routeId: "route-1",
+      tripId: "trip-1",
       stageId: "stage-1",
       direction: "FROM_TERMINUS",
       travelDate: "2026-10-16",

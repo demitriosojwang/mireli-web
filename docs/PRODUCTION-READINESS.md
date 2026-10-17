@@ -6,27 +6,30 @@ is empty, there is no approved driver, and live payment/email credentials have
 not been installed. Keep pooled cabs at zero and do not accept payment until the
 end-to-end gates below pass.
 
-## AWS deployment state (read-only SSM verification, 16 October 2026)
+## AWS deployment state (read-only SSM verification, 18 October 2026)
 
 - [x] EC2 `i-097df027e02b0708f` is running in `eu-north-1`, with SSM Online.
-- [x] One `mireli` Docker container is healthy on image `794fb87`; Caddy and
-  Docker are active on the host.
+- [x] Exactly one `mireli` Docker container is healthy on image `794fb87`, bound
+  to `127.0.0.1:3000`; Caddy, Docker, and the app service are active.
 - [x] Internal `GET /api/health` returns `{"status":"ok"}`.
 - [x] Internal `GET /api/routes` returns `pointCount: 0` and the confirmed
   KSh 50 booking fee; `GET /api/trains` returns no trains; searching Mtwapa
-  returns no points. The production catalogue is therefore genuinely empty.
-- [x] Customer availability `GET /api/trips?date=2026-10-16` returns
+  returns `{"points":[],"hasMore":false}`. This is why the drop-off list is
+  empty: there are no active published stops in the production catalogue, not
+  an unbounded customer-side list request.
+- [x] Customer availability `GET /api/trips?date=2026-10-18&direction=FROM_TERMINUS` returns
   `{"hasEligibleDrivers":false,"trips":[]}`. The web app shows zero pooled cabs
   and does not create booking inventory when no eligible driver exists.
-- [x] Driver API is strict (`simulation: false`). Phone/email sign-in,
-  registration, and navigation are currently closed.
+- [x] Driver API is strict (`simulation: false`); phone/email sign-in,
+  registration, and navigation are currently closed. The status response says
+  driver email sign-in is not configured.
 - [x] No driver or stop data was added to make the booking UI look populated.
 - [x] Local Docker is a test environment only. The AWS VM continues serving
   independently when the developer's computer is off.
 - [ ] `mirelisgr.duckdns.org` still resolves to old IP `105.161.112.67` rather
-  than EIP `13.53.183.149`; a public HTTPS health request timed out. Rotate the
-  exposed DuckDNS token, update its A record, then verify Caddy TLS and public
-  health/status checks from outside AWS.
+  than EIP `13.53.183.149`. Rotate the exposed DuckDNS token, update its A
+  record, then verify Caddy TLS and public health/status checks from outside
+  AWS. DNS has not been changed.
 - [x] The latest application source commit `1d6b5ae` passed GitHub Actions on
   16 October 2026: application verification, AWS infrastructure validation,
   and AMD64/ARM64 production image builds all succeeded ([run 38946592991](https://github.com/demitriosojwang/mireli-web/actions/runs/38946592991)).
@@ -56,6 +59,14 @@ the intended web/API host; the local Docker stack does not serve production.
   show a retryable booking-session error and block booking submission when
   passenger identity could not be initialized.
 - [x] Require an explicit pickup/drop-off point before a cab can be booked.
+- [x] Keep the chosen cab ID and passenger-selected travel date through booking
+  creation; a stale or full cab now fails without payment instead of silently
+  moving the booking to another departure.
+- [x] Keep the booking UI and API aligned at a maximum of six pooled seats,
+  reject out-of-range server requests instead of silently clamping them, and
+  disable a cab card that cannot fit the requested seats.
+- [x] Show cab inventory only after the passenger chooses a stop, reducing
+  unnecessary page length and keeping the no-approved-driver state at zero.
 - [x] Revalidate the route is active and the selected stage is a published
   non-terminus stop in the booking API; reject malformed ride-option booleans
   and invalid fare data before writing a booking.

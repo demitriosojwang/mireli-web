@@ -214,13 +214,14 @@ export async function ensureTrips(): Promise<number> {
   return created;
 }
 
-/** Auto-allocate a booking to the best trip: same route + direction, same
- *  calendar day, seats available, departs at least bookingWindowMinutes out,
- *  not yet departed. Falls back to creating an unscheduled trip with a free
- *  driver. Returns null when nothing is possible (admin sees it as an alert). */
+/** Allocate to a feasible trip on the requested route + direction and
+ *  calendar day. Customer bookings can pin the selected trip so a stale or
+ *  full cab never silently becomes a different departure. Only unpinned
+ *  internal callers may fall back to an extra departure. */
 export async function allocateBooking(params: {
   bookingId: string;
   routeId: string;
+  selectedTripId?: string;
   direction: string;
   seats: number;
   travelDate: Date;
@@ -238,6 +239,7 @@ export async function allocateBooking(params: {
   // Prefer the earliest feasible departure that fits everyone
   const candidates = await db.trip.findMany({
     where: {
+      ...(params.selectedTripId ? { id: params.selectedTripId } : {}),
       routeId: params.routeId,
       direction: params.direction,
       departureAt: { gte: from, lt: dayEnd },
@@ -288,6 +290,14 @@ export async function allocateBooking(params: {
           : `Auto-allocated — ${reservation.seatsLeft} seats left on that departure`,
       };
     }
+  }
+
+  if (params.selectedTripId) {
+    await db.booking.update({
+      where: { id: params.bookingId },
+      data: { allocationNote: "Selected cab is no longer available — passenger must choose again" },
+    });
+    return { tripId: null, note: "Selected cab is no longer available — choose another cab" };
   }
 
   // No scheduled capacity — try to spin up an extra trip with a free driver.

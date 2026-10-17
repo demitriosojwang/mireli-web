@@ -74,6 +74,7 @@ export interface BookableTripWithStages extends BookableTrip {
 export interface BookingDraft {
   trip: BookableTripWithStages;
   stageId: string;
+  travelDate: string;
   seats: number;
   charter: boolean;
   homePickup: boolean;
@@ -206,6 +207,7 @@ function BookingSheetContent({
       const res = await api<CreateResponse>("/api/bookings", {
         body: {
           routeId: trip.routeId,
+          tripId: trip.id,
           direction: trip.direction,
           stageId: draft.stageId,
           homePickup: draft.homePickup,
@@ -213,7 +215,7 @@ function BookingSheetContent({
           seats: draft.charter ? 1 : draft.seats,
           isCharter: draft.charter,
           applyCredit: useCredit && creditBalance > 0,
-          travelDate: trip.departureAt.slice(0, 10),
+          travelDate: draft.travelDate,
           passengerName: details.fullName.trim(),
           passengerPhone: details.phone,
           passengerEmail: details.email.trim(),

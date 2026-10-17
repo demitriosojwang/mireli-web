@@ -94,6 +94,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const {
     routeId,
+    tripId,
     direction = "FROM_TERMINUS",
     stageId,
     homePickup = false,
@@ -150,11 +151,14 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
-  if (typeof routeId !== "string" || routeId.length === 0 || typeof stageId !== "string" || stageId.length === 0) {
-    return NextResponse.json({ error: "Choose a published route and stop." }, { status: 400 });
+  if (typeof routeId !== "string" || routeId.length === 0 || typeof tripId !== "string" || tripId.length === 0 || typeof stageId !== "string" || stageId.length === 0) {
+    return NextResponse.json({ error: "Choose an available cab, route, and stop." }, { status: 400 });
   }
   if (typeof homePickup !== "boolean" || typeof isCharter !== "boolean" || typeof applyCredit !== "boolean") {
     return NextResponse.json({ error: "Review your ride options and try again." }, { status: 400 });
+  }
+  if (!Number.isSafeInteger(seats) || seats < 1 || seats > 6) {
+    return NextResponse.json({ error: "Choose between 1 and 6 seats." }, { status: 400 });
   }
 
   const cfg = await getConfig();
@@ -174,7 +178,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Door-to-door service needs a pickup or drop-off address" }, { status: 400 });
   }
 
-  const tripSeats = isCharter ? 0 : Math.max(1, Math.min(parseInt(seats, 10) || 1, 6));
+  const tripSeats = isCharter ? 0 : seats;
   let fare = isCharter ? 0 : stage.fare * tripSeats;
   const homeSurcharge = homePickup ? (isCharter ? stage.homeSurcharge : stage.homeSurcharge * tripSeats) : 0;
   const platformFeeAmount = cfg.bookingFeeAmount;
@@ -249,6 +253,7 @@ export async function POST(req: NextRequest) {
     allocation = await allocateBooking({
       bookingId: booking.id,
       routeId: route.id,
+      selectedTripId: tripId,
       direction,
       seats: isCharter ? 999 : tripSeats, // charter handled inside allocator
       travelDate: travelDateDate,
@@ -266,7 +271,7 @@ export async function POST(req: NextRequest) {
   if (!allocation.tripId) {
     await db.booking.delete({ where: { id: booking.id } });
     return NextResponse.json(
-      { error: "No approved driver and cab are available for this journey yet. No payment was taken; please try another date later." },
+      { error: "That cab is no longer available. No payment was taken; refresh the list and choose another cab or date." },
       { status: 409 },
     );
   }

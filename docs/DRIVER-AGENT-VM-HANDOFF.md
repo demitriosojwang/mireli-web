@@ -1,6 +1,6 @@
 # Mireli Driver agent: shared VM handoff
 
-Updated 16 October 2026. Use this when connecting the Mireli Driver Android
+Updated 18 October 2026. Use this when connecting the Mireli Driver Android
 project to the same backend used by Mireli Web.
 
 ## What is running
@@ -21,25 +21,35 @@ and inbound SSH is intentionally closed. Use the individually authorized AWS
 Systems Manager (SSM) path below. Do not share a teammate's AWS profile, open
 port 22, or copy a private key to the VM.
 
-## Latest connection attempt (17 October 2026)
+## Latest connection and VM check (18 October 2026)
 
-- AWS emailed that the request for EC2 in Europe (Stockholm) requiring
-  additional validation was validated. This is an account-access validation;
-  it does not create an instance key pair, add SSH ingress, or itself provide
-  local CLI credentials.
-- AWS CLI v2.38.1 is installed but was not on this shell's PATH. The `mireli`
-  profile currently has no usable credentials (`NoCredentials`). The `aws
-  login --profile mireli --region eu-north-1` browser flow was started and is
-  awaiting completion.
-- A direct, batch-mode SSH attempt to `ec2-user@13.53.183.149` timed out on
-  TCP port 22. The last AWS control-plane inspection (16 October) reported no
-  EC2 key pair and a security group that permits inbound TCP 80/443 only. No
-  VM or application changes were made in this attempt.
-- The last successful SSM report (16 October, 22:18 EAT) showed the instance
-  `Online` on Amazon Linux 2023 with agent `3.3.5390.0`. The interactive CLI
-  session could not be opened because `session-manager-plugin` is missing.
-  After the AWS login completes, retry the read-only SSM status check; use the
-  AWS Console Session Manager as the browser-terminal fallback.
+- AWS CLI v2.38.1 is installed at
+  `C:\Users\favou\AppData\Local\Programs\Amazon\AWSCLIV2\aws.exe`; this
+  Codex shell could not access it through PATH, so commands used the explicit
+  path. `aws login --profile mireli --region eu-north-1` completed. AWS CLI
+  credentials are temporary; every developer must sign in with their own AWS
+  identity and must not reuse this workstation's profile.
+- SSM reports `i-097df027e02b0708f` `Online` on Amazon Linux with agent
+  `3.3.5390.0`. Read-only SSM Run Command works. The Session Manager plugin is
+  not available in this shell, so an interactive `aws ssm start-session` was
+  not verified.
+- Read-only checks showed Docker, Caddy, and `mireli-app` active. There is one
+  healthy container named `mireli`, image tag `794fb87`, bound to
+  `127.0.0.1:3000`; `/api/health` returns `{"status":"ok"}`.
+- `/api/routes` returns `pointCount: 0` and a KSh 50 fee; `/api/trains` is
+  empty; `/api/stages?q=Mtwapa` returns no points; and today's trip query
+  returns `hasEligibleDrivers: false` with no trips. The production catalogue
+  and approved driver supply are empty.
+- `/api/v1/driver/status` is strict (`simulation: false`) but phone/email
+  sign-in, registration, and navigation are closed. Its response says driver
+  email sign-in is not configured.
+- `mirelisgr.duckdns.org` resolves to `105.161.112.67`, not the VM's EIP
+  `13.53.183.149`. Public DNS/TLS is not ready. Rotate the DuckDNS token that
+  appeared in a screenshot before changing DNS.
+- The prior SSH attempt timed out on port 22. The instance has no EC2 key pair
+  and inbound SSH is intentionally closed. Do not open SSH as a workaround.
+- These were read-only checks; no VM configuration, DNS, or application state
+  was changed.
 
 For another developer to use the same VM, invite them as an AWS project team
 member and grant only the SSM session permissions they need. They must use
@@ -88,21 +98,12 @@ role and must never be copied into Android.
 
 ## Verified VM state
 
-On 16 October 2026 at 22:18 EAT, read-only SSM Run Command checks succeeded.
-Docker, Caddy, and `mireli-app` were active; `/api/health` returned
-`{"status":"ok"}`. Driver status returned strict mode (`simulation: false`),
-while phone sign-in, email sign-in, registration, and navigation were all
-closed; the API message says driver email sign-in is not configured. `/api/routes`
-reported `pointCount: 0`, and `/api/trains` returned an empty list, so there is
-no bookable production catalogue yet. The interactive CLI shell could not start
-from the current workstation because its Session Manager plugin is not
-installed; SSM Run Command itself worked. No VM or application changes were made.
-
-The public hostname still resolves to an old IP, not the VM's EIP, and public
-TLS has not been verified. The DuckDNS token previously shown in a screenshot
-must be rotated by the owner before DNS is changed. Do not use the public URL in
-a production Android build until the owner verifies DNS, HTTPS, and strict-mode
-status from outside AWS.
+The read-only state above is current as of 18 October 2026. The VM is healthy
+internally, but it cannot support a customer or driver pilot until its route and
+train catalogue, approved drivers, driver authentication, public DNS/TLS,
+payment callbacks, and passenger/driver email delivery are configured and
+tested. Do not use the public URL in a production Android build until the owner
+verifies DNS, HTTPS, and strict-mode status from outside AWS.
 
 ## Android and shared-backend contract
 

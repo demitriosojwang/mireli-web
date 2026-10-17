@@ -270,6 +270,7 @@ export default function Home() {
     setDraft({
       trip: { ...trip, stages: [selectedPoint.point] },
       stageId: selectedPoint.point.id,
+      travelDate: date,
       seats,
       charter,
       homePickup,
@@ -323,6 +324,7 @@ export default function Home() {
 
   // Trips after train + point filters
   const visibleTrips = useMemo(() => {
+    if (!selectedPoint) return [];
     let list = (trips || []).filter((trip) =>
       trip.bookable && (charter ? trip.seatsLeft === trip.capacity : trip.seatsLeft > 0),
     );
@@ -333,10 +335,10 @@ export default function Home() {
 
   // How many seats can actually be booked on the cabs currently listed?
   const seatCap = useMemo(() => {
-    if (loading) return 14;
+    if (loading) return 1;
     if (!visibleTrips.length) return 1;
     const maxLeft = Math.max(...visibleTrips.map((t) => Math.max(t.seatsLeft, 0)));
-    return Math.max(1, Math.min(14, maxLeft));
+    return Math.max(1, Math.min(6, maxLeft));
   }, [loading, visibleTrips]);
 
   const seats = Math.min(requestedSeats, seatCap);
@@ -718,7 +720,9 @@ export default function Home() {
                 <h3 className="text-sm font-medium">
                   {charter ? "Available for charter" : "Available pooled cabs"}
                 </h3>
-                <span className="text-xs text-muted-foreground">{loading ? "…" : `${visibleTrips.length} cabs`}</span>
+                <span className="text-xs text-muted-foreground">
+                  {loading ? "…" : hasEligibleDrivers === false ? "0 cabs" : selectedPoint ? `${visibleTrips.length} cabs` : "Choose a stop"}
+                </span>
               </div>
 
               {loading && (
@@ -743,9 +747,9 @@ export default function Home() {
                       ? "This train’s meet-cab has already left for the selected day — pick a later train or another date."
                       : hasEligibleDrivers === false
                         ? "No bookable cabs are available yet. Drivers will appear here after onboarding and approval."
-                        : selectedPoint
-                        ? "No available cabs serve this point for that train. Try another point or clear your selection."
-                        : "No available cabs are listed for this train yet."}
+                        : !selectedPoint
+                        ? `Choose a ${pointLabelCap.toLowerCase()} point to see cabs serving that stop.`
+                        : "No available cabs serve this point for that train. Try another point or date."}
                   </CardContent>
                 </Card>
               )}
@@ -881,7 +885,8 @@ function CabCard({
     : (pointFare ?? trip.minFare) * seats;
   const surcharge = homePickup ? (pointSurcharge ?? 0) * (charter ? 1 : seats) : 0;
   const fare = baseFare + surcharge + (hasPoint && !charter ? trip.platformFeeAmount : 0);
-  const full = trip.seatsLeft <= 0 || !trip.bookable;
+  const insufficientSeats = charter ? trip.seatsLeft !== trip.capacity : trip.seatsLeft < seats;
+  const full = insufficientSeats || !trip.bookable;
 
   return (
     <Card className="overflow-hidden">
@@ -951,7 +956,7 @@ function CabCard({
           {!hasPoint
             ? `Choose a ${trip.pointsLabel} point first`
             : full
-            ? trip.seatsLeft <= 0
+            ? insufficientSeats
               ? "Not enough seats"
               : "Unavailable"
             : charter
