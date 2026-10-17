@@ -133,15 +133,18 @@ export default function Home() {
   const [pointSearchStatus, setPointSearchStatus] = useState<CatalogueStatus | "idle">("idle");
   const [pointSearchHasMore, setPointSearchHasMore] = useState(false);
   const [pointSearchRetry, setPointSearchRetry] = useState(0);
-  const queryKey = `${direction}|${date}`;
-  const loading = isRefreshing || loadedQuery !== queryKey;
-
   // selection state (original store equivalents)
   const [trainKey, setTrainKey] = useState<string | null>(null);
   const [selectedPoint, setSelectedPoint] = useState<SelectedPoint | null>(null);
   const [homePickup, setHomePickup] = useState(false);
   const [charter, setCharter] = useState(false);
   const [requestedSeats, setSeats] = useState(1);
+
+  // Availability is route-specific and is fetched only after a passenger
+  // chooses a stop. This keeps the initial booking form free of broad trip
+  // queries and lets the stop choice drive the next compact step.
+  const queryKey = selectedPoint ? `${direction}|${date}|${selectedPoint.route.id}` : null;
+  const loading = Boolean(queryKey) && (isRefreshing || loadedQuery !== queryKey);
 
   const [draft, setDraft] = useState<BookingDraft | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -238,10 +241,14 @@ export default function Home() {
   }, [isAuthed]);
 
   useEffect(() => {
-    if (!splashReady || showSplash) return;
+    if (!splashReady || showSplash || !selectedPoint || !queryKey) return;
+    const requestedQueryKey = queryKey;
     const controller = new AbortController();
     let active = true;
-    api<{ trips: BookableTrip[]; hasEligibleDrivers: boolean }>(`/api/trips?date=${date}&direction=${direction}`, { signal: controller.signal })
+    api<{ trips: BookableTrip[]; hasEligibleDrivers: boolean }>(
+      `/api/trips?date=${date}&direction=${direction}&routeId=${encodeURIComponent(selectedPoint.route.id)}`,
+      { signal: controller.signal },
+    )
       .then((res) => {
         if (!active) return;
         setTrips(res.trips);
@@ -257,13 +264,13 @@ export default function Home() {
       .finally(() => {
         if (!active) return;
         setLoading(false);
-        setLoadedQuery(queryKey);
+        setLoadedQuery(requestedQueryKey);
       });
     return () => {
       active = false;
       controller.abort();
     };
-  }, [splashReady, showSplash, direction, date, queryKey, tripRefreshKey]);
+  }, [splashReady, showSplash, direction, date, selectedPoint?.route.id, queryKey, tripRefreshKey]);
 
   function openBooking(trip: BookableTrip) {
     if (!selectedPoint || selectedPoint.route.id !== trip.routeId) return;
@@ -297,11 +304,11 @@ export default function Home() {
           time: mtmTime,
           name: t.name,
           label: direction === "FROM_TERMINUS" ? "Arrives MTM" : "Departs MTM",
-          gone: trips !== null && hasEligibleDrivers === true && !(trips || []).some((x) => x.train && `${x.train.name}-${x.train.mtmTime}` === key),
+          gone: !!selectedPoint && loadedQuery === queryKey && trips !== null && hasEligibleDrivers === true && !(trips || []).some((x) => x.train && `${x.train.name}-${x.train.mtmTime}` === key),
         };
       })
       .sort((a, b) => a.time.localeCompare(b.time));
-  }, [timetable, direction, trips, hasEligibleDrivers]);
+  }, [timetable, direction, trips, hasEligibleDrivers, selectedPoint, loadedQuery, queryKey]);
 
   const selectedTrainGone = trainKey ? (trainOptions.find((o) => o.key === trainKey)?.gone ?? false) : false;
 
@@ -458,7 +465,14 @@ export default function Home() {
                   <MapPin className="h-3.5 w-3.5" /> {pointLabelCap} point
                 </div>
                 {selectedPoint && (
-                  <button onClick={() => { setSelectedPoint(null); setHomePickup(false); }} className="text-[11px] text-primary hover:underline">
+                  <button onClick={() => {
+                    setSelectedPoint(null);
+                    setHomePickup(false);
+                    setTrips(null);
+                    setHasEligibleDrivers(null);
+                    setLoadedQuery(null);
+                    setTripsStatus("loading");
+                  }} className="text-[11px] text-primary hover:underline">
                     Clear selection
                   </button>
                 )}
@@ -591,12 +605,17 @@ export default function Home() {
                       {selectedPoint.coast === "south" ? "South Coast" : "North Coast"} · {ksh(selectedPoint.point.fare)} per seat
                     </p>
                   )}
+                  {!selectedPoint && routesStatus === "ready" && pointCount > 0 && (
+                    <p className="px-1 text-[11px] text-muted-foreground">
+                      Choose a stop to see ride options and cabs for that route.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
 
             {/* Ride type and door service: compact choices with explicit states. */}
-            <section className="space-y-2.5" aria-labelledby="ride-options-title">
+            {selectedPoint && <section className="space-y-2.5" aria-labelledby="ride-options-title">
               <div className="flex items-baseline justify-between">
                 <h2 id="ride-options-title" className="text-sm font-semibold">Choose your ride</h2>
                 <span className="text-[11px] text-muted-foreground">You can review the fare next</span>
@@ -692,10 +711,10 @@ export default function Home() {
                         : ksh(farePreview.total)}
                 </span>
               </div>
-            </section>
+            </section>}
 
             {/* Seats (pooled only) */}
-            {!charter && (
+            {selectedPoint && !charter && (
               <div>
                 <div className="mb-2 flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
                   <Users className="h-3.5 w-3.5" /> How many seats?
@@ -715,7 +734,7 @@ export default function Home() {
             )}
 
             {/* Available cabs */}
-            <div className="space-y-2">
+            {selectedPoint && <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium">
                   {charter ? "Available for charter" : "Available pooled cabs"}
@@ -770,7 +789,7 @@ export default function Home() {
                     />
                   </motion.div>
                 ))}
-            </div>
+            </div>}
 
             <details className="rounded-xl border bg-card px-3.5 py-3 text-sm">
               <summary className="cursor-pointer font-medium">Fare and service details</summary>

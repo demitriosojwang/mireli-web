@@ -67,6 +67,9 @@ the intended web/API host; the local Docker stack does not serve production.
   disable a cab card that cannot fit the requested seats.
 - [x] Show cab inventory only after the passenger chooses a stop, reducing
   unnecessary page length and keeping the no-approved-driver state at zero.
+- [x] Defer trip-availability requests until a stop is chosen, and filter the
+  availability query to that stop's active route instead of loading every route
+  for the selected date and direction on the initial page view.
 - [x] Revalidate the route is active and the selected stage is a published
   non-terminus stop in the booking API; reject malformed ride-option booleans
   and invalid fare data before writing a booking.

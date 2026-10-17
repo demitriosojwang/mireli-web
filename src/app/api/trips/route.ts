@@ -12,9 +12,13 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const date = searchParams.get("date"); // YYYY-MM-DD
   const direction = searchParams.get("direction") || "FROM_TERMINUS";
+  const routeId = searchParams.get("routeId");
   if (!date) return NextResponse.json({ error: "date required" }, { status: 400 });
 
   if (!["FROM_TERMINUS", "TO_TERMINUS"].includes(direction)) return NextResponse.json({ error: "Invalid direction" }, { status: 400 });
+  if (routeId !== null && (routeId.length === 0 || routeId.length > 64)) {
+    return NextResponse.json({ error: "Invalid route" }, { status: 400 });
+  }
   let dayStart: Date;
   let dayEnd: Date;
   try { ({ start: dayStart, end: dayEnd } = nairobiDayRange(date)); }
@@ -55,10 +59,12 @@ export async function GET(req: NextRequest) {
     const now = new Date();
     const trips = await db.trip.findMany({
       where: {
+        ...(routeId ? { routeId } : {}),
         direction,
         driverId: { in: eligibleDriverIds },
         departureAt: { gte: dayStart, lt: dayEnd },
         status: { in: ["scheduled", "locked", "departed"] },
+        route: { is: { active: true } },
       },
       orderBy: { departureAt: "asc" },
       select: {

@@ -82,7 +82,7 @@ describe("customer trip availability", () => {
       bookings: [{ seats: 1 }],
     }]);
 
-    const response = await GET(request());
+    const response = await GET(request("date=2026-10-11&routeId=route-1"));
     const result = await response.json();
 
     expect(response.status).toBe(200);
@@ -92,6 +92,8 @@ describe("customer trip availability", () => {
     expect(result.trips[0]).not.toHaveProperty("stages");
     expect(result.trips[0]).not.toHaveProperty("points");
     expect(result.trips[0].driver).not.toHaveProperty("phone");
+    expect(mocks.tripFindMany.mock.calls[0][0].where.routeId).toBe("route-1");
+    expect(mocks.tripFindMany.mock.calls[0][0].where.route).toEqual({ is: { active: true } });
     expect(mocks.tripFindMany.mock.calls[0][0].where.driverId.in).toEqual([eligibleDriver.id]);
     expect(mocks.driverFindMany.mock.calls[0][0].select.application.select.documents.select)
       .toEqual({ type: true, state: true, scanState: true, expiresAt: true });
@@ -145,6 +147,13 @@ describe("customer trip availability", () => {
 
   it("rejects a missing date before querying the database", async () => {
     const response = await GET(request("direction=FROM_TERMINUS"));
+
+    expect(response.status).toBe(400);
+    expect(mocks.driverFindMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects an empty route filter before querying the database", async () => {
+    const response = await GET(request("date=2026-10-11&routeId="));
 
     expect(response.status).toBe(400);
     expect(mocks.driverFindMany).not.toHaveBeenCalled();
