@@ -168,6 +168,16 @@ the intended web/API host; the local Docker stack does not serve production.
   covers booking states `cancelled` and `no_show`; verify other trip cutoffs.
 - [ ] Configure and verify production Daraja collection callbacks and
   reconciliation. A successful STK prompt alone must not confirm a booking.
+- [x] In the current source, require signed authorization tokens on M-Pesa
+  callback routes, and save a per-booking payment intent before sending an STK
+  request so retries do not
+  create duplicate prompts and an early callback can find its booking.
+- [ ] From Admin → Payments, register the current signed C2B confirmation URL
+  with Safaricom and verify signed STK, timeout, C2B, and B2C callbacks in the
+  sandbox. The callback URLs include query parameters; confirm Safaricom
+  preserves them through the callback. Their value is derived from the stable
+  `SESSION_SECRET`; re-register callbacks and wait for pending payments to
+  settle before rotating that secret.
 - [ ] Run sandbox end-to-end cases for payment success, failure, duplicate and
   missing callbacks, refund/credit, and passenger cancellation cutoffs.
 - [ ] Verify completed-trip settlement with real examples: shared ride has no

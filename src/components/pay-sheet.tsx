@@ -55,6 +55,8 @@ function PaySheetContent({ open, onClose, booking, onPaid }: PaySheetProps) {
   const [paybill, setPaybill] = useState<string | null>(null);
   const [step, setStep] = useState<PayStep>("phone");
   const [phone, setPhone] = useState(booking.passengerPhone || "");
+  const [paymentPending, setPaymentPending] = useState(false);
+  const [paymentMessage, setPaymentMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<{ receipt: string; amount: number } | null>(null);
@@ -81,9 +83,12 @@ function PaySheetContent({ open, onClose, booking, onPaid }: PaySheetProps) {
     setBusy(true);
     setError(null);
     try {
-      await api(`/api/bookings/${booking.id}`, {
+      const result = await api<{ paymentPending?: boolean; message?: string; phone?: string }>(`/api/bookings/${booking.id}`, {
         body: { action: "pay", phone },
       });
+      setPaymentPending(Boolean(result.paymentPending));
+      setPaymentMessage(result.message || null);
+      if (result.phone) setPhone(result.phone);
       setStep("stk");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to send prompt");
@@ -115,7 +120,7 @@ function PaySheetContent({ open, onClose, booking, onPaid }: PaySheetProps) {
   return (
     <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
       <SheetContent side="bottom" className="max-h-[92vh] overflow-y-auto">
-        {step !== "verifying" && step !== "done" && paybill && (
+        {step !== "verifying" && step !== "done" && !paymentPending && paybill && (
           <div className="px-4 pt-1">
             <div className="grid grid-cols-2 gap-1 rounded-xl bg-secondary/60 p-1">
               <button
@@ -183,11 +188,12 @@ function PaySheetContent({ open, onClose, booking, onPaid }: PaySheetProps) {
           <>
             <SheetHeader>
               <SheetTitle className="flex items-center gap-2">
-                <Smartphone className="h-5 w-5 text-primary" /> Check your phone
+                <Smartphone className="h-5 w-5 text-primary" /> {paymentPending ? "Checking payment" : "Check your phone"}
               </SheetTitle>
               <SheetDescription id="pay-desc">
-                An M-Pesa prompt has been sent to {phone}. Enter your PIN on the prompt, then confirm
-                below.
+                {paymentPending
+                  ? paymentMessage || "Your M-Pesa request may still be processing. Do not send another payment request."
+                  : `An M-Pesa prompt has been sent to ${phone}. Enter your PIN on the prompt, then confirm below.`}
               </SheetDescription>
             </SheetHeader>
             <div className="flex flex-col items-center gap-4 px-4 pb-6 pt-2">
@@ -197,11 +203,13 @@ function PaySheetContent({ open, onClose, booking, onPaid }: PaySheetProps) {
               </span>
               {error && <p className="text-sm text-destructive">{error}</p>}
               <Button className="h-11 w-full" onClick={verify}>
-                I&apos;ve paid — verify
+                {paymentPending ? "Check payment status" : "I've paid — verify"}
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => setStep("phone")}>
-                Use a different number
-              </Button>
+              {!paymentPending && (
+                <Button variant="ghost" size="sm" onClick={() => setStep("phone")}>
+                  Use a different number
+                </Button>
+              )}
             </div>
           </>
         )}

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getPassengerSession } from "@/lib/session";
@@ -86,17 +87,66 @@ export async function POST(req: NextRequest, { params }: Params) {
     const phone = normalizePhone(phoneRaw);
     if (!phone) return NextResponse.json({ error: "Enter a valid M-Pesa number (07XX or 2547XX)" }, { status: 400 });
 
-    // Idempotency: reuse a live push instead of double-charging
-    const live = await db.mpesaTransaction.findFirst({
-      where: { bookingId: booking.id, status: { in: ["pending", "stk_push_sent"] } },
-      orderBy: { createdAt: "desc" },
+    // Persist an idempotent intent before contacting Daraja. Lock the booking
+    // row so simultaneous taps cannot each initiate a separate charge.
+    const attempt = await db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "Booking" WHERE "id" = ${booking.id} FOR UPDATE`;
+      const live = await tx.mpesaTransaction.findFirst({
+        where: { bookingId: booking.id, status: { in: ["pending", "stk_push_sent", "ambiguous"] } },
+        orderBy: { createdAt: "desc" },
+      });
+      if (live) return { transaction: live, created: false };
+
+      const intentReference = `${daraja.PAYMENT_INTENT_PREFIX}${randomUUID()}`;
+      const transaction = await tx.mpesaTransaction.create({
+        data: {
+          bookingId: booking.id,
+          phone,
+          amount: booking.cashDue,
+          checkoutRequestId: intentReference,
+          merchantRequestId: `intent-${randomUUID()}`,
+          status: "pending",
+        },
+      });
+      return { transaction, created: true };
     });
-    if (live) {
-      return NextResponse.json({ ok: true, checkoutRequestId: live.checkoutRequestId, amount: live.amount, phone: live.phone, reused: true });
+
+    if (!attempt.created) {
+      const existing = attempt.transaction;
+      const unresolved = daraja.isPaymentIntentId(existing.checkoutRequestId) || existing.status === "ambiguous";
+      return NextResponse.json({
+        ok: true,
+        amount: existing.amount,
+        phone: existing.phone,
+        reused: true,
+        paymentPending: unresolved || existing.status === "pending",
+        message: unresolved || existing.status === "pending"
+          ? "An earlier M-Pesa request is still being checked. Please do not start another payment."
+          : undefined,
+      });
     }
 
-    const push = await daraja.stkPush(phone, booking.cashDue, booking.code);
+    const tx = attempt.transaction;
+    const push = await daraja.stkPush(phone, booking.cashDue, booking.code, tx.id);
     if (!push.ok || !push.checkoutRequestId) {
+      const uncertain = push.responseCode === daraja.RESULT_CODES.TIMEOUT || push.ok;
+      await db.mpesaTransaction.updateMany({
+        where: { id: tx.id, status: "pending" },
+        data: {
+          status: uncertain ? "ambiguous" : "failed",
+          resultCode: push.responseCode,
+          resultDesc: push.responseDescription,
+        },
+      });
+      if (uncertain) {
+        return NextResponse.json({
+          ok: true,
+          paymentPending: true,
+          amount: booking.cashDue,
+          phone,
+          message: "The M-Pesa request may still be processing. Do not pay again; check your phone and use Verify shortly.",
+        });
+      }
       await audit({
         actorId: session.id,
         actorName: session.name,
@@ -108,11 +158,9 @@ export async function POST(req: NextRequest, { params }: Params) {
       });
       return NextResponse.json({ error: push.responseDescription || "M-Pesa rejected the payment request" }, { status: 400 });
     }
-    const tx = await db.mpesaTransaction.create({
+    await db.mpesaTransaction.updateMany({
+      where: { id: tx.id, checkoutRequestId: tx.checkoutRequestId, status: "pending" },
       data: {
-        bookingId: booking.id,
-        phone,
-        amount: booking.cashDue,
         checkoutRequestId: push.checkoutRequestId,
         merchantRequestId: push.merchantRequestId,
         status: "stk_push_sent",
@@ -127,7 +175,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       entityId: booking.id,
       metadata: { code: booking.code, amount: booking.cashDue, phone },
     });
-    return NextResponse.json({ ok: true, checkoutRequestId: tx.checkoutRequestId, amount: booking.cashDue, phone });
+    return NextResponse.json({ ok: true, amount: booking.cashDue, phone });
   }
 
   // ── Verify: the customer acted on the prompt → poll the result ────────────
@@ -142,7 +190,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       );
     }
     const tx = await db.mpesaTransaction.findFirst({
-      where: { bookingId: booking.id, status: { in: ["stk_push_sent", "pending"] } },
+      where: { bookingId: booking.id, status: { in: ["stk_push_sent", "pending", "ambiguous"] } },
       orderBy: { createdAt: "desc" },
     });
     if (!tx) {
@@ -183,6 +231,12 @@ export async function POST(req: NextRequest, { params }: Params) {
       }
       return NextResponse.json(
         { error: "We can't see your payment yet — it usually lands within a minute. Try again shortly." },
+        { status: 409 },
+      );
+    }
+    if (daraja.isPaymentIntentId(tx.checkoutRequestId)) {
+      return NextResponse.json(
+        { error: "M-Pesa is still confirming this request. Do not pay again; wait briefly and check your phone before retrying.", paymentPending: true },
         { status: 409 },
       );
     }

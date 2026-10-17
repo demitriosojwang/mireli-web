@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   confirmBookingPayment: vi.fn(),
   audit: vi.fn(),
   resolveDaraja: vi.fn(),
+  verifyCallbackToken: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -23,6 +24,7 @@ vi.mock("@/lib/money", () => ({ confirmBookingPayment: mocks.confirmBookingPayme
 vi.mock("@/lib/audit", () => ({ audit: mocks.audit }));
 vi.mock("@/lib/daraja", () => ({
   resolveDaraja: mocks.resolveDaraja,
+  verifyCallbackToken: mocks.verifyCallbackToken,
   RESULT_CODES: { SUCCESS: "0" },
   generateMpesaReceipt: vi.fn(() => "QWE1234567"),
 }));
@@ -37,8 +39,8 @@ const booking = {
   ledgerEntry: null,
 };
 
-function request(amount: string) {
-  return new NextRequest("https://mireli.test/api/pay/mpesa/c2b", {
+function request(amount: string, token = "test-token") {
+  return new NextRequest(`https://mireli.test/api/pay/mpesa/c2b?mireli_token=${token}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -60,6 +62,7 @@ beforeEach(() => {
   mocks.confirmBookingPayment.mockResolvedValue(true);
   mocks.audit.mockResolvedValue(undefined);
   mocks.resolveDaraja.mockResolvedValue({ shortcode: "123456" });
+  mocks.verifyCallbackToken.mockImplementation((scope: string, token: string | null) => scope === "c2b" && token === "test-token");
 });
 
 describe("C2B Paybill amount matching", () => {
@@ -90,6 +93,15 @@ describe("C2B Paybill amount matching", () => {
     expect(mocks.mpesaTransactionCreate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ amount: 400, status: "failed" }),
     }));
+    expect(mocks.confirmBookingPayment).not.toHaveBeenCalled();
+  });
+
+  it("rejects unauthenticated callbacks before booking or payment writes", async () => {
+    const response = await POST(request("500", "forged-token"));
+
+    expect(response.status).toBe(401);
+    expect(mocks.bookingFindUnique).not.toHaveBeenCalled();
+    expect(mocks.mpesaTransactionCreate).not.toHaveBeenCalled();
     expect(mocks.confirmBookingPayment).not.toHaveBeenCalled();
   });
 });

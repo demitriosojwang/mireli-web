@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { confirmBookingPayment } from "@/lib/money";
-import { resolveDaraja, RESULT_CODES, generateMpesaReceipt } from "@/lib/daraja";
+import { resolveDaraja, RESULT_CODES, generateMpesaReceipt, verifyCallbackToken } from "@/lib/daraja";
 
 /**
  * Safaricom Daraja → C2B confirmation webhook.
@@ -15,6 +15,9 @@ import { resolveDaraja, RESULT_CODES, generateMpesaReceipt } from "@/lib/daraja"
  */
 export async function POST(req: NextRequest) {
   const accepted = NextResponse.json({ ResultCode: 0, ResultDesc: "Accepted" });
+  if (!verifyCallbackToken("c2b", req.nextUrl.searchParams.get("mireli_token"))) {
+    return NextResponse.json({ error: "Invalid callback authorization" }, { status: 401 });
+  }
   try {
     const body = (await req.json().catch(() => ({}))) as {
       TransactionType?: string;

@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { resolvePaymentMode } from "@/lib/runtime-mode";
+import { isLocalDemoEnabled, resolvePaymentMode } from "@/lib/runtime-mode";
 import { db } from "@/lib/db";
 
 /**
@@ -54,6 +54,43 @@ export const RESULT_CODES = {
 
 // Drivers whose payout will deliberately fail in demo mode (invalid number demo)
 export const INVALID_B2C_NUMBERS = new Set(["+254700000013"]);
+
+/** Internal checkout intent ids are stored before the external STK request so
+ *  a callback can still find the payment if persisting Daraja's response fails. */
+export const PAYMENT_INTENT_PREFIX = "mireli-intent:";
+
+export function isPaymentIntentId(value: string): boolean {
+  return value.startsWith(PAYMENT_INTENT_PREFIX);
+}
+
+function callbackSigningKey(): string {
+  const key = process.env.SESSION_SECRET;
+  if (key && key.length >= 32) return key;
+  if (isLocalDemoEnabled()) return "mireli-local-preview-only-not-a-production-key";
+  throw new Error("SESSION_SECRET must contain at least 32 characters to sign M-Pesa callback URLs.");
+}
+
+function callbackToken(scope: string): string {
+  return crypto.createHmac("sha256", callbackSigningKey()).update(`mireli-daraja:${scope}`).digest("hex");
+}
+
+/** Safaricom callbacks do not include a request signature. Sign callback URLs
+ *  so public routes cannot confirm fabricated payments from a customer request. */
+export function verifyCallbackToken(scope: string, token: string | null): boolean {
+  if (!token || !/^[a-f\d]{64}$/i.test(token)) return false;
+  try {
+    const actual = Buffer.from(token, "hex");
+    const expected = Buffer.from(callbackToken(scope), "hex");
+    return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+  } catch {
+    return false;
+  }
+}
+
+function securedCallbackUrl(url: string, scope: string): string {
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}mireli_token=${callbackToken(scope)}`;
+}
 
 // ─── Identifiers (same format in both modes — used by mock + fallbacks) ─────
 
@@ -183,10 +220,10 @@ export function callbackUrls(creds: DarajaCredentials) {
   const base = creds.callbackBaseUrl.replace(/\/+$/, "");
   return {
     base,
-    stkResult: `${base}/api/pay/mpesa/callback`,
-    stkTimeout: `${base}/api/pay/mpesa/timeout`,
-    c2bConfirmation: `${base}/api/pay/mpesa/c2b`,
-    b2cResult: `${base}/api/pay/mpesa/b2c/result`,
+    stkResult: securedCallbackUrl(`${base}/api/pay/mpesa/callback`, "stk"),
+    stkTimeout: securedCallbackUrl(`${base}/api/pay/mpesa/timeout`, "stk-timeout"),
+    c2bConfirmation: securedCallbackUrl(`${base}/api/pay/mpesa/c2b`, "c2b"),
+    b2cResult: securedCallbackUrl(`${base}/api/pay/mpesa/b2c/result`, "b2c"),
   };
 }
 
@@ -303,7 +340,7 @@ export interface StkPushResult {
 /** Initiates the STK push. Mock: accepted instantly (the Pay Sheet's verify
  *  step simulates the customer). Live: real Daraja request; the customer
  *  answers on their phone and Daraja posts the result to our callback. */
-export async function stkPush(phone: string, amount: number, ref: string): Promise<StkPushResult> {
+export async function stkPush(phone: string, amount: number, ref: string, intentId?: string): Promise<StkPushResult> {
   if (amount <= 0) throw new Error("STK push amount must be positive");
   const creds = await resolveDaraja();
 
@@ -327,7 +364,18 @@ export async function stkPush(phone: string, amount: number, ref: string): Promi
       responseDescription: "Invalid M-Pesa number — use 07XX or 2547XX format",
     };
   }
-  const urls = callbackUrls(creds);
+  let urls: ReturnType<typeof callbackUrls>;
+  try {
+    urls = callbackUrls(creds);
+  } catch (e) {
+    return {
+      ok: false,
+      checkoutRequestId: "",
+      merchantRequestId: "",
+      responseCode: "400",
+      responseDescription: e instanceof Error ? e.message : "M-Pesa callback security is not configured",
+    };
+  }
   if (!urls.base) {
     return {
       ok: false,
@@ -337,6 +385,9 @@ export async function stkPush(phone: string, amount: number, ref: string): Promi
       responseDescription: "Callback base URL is not configured — set it in Admin → Payments",
     };
   }
+  const stkResultUrl = intentId
+    ? `${urls.stkResult}&intent=${encodeURIComponent(intentId)}`
+    : urls.stkResult;
   const timestamp = mpesaTimestamp();
   try {
     const token = await getAccessToken(creds);
@@ -352,7 +403,7 @@ export async function stkPush(phone: string, amount: number, ref: string): Promi
         PartyA: party,
         PartyB: creds.shortcode,
         PhoneNumber: party,
-        CallBackURL: urls.stkResult,
+        CallBackURL: stkResultUrl,
         AccountReference: ref.slice(0, 12),
         TransactionDesc: `Mi-Reli fare ${ref}`.slice(0, 20),
       }),
