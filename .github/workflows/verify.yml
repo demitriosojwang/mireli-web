@@ -1,7 +1,7 @@
 name: Verify Mireli Web
 on:
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
     branches: ['**']
 concurrency:
@@ -36,7 +36,6 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
-      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - name: Build and test the Linux application image
         uses: docker/build-push-action@v6
@@ -46,17 +45,46 @@ jobs:
           platforms: linux/amd64
           push: false
           tags: mireli-web:ci-test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      - name: Build the deployable image for the VM architecture
+          cache-from: type=gha,scope=mireli-amd64
+          cache-to: type=gha,mode=max,scope=mireli-amd64
+      - name: Build the deployable AMD64 image
         uses: docker/build-push-action@v6
         with:
           context: .
           target: runner
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: false
-          tags: mireli-web:ci-release-check
-          cache-from: type=gha
+          tags: mireli-web:ci-release-check-amd64
+          cache-from: type=gha,scope=mireli-amd64
+          cache-to: type=gha,mode=max,scope=mireli-amd64
+
+  container-arm64:
+    name: Build production container (ARM64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and test the ARM64 Linux application image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: test
+          platforms: linux/arm64
+          push: false
+          tags: mireli-web:ci-test-arm64
+          cache-from: type=gha,scope=mireli-arm64
+          cache-to: type=gha,mode=max,scope=mireli-arm64
+      - name: Build the deployable ARM64 image for the VM
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runner
+          platforms: linux/arm64
+          push: false
+          tags: mireli-web:ci-release-check-arm64
+          cache-from: type=gha,scope=mireli-arm64
+          cache-to: type=gha,mode=max,scope=mireli-arm64
 
   aws-infrastructure:
     name: Validate AWS VM infrastructure
