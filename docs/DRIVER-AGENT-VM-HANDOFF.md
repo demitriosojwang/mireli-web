@@ -25,24 +25,29 @@ port 22, or copy a private key to the VM.
 
 - AWS CLI v2.38.1 is installed at
   `C:\Users\favou\AppData\Local\Programs\Amazon\AWSCLIV2\aws.exe`; this
-  Codex shell could not access it through PATH, so commands used the explicit
-  path. `aws login --profile mireli --region eu-north-1` completed. AWS CLI
-  credentials are temporary; every developer must sign in with their own AWS
-  identity and must not reuse this workstation's profile.
+  Codex shell could not access it through `PATH`, so the explicit executable
+  path was used. `aws sts get-caller-identity --profile mireli` succeeded for
+  this operator. AWS credentials are temporary; every developer must sign in
+  with their own AWS identity and must not reuse this workstation's profile.
 - SSM reports `i-097df027e02b0708f` `Online` on Amazon Linux with agent
-  `3.3.5390.0`. Read-only SSM Run Command works. The Session Manager plugin is
-  not available in this shell, so an interactive `aws ssm start-session` was
-  not verified.
-- Read-only checks showed Docker, Caddy, and `mireli-app` active. There is one
-  healthy container named `mireli`, image tag `794fb87`, bound to
+  `3.3.5390.0`. A read-only SSM Run Command completed successfully on 18
+  October 2026. Docker, Caddy, and `mireli-app` are active. There is one healthy
+  container named `mireli`, image tag `794fb87`, bound to
   `127.0.0.1:3000`; `/api/health` returns `{"status":"ok"}`.
-- `/api/routes` returns `pointCount: 0` and a KSh 50 fee; `/api/trains` is
-  empty; `/api/stages?q=Mtwapa` returns no points; and today's trip query
-  returns `hasEligibleDrivers: false` with no trips. The production catalogue
-  and approved driver supply are empty.
-- `/api/v1/driver/status` is strict (`simulation: false`) but phone/email
-  sign-in, registration, and navigation are closed. Its response says driver
-  email sign-in is not configured.
+- `/api/v1/driver/status` returns strict mode (`simulation: false`), with
+  phone/email sign-in, registration, and navigation closed. The response says
+  driver email sign-in is not configured.
+- The production catalogue is empty: `/api/routes` reports `pointCount: 0`,
+  `/api/trains` returns no trains, and `/api/stages?q=Mtwapa` returns no
+  points. The 18 October trip-availability query returns
+  `hasEligibleDrivers: false` and no trips. The driver app must not display
+  invented vehicles or schedules.
+- The AWS CLI works when called by its explicit path. The Session Manager
+  plugin is not installed/detected on this workstation, so an interactive
+  `aws ssm start-session` shell is not yet available here. Install it using
+  the [official AWS Session Manager plugin instructions](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html).
+- The public DNS finding below is from the earlier DNS check; this SSM check
+  did not change VM configuration, DNS, or application state.
 - `mirelisgr.duckdns.org` resolves to `105.161.112.67`, not the VM's EIP
   `13.53.183.149`. Public DNS/TLS is not ready. Rotate the DuckDNS token that
   appeared in a screenshot before changing DNS.

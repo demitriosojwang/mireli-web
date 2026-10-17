@@ -1,6 +1,6 @@
 # Mireli Driver shared-backend setup
 
-Updated 16 October 2026. Give this guide to the Android developer or coding
+Updated 18 October 2026. Give this guide to the Android developer or coding
 agent before connecting Mireli Driver to the web application's backend.
 
 ## Start here
@@ -24,9 +24,10 @@ The AWS pilot VM is:
 - Driver API status path: `/api/v1/driver/status`
 
 The VM currently runs the app and driver API in one healthy container. A verified
-SSM check on 16 October 2026 returned `{"status":"ok"}` from the local health
-path. The public hostname is not live yet: it still resolves to the old address
-`105.161.112.67`, while the VM's EIP is `13.53.183.149`. The DuckDNS token was
+SSM check on 18 October 2026 returned `{"status":"ok"}` from the local health
+path and confirmed the production route/train catalogue is empty. The public
+hostname is not live yet: it still resolves to the old address `105.161.112.67`,
+while the VM's EIP is `13.53.183.149`. The DuckDNS token was
 exposed in a screenshot and must be rotated before the owner updates that A
 record. Until public DNS and HTTPS are verified, production Android builds must
 not depend on this hostname.
