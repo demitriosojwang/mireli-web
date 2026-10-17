@@ -36,9 +36,9 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - name: Build and test the Linux application image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: test
@@ -48,7 +48,7 @@ jobs:
           cache-from: type=gha,scope=mireli-amd64
           cache-to: type=gha,mode=max,scope=mireli-amd64
       - name: Build the deployable AMD64 image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: runner
@@ -64,9 +64,9 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - name: Build and test the ARM64 Linux application image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: test
@@ -76,7 +76,7 @@ jobs:
           cache-from: type=gha,scope=mireli-arm64
           cache-to: type=gha,mode=max,scope=mireli-arm64
       - name: Build the deployable ARM64 image for the VM
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: runner
