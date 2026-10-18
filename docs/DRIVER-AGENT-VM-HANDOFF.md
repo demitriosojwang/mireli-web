@@ -82,9 +82,9 @@ an audit event.
   [#39124074073](https://github.com/demitriosojwang/mireli-web/actions/runs/39124074073),
   including database validation, tests, typecheck, lint, production build,
   CloudFormation lint/Guard, and AMD64/ARM64 container builds. The feature
-  branch has not been deployed. PR #4 has not been merged. GitHub still reports
-  a pending Vercel status on the PR; no Vercel deployment is used for the AWS
-  host. The AWS GitHub OIDC
+  branch has not been deployed. PR #4 has not been merged. GitHub still runs
+  the Vercel status and Preview Comments checks on the PR (both green on the
+  latest observed run); AWS is the runtime target. The AWS GitHub OIDC
   deploy workflow remains disabled while project policy denies creating the
   OIDC provider. Do not use long-lived AWS keys as a workaround. The new
   release workflow also checks route, train, stage-search, driver-supply, and
