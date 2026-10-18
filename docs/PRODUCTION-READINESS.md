@@ -6,7 +6,7 @@ over. The production catalogue is empty, there is no approved driver, and live
 payment/email credentials have not been installed. Keep pooled cabs at zero and
 do not accept payment until the end-to-end gates below pass.
 
-## AWS deployment state (read-only SSM verification: 18 October 2026, 15:02 EAT)
+## AWS deployment state (read-only SSM verification: 18 October 2026, 15:15 EAT)
 
 - [x] EC2 `i-097df027e02b0708f` is running in `eu-north-1`, with SSM Online.
 - [x] AWS identity verification succeeded and SSM reports the node Online with
@@ -53,6 +53,16 @@ do not accept payment until the end-to-end gates below pass.
   published stops, `/api/trains` is empty, and the strict driver status keeps
   sign-in, registration, and navigation closed. No VM or DNS changes were
   made during this verification.
+- [x] Fresh read-only SSM checks at 15:13–15:15 EAT reconfirmed that the node
+  is Online (Amazon Linux 2023, agent `3.3.5390.0`), and Docker, Caddy, and
+  `mireli-app` are active. The single healthy container still runs image
+  `794fb87`. `/api/health` returns 200; `/api/routes` reports `pointCount: 0`;
+  `/api/trains` returns no trains; `/api/stages?q=Mtwapa` returns no points;
+  `/api/driver-supply` returns 404; `/api/pay/options` returns 500; and strict
+  driver status keeps sign-in, registration, and navigation closed. SSM command
+  IDs are `0d8f4b77-f34d-415d-8a13-e3ee4d0e68e4` and
+  `df1d344f-6bb7-4773-a6ec-decf6bf20a21`. No VM configuration, application
+  image, or DNS record was changed.
 - [x] No driver or stop data was added to make the booking UI look populated.
 - [x] The drop-off problem has two confirmed causes on the two checked hosts.
   On AWS, the catalogue query succeeds but returns `pointCount: 0`; no approved
