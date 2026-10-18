@@ -15,8 +15,8 @@ For Android API setup and flavor rules, read
 - ECR repository: `036834403673.dkr.ecr.eu-north-1.amazonaws.com/mireli-sgr-pilot-appimagerepository-juxctzu7badb`.
 - Intended public hostname: `mirelisgr.duckdns.org`; DNS has not been pointed to this VM and HTTPS has not been verified. The old DuckDNS token was exposed in a screenshot; the owner must rotate it before changing DNS.
 - Security group opens only inbound TCP 80/443. Port 22 is not open. The web app binds to host loopback port 3000 behind Caddy.
-- Latest SSM health check (18 October 2026, 12:32 EAT): Docker, Caddy, and `mireli-app` are active; the single `mireli` container is healthy on image tag `794fb87`; `http://127.0.0.1:3000/api/health` returns `{"status":"ok"}`. The API reports zero route points and no active trains.
-- Driver status is strict (`simulation: false`), but phone/email sign-in, registration, and navigation are closed because production provider credentials are absent. The current trip query reports no eligible drivers and no trips.
+- Latest SSM health check (18 October 2026, 13:04 EAT): Docker, Caddy, and `mireli-app` are active; the single `mireli` container is healthy on image tag `794fb87`; `http://127.0.0.1:3000/api/health` returns `{"status":"ok"}`. `/api/routes` reports `pointCount: 0`, `/api/trains` is empty, and `/api/stages?q=Mtwapa` returns no points.
+- Driver status is strict (`simulation: false`); phone/email sign-in, registration, and navigation are closed. The status response says driver email sign-in is not configured. The last trip-availability query (18 October, 11:25 EAT) found no eligible drivers and no trips; this was not rerun in the 13:04 check.
 - DuckDNS currently resolves to `105.161.112.67`, not the VM's EIP. HTTPS and public driver API access are unverified. Rotate the exposed token and point the A record to `13.53.183.149` before treating the site as online for customers.
 - Runtime database is PostgreSQL 16 embedded in the one Mireli image and persisted on the VM volume. Daily `pg_dump` backups are sent to the private, versioned S3 bucket `mireli-sgr-pilot-036834403673-db-backups-eu-north-1`, with 30-day expiry.
 
