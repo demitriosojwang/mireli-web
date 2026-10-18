@@ -21,7 +21,7 @@ and inbound SSH is intentionally closed. Use the individually authorized AWS
 Systems Manager (SSM) path below. Do not share a teammate's AWS profile, open
 port 22, or copy a private key to the VM.
 
-## Latest connection and VM check (18 October 2026, 11:14 EAT)
+## Latest connection and VM check (18 October 2026, 11:25 EAT)
 
 - AWS CLI v2 is installed on the operator workstation at
   `C:\Users\favou\AppData\Local\Programs\Amazon\AWSCLIV2\aws.exe`; it may
@@ -30,18 +30,26 @@ port 22, or copy a private key to the VM.
   every developer must use their own AWS identity and must not reuse this
   workstation's profile.
 - SSM reports `i-097df027e02b0708f` `Online` on Amazon Linux with agent
-  `3.3.5390.0`. A read-only Systems Manager Run Command at 11:14 EAT verified
-  Docker, Caddy, and `mireli-app` are active. There is one
-  healthy container named `mireli`, image tag `794fb87`, bound to
-  `127.0.0.1:3000`; `/api/health` returns `{"status":"ok"}`. This session used
-  SSM rather than SSH because the instance has no key pair and inbound SSH is
-  closed.
-- The VM still runs image `794fb87`. Source commit `675f5d4` has a successful
-  GitHub Actions run (#103), including application checks, CloudFormation
-  validation, and AMD64/ARM64 image builds, but it has not been deployed. The
-  AWS GitHub OIDC deploy workflow remains disabled while project policy denies
-  creating the OIDC provider. Do not use long-lived AWS keys as a workaround.
-- The production database currently has four applied migrations:
+  `3.3.5390.0`. A read-only Systems Manager Run Command at 11:25 EAT verified
+  one healthy container named `mireli`, image tag `794fb87`, bound to
+  `127.0.0.1:3000`; `/api/health` returns `{"status":"ok"}`. `/api/routes`
+  reports `pointCount: 0`, `/api/trains` returns no trains,
+  `/api/stages?q=Mtwapa` returns no points, and the trip endpoint reports
+  `hasEligibleDrivers: false` with no trips. `/api/v1/driver/status` reports
+  strict mode (`simulation: false`) but phone/email sign-in, registration, and
+  navigation are closed. Driver email authentication is not configured.
+- AWS EC2 metadata confirms the instance has no key pair. A current TCP check
+  to `13.53.183.149:22` failed, so SSH is unavailable; SSM is the verified
+  connection path. Do not open port 22 as a workaround.
+- The VM still runs image `794fb87`. Application source commit `675f5d4` has a
+  successful GitHub Actions run (#103), including application checks,
+  CloudFormation validation, and AMD64/ARM64 image builds. The latest docs
+  commit `0a3692a` also passed CI run #104. The application source commit has
+  not been deployed. PR #4 remains open and unmerged. The AWS GitHub OIDC deploy
+  workflow remains disabled while project policy denies creating the OIDC
+  provider. Do not use long-lived AWS keys as a workaround.
+- The last read-only production database inspection (18 October, 11:14 EAT)
+  found four applied migrations:
   `20261001_initial_postgres`, `20261006_driver_services`,
   `20261008_driver_email_auth`, and
   `20261011_booking_fee_charter_commission`. Runtime settings currently enable
@@ -60,13 +68,12 @@ port 22, or copy a private key to the VM.
   driver email sign-in is not configured. Keep driver sign-in closed until real
   production authentication credentials and provider configuration are set up
   and verified.
-- This SSM check did not modify the VM, DNS, or application state. The earlier
-  DNS check found `mirelisgr.duckdns.org` resolving to `105.161.112.67`, not the
-  VM's EIP `13.53.183.149`; public DNS/TLS remains unverified. Rotate the
-  DuckDNS token shown in a screenshot before changing DNS. Never put that token
-  in this repository or chat.
-- SSH on port 22 previously timed out. The instance has no EC2 key pair and
-  inbound SSH is intentionally closed. Use SSM; do not open SSH as a workaround.
+- This SSM check did not modify the VM, DNS, or application state. At 11:25 EAT,
+  `mirelisgr.duckdns.org` still resolved to `105.161.112.67`, not the VM's EIP
+  `13.53.183.149`, and an HTTPS request to `/api/health` could not connect on
+  port 443. Public DNS/TLS is not ready. Rotate the DuckDNS token shown in a
+  screenshot before changing DNS. Never put that token in this repository or
+  chat.
 
 For another developer to use this VM, invite them as an AWS project team member
 and grant only the SSM session permissions they need. They must sign in with
@@ -126,7 +133,7 @@ role and must never be copied into Android.
 
 ## Verified VM state
 
-The read-only state above is current as of 18 October 2026, 11:14 EAT. The VM is
+The read-only state above is current as of 18 October 2026, 11:25 EAT. The VM is
 healthy internally, but it cannot support a customer or driver pilot until its
 route and train catalogue, approved drivers, driver authentication, public
 DNS/TLS, payment callbacks, and passenger/driver email delivery are configured
