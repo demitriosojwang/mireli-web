@@ -21,7 +21,14 @@ and inbound SSH is intentionally closed. Use the individually authorized AWS
 Systems Manager (SSM) path below. Do not share a teammate's AWS profile, open
 port 22, or copy a private key to the VM.
 
-## Latest connection and VM check (18 October 2026, 11:25 EAT)
+## Latest successful connection and VM check (18 October 2026, 11:25 EAT)
+
+The workstation's AWS CLI session expired when SSM was rechecked later on
+18 October. A new `aws login --profile mireli --remote` is waiting for the
+authorization code displayed in the browser to be entered in the CLI. Until
+that completes, the 11:25 EAT SSM snapshot below remains the last successful
+live check. Reauthentication has not changed AWS resources, the VM, DNS, or
+application state.
 
 - AWS CLI v2 is installed on the operator workstation at
   `C:\Users\favou\AppData\Local\Programs\Amazon\AWSCLIV2\aws.exe`; it may
@@ -44,7 +51,7 @@ port 22, or copy a private key to the VM.
 - The VM still runs image `794fb87`. Application source commit `675f5d4` has a
   successful GitHub Actions run (#103), including application checks,
   CloudFormation validation, and AMD64/ARM64 image builds. The latest docs
-  commit `0a3692a` also passed CI run #104. The application source commit has
+  commit `b0c7830` also passed CI run #106. The application source commit has
   not been deployed. PR #4 remains open and unmerged. The AWS GitHub OIDC deploy
   workflow remains disabled while project policy denies creating the OIDC
   provider. Do not use long-lived AWS keys as a workaround.
