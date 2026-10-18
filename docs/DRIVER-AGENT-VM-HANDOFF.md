@@ -21,12 +21,13 @@ and inbound SSH is intentionally closed. Use the individually authorized AWS
 Systems Manager (SSM) path below. Do not share a teammate's AWS profile, open
 port 22, or copy a private key to the VM.
 
-## Latest successful connection and VM check (18 October 2026, 13:04 EAT)
+## Latest SSM connection and VM check (18 October 2026, 13:21 EAT)
 
-AWS authentication was verified and a read-only SSM Run Command completed
-successfully at 13:04 EAT (command ID
-`92761aa1-772c-4937-ae63-06c8b6e29752`). No VM, application, DNS, or AWS
-resource settings were changed during this check.
+AWS authentication was verified. A read-only SSM Run Command reached the VM
+at 13:21 EAT (command ID `b3bc2651-2516-429d-89be-22dca2c02676`). The command
+reported status `Failed` with response code 22 because its final `curl` received
+HTTP 404 from `/api/driver-supply`; earlier health and catalogue probes
+succeeded. No VM, application, DNS, or AWS resource settings were changed.
 
 - AWS CLI v2 is installed on the operator workstation at
   `C:\Users\favou\AppData\Local\Programs\Amazon\AWSCLIV2\aws.exe`; it may
@@ -34,8 +35,8 @@ resource settings were changed during this check.
   succeeded with the `mireli` profile in `eu-north-1`. Credentials are
   temporary; every developer must use their own AWS identity and must not
   reuse this workstation's profile.
-- SSM reports `i-097df027e02b0708f` `Online` on Amazon Linux 2023; its last
-  heartbeat was 12:58 EAT. The 13:04 EAT read-only Run Command verified
+- SSM reached `i-097df027e02b0708f` on Amazon Linux 2023. The 13:21 EAT
+  read-only Run Command verified
   `docker`, `caddy`, and `mireli-app` are active. There is one healthy
   container named `mireli`,
   image tag `794fb87`, serving the local API on port 3000;
@@ -44,17 +45,20 @@ resource settings were changed during this check.
   and `/api/stages?q=Mtwapa` returns no points. `/api/v1/driver/status` reports
   strict mode (`simulation: false`), with phone/email sign-in, registration,
   and navigation closed. Its message says driver email sign-in is not
-  configured. The container had been up for 46 hours at the time of the check.
+  configured. The current VM image returns HTTP 404 for `/api/driver-supply`,
+  although that route exists in the current source branch. The container had
+  been up for 46 hours at the time of the earlier 13:04 check.
 - AWS EC2 metadata confirms the instance has no key pair. A TCP check at
   11:25 EAT to `13.53.183.149:22` failed, so direct SSH is unavailable; SSM is
   the verified connection path. Do not open port 22 as a workaround.
-- The VM still runs image `794fb87`; current branch tip is `10a3d26` on
-  `codex/booking-flow-production-readiness`. GitHub Actions run
-  [#39117363934](https://github.com/demitriosojwang/mireli-web/actions/runs/39117363934)
-  passed app verification, CloudFormation validation, and AMD64/ARM64 image
-  builds. The current branch has not been deployed. PR #4 remains open and
-  unmerged. The AWS GitHub OIDC deploy workflow remains disabled while project
-  policy denies creating the OIDC provider. Do not use long-lived AWS keys as a
+- The VM still runs image `794fb87`. The booking-flow source revision is
+  `10a3d26` on branch `codex/booking-flow-production-readiness`; its full CI
+  passed run [#39117363934](https://github.com/demitriosojwang/mireli-web/actions/runs/39117363934).
+  Documentation checkpoint `f7652e3` also passed the full suite in
+  [#39118544935](https://github.com/demitriosojwang/mireli-web/actions/runs/39118544935).
+  The feature branch has not been deployed. PR #4 remains open and unmerged.
+  The AWS GitHub OIDC deploy workflow remains disabled while project policy
+  denies creating the OIDC provider. Do not use long-lived AWS keys as a
   workaround.
 - The last read-only production database inspection (18 October, 11:14 EAT)
   found four applied migrations:
@@ -79,7 +83,7 @@ resource settings were changed during this check.
 - The previous DNS/TLS probe at 11:25 EAT found
   `mirelisgr.duckdns.org` resolving to `105.161.112.67`, not the VM's EIP
   `13.53.183.149`, and HTTPS `/api/health` could not connect on port 443.
-  DNS/TLS was not rechecked in the 13:04 SSM command, so treat that prior
+  DNS/TLS was not rechecked in the 13:21 SSM command, so treat that prior
   result as the last known public status. Rotate the DuckDNS token shown in a
   screenshot before changing DNS. Never put that token in this repository or
   chat.
@@ -142,7 +146,7 @@ role and must never be copied into Android.
 
 ## Verified VM state
 
-The read-only state above is current as of 18 October 2026, 13:04 EAT. The VM is
+The read-only state above is current as of 18 October 2026, 13:21 EAT. The VM is
 healthy internally, but it cannot support a customer or driver pilot until its
 route and train catalogue, approved drivers, driver authentication, public
 DNS/TLS, payment callbacks, and passenger/driver email delivery are configured

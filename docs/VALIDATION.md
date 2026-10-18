@@ -7,12 +7,15 @@
   allocation. Source commit `10a3d26` passed GitHub Actions run
   [#39117363934](https://github.com/demitriosojwang/mireli-web/actions/runs/39117363934)
   with the full test, typecheck, lint, production build, CloudFormation,
-  Compose, AMD64, and ARM64 checks. The latest handoff commit `b45a322` also
-  passed [run #39117923507](https://github.com/demitriosojwang/mireli-web/actions/runs/39117923507).
-- Read-only AWS SSM checks at 13:04 EAT found one healthy app container on
+-  Compose, AMD64, and ARM64 checks. Documentation checkpoint `f7652e3`
+  also passed [run #39118544935](https://github.com/demitriosojwang/mireli-web/actions/runs/39118544935).
+- Read-only AWS SSM checks at 13:21 EAT found one healthy app container on
   image `794fb87`, `GET /api/health` healthy, zero published route stops, and
   no active train schedule. Driver status remains strict with sign-in closed.
-  The source branch is not deployed to the VM.
+  `/api/driver-supply` returns 404 on the running image, but exists in current
+  source; the branch is not deployed to the VM. The SSM command returned a
+  nonzero status because of this 404; its preceding service/health/catalogue
+  probes succeeded.
 - The page currently served at this workstation's `localhost:3000` is a stale
   local preview, not a rendering of the current source: its visible controls
   differ from `src/app/page.tsx`, and `/api/driver-supply` returns 404 there.
