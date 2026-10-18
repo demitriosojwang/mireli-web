@@ -21,7 +21,7 @@ and inbound SSH is intentionally closed. Use the individually authorized AWS
 Systems Manager (SSM) path below. Do not share a teammate's AWS profile, open
 port 22, or copy a private key to the VM.
 
-## Latest connection and VM check (18 October 2026)
+## Latest connection and VM check (18 October 2026, 07:53 EAT)
 
 - AWS CLI v2.38.1 is installed at
   `C:\Users\favou\AppData\Local\Programs\Amazon\AWSCLIV2\aws.exe`; this
@@ -30,10 +30,19 @@ port 22, or copy a private key to the VM.
   this operator. AWS credentials are temporary; every developer must sign in
   with their own AWS identity and must not reuse this workstation's profile.
 - SSM reports `i-097df027e02b0708f` `Online` on Amazon Linux with agent
-  `3.3.5390.0`. A read-only SSM Run Command completed successfully on 18
-  October 2026. Docker, Caddy, and `mireli-app` are active. There is one healthy
+  `3.3.5390.0` (last ping `2026-10-18 07:48 EAT`). A read-only SSM Run
+  Command and an interactive Session Manager shell both succeeded at about
+  07:53 EAT. Docker, Caddy, and `mireli-app` are active. There is one healthy
   container named `mireli`, image tag `794fb87`, bound to
   `127.0.0.1:3000`; `/api/health` returns `{"status":"ok"}`.
+- The Session Manager plugin `1.2.896.0` was installed on this operator's
+  workstation from AWS's official Windows installer after verifying its
+  Amazon code signature. Each other developer must install the plugin on their
+  own workstation; never copy the AWS profile or temporary credentials.
+- In the interactive SSM shell, `ssm-user` could not access the Docker socket
+  directly. `sudo -n docker ps ...` succeeded. Use `sudo` for approved Docker
+  inspection; do not add `ssm-user` to the `docker` group, which grants
+  root-equivalent access.
 - `/api/v1/driver/status` returns strict mode (`simulation: false`), with
   phone/email sign-in, registration, and navigation closed. The response says
   driver email sign-in is not configured.
@@ -42,10 +51,6 @@ port 22, or copy a private key to the VM.
   points. The 18 October trip-availability query returns
   `hasEligibleDrivers: false` and no trips. The driver app must not display
   invented vehicles or schedules.
-- The AWS CLI works when called by its explicit path. The Session Manager
-  plugin is not installed/detected on this workstation, so an interactive
-  `aws ssm start-session` shell is not yet available here. Install it using
-  the [official AWS Session Manager plugin instructions](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html).
 - The public DNS finding below is from the earlier DNS check; this SSM check
   did not change VM configuration, DNS, or application state.
 - `mirelisgr.duckdns.org` resolves to `105.161.112.67`, not the VM's EIP
@@ -53,8 +58,9 @@ port 22, or copy a private key to the VM.
   appeared in a screenshot before changing DNS.
 - The prior SSH attempt timed out on port 22. The instance has no EC2 key pair
   and inbound SSH is intentionally closed. Do not open SSH as a workaround.
-- These were read-only checks; no VM configuration, DNS, or application state
-  was changed.
+- All VM checks were read-only; no VM configuration, DNS, or application state
+  was changed. The only workstation change was installing the AWS-signed
+  Session Manager plugin so this operator could establish the keyless shell.
 
 For another developer to use the same VM, invite them as an AWS project team
 member and grant only the SSM session permissions they need. They must use
@@ -70,9 +76,9 @@ The VM is an SSM managed node and reported `Online` at the last check. Each
 developer must be invited as a team member in AWS Settings and granted the
 narrowest permission needed to start a session on this instance. The developer
 uses their own AWS sign-in/profile. AWS CLI v2 and the Session Manager plugin
-are both needed for an interactive CLI session; this workstation currently has
-AWS CLI v2 but is missing the plugin. Install it from the
-[official AWS Session Manager plugin instructions](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html).
+are both needed for an interactive CLI session. The tested operator workstation
+has AWS CLI `2.38.1` and plugin `1.2.896.0`; other developers must install the
+plugin themselves using the [official AWS Windows install steps](https://docs.aws.amazon.com/systems-manager/latest/userguide/install-plugin-windows.html).
 
 PowerShell commands (replace `<your-profile>` with that developer's own profile
 name):
@@ -92,7 +98,7 @@ Read-only checks inside the session:
 
 ```bash
 sudo systemctl is-active docker caddy mireli-app
-docker ps --filter name=mireli --format '{{.Names}} {{.Image}} {{.Status}}'
+sudo docker ps --filter name=mireli --format '{{.Names}} {{.Image}} {{.Status}}'
 curl -fsS http://127.0.0.1:3000/api/health
 curl -fsS http://127.0.0.1:3000/api/v1/driver/status
 ```
