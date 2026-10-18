@@ -6,25 +6,27 @@ over. The production catalogue is empty, there is no approved driver, and live
 payment/email credentials have not been installed. Keep pooled cabs at zero and
 do not accept payment until the end-to-end gates below pass.
 
-## AWS deployment state (read-only SSM verification: 18 October 2026, 11:14 EAT)
+## AWS deployment state (read-only SSM verification: 18 October 2026, 11:25 EAT)
 
 - [x] EC2 `i-097df027e02b0708f` is running in `eu-north-1`, with SSM Online.
 - [x] The AWS CLI sign-in works and SSM reports the node Online with agent
   `3.3.5390.0`. See the
   [driver VM handoff](DRIVER-AGENT-VM-HANDOFF.md) for per-developer access.
 - [x] Exactly one `mireli` Docker container is healthy on image `794fb87`, bound
-  to `127.0.0.1:3000`; Caddy, Docker, and the app service are active.
-- [x] Internal `GET /api/health` returns `{"status":"ok"}`.
+  to `127.0.0.1:3000`. The last service-manager check at 11:14 EAT also
+  confirmed Caddy, Docker, and the app service are active.
+- [x] A read-only SSM check at 11:25 EAT confirms internal
+  `GET /api/health` returns `{"status":"ok"}`.
 - [x] A read-only SSM check at 11:14 EAT verified the database currently has
   four migrations through `20261011_booking_fee_charter_commission`. The VM
   enables migrations at application startup. Source commit `d8382e8` includes
   three additional migrations for booking ticket email, train service days,
   and durable refund attempts; they are not yet applied in production.
-- [x] Internal `GET /api/routes` returns `pointCount: 0` and a KSh 50 booking
-  fee; `GET /api/trains` returns no trains; `GET /api/stages?q=Mtwapa` returns
-  `{"points":[],"hasMore":false}`. The drop-off picker is empty because the
-  live database has no active published stops. It must stay empty until the
-  owner supplies and publishes the approved catalogue.
+- [x] Current internal `GET /api/routes` returns `pointCount: 0` and a KSh 50
+  booking fee; `GET /api/trains` returns no trains; and
+  `GET /api/stages?q=Mtwapa` returns `{"points":[],"hasMore":false}`. The
+  AWS database has no active published stops, so the drop-off picker must stay
+  empty until the owner supplies and publishes the approved catalogue.
 - [x] Customer availability for 18 October returns
   `{"hasEligibleDrivers":false,"trips":[]}`. The web app must show zero pooled
   cabs and must not create booking inventory when no eligible driver exists.
@@ -32,23 +34,31 @@ do not accept payment until the end-to-end gates below pass.
   registration, and navigation are currently closed. The status response says
   driver email sign-in is not configured.
 - [x] No driver or stop data was added to make the booking UI look populated.
-- [x] Cause of the slow/blank production experience is identified: the running
-  image is older than the current booking UI. In the old image, the page requests
-  unfiltered trip availability for the entire date and direction on first load,
-  and the stop bootstrap can remain in its loading skeleton if the API hangs.
-  The current source branch defers trips until a stop is selected, scopes the
-  query to that stop's route, applies request timeouts, and displays explicit
-  loading, empty, and retryable error states. The source fix is not live until
-  a reviewed image containing it is deployed.
+- [x] The drop-off problem has two confirmed causes on the two checked hosts.
+  On AWS, the catalogue query succeeds but returns `pointCount: 0`; no approved
+  stop data exists there. The legacy public Vercel URL still serves an older
+  booking page: its `/api/routes` response says the route catalogue is
+  temporarily unavailable, `/api/stages?q=mtwapa` and `/api/trains` return
+  empty results, and `/api/driver-supply` returns 404. Its rendered controls
+  also differ from the current branch, which hides ride choices until a stop is
+  selected. No Vercel settings or deployment were changed. In the current
+  source, stop search waits for two typed characters, is debounced, returns at
+  most 12 stops, and trip availability runs only after a stop is selected and
+  is scoped to that route. Timeouts and loading, empty, and retryable error
+  states prevent an indefinite blank field. These source changes are not live
+  on AWS until a reviewed image is deployed.
 - [x] Local Docker is a test environment only. The AWS VM continues serving
   independently when the developer's computer is off.
 - [ ] `mirelisgr.duckdns.org` still resolves to old IP `105.161.112.67` rather
   than EIP `13.53.183.149`. Rotate the exposed DuckDNS token, update its A
   record, then verify Caddy TLS and public health/status checks from outside
-  AWS. DNS has not been changed.
-- [x] Source commit `675f5d4` passed GitHub Actions run #103 for tests,
-  typecheck, lint, build, Prisma validation/generation, AMD64/ARM64 images,
-  Compose validation, and CloudFormation checks. See
+  AWS. HTTPS could not connect to the current DNS target on port 443. DNS has
+  not been changed.
+- [x] Application source commit `675f5d4` passed GitHub Actions run #103. The
+  current branch head `90912a7` passed
+  [GitHub Actions run #105](https://github.com/demitriosojwang/mireli-web/actions/runs/39111499990),
+  including tests, typecheck, lint, build, Prisma validation/generation,
+  AMD64/ARM64 images, Compose validation, and CloudFormation checks. See
   [PR #4](https://github.com/demitriosojwang/mireli-web/pull/4). The VM still
   runs `794fb87`; passing CI does not mean the branch has been deployed.
 - [x] Remove the unused `GET /api` Hello World scaffold from source; keep
@@ -65,8 +75,8 @@ do not accept payment until the end-to-end gates below pass.
   passenger UI must keep its honest empty state; no customer booking can yet be
   matched successfully.
 
-Previous Vercel checks in older project notes are historical only. AWS EC2 is
-the intended web/API host; the local Docker stack does not serve production.
+The Vercel URL remains a legacy, stale public page and is not a launch target.
+AWS EC2 is the intended web/API host; the local Docker stack is for testing only.
 
 ## Completed in this change
 
