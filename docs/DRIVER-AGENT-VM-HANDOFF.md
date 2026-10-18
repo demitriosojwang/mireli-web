@@ -21,7 +21,7 @@ and inbound SSH is intentionally closed. Use the individually authorized AWS
 Systems Manager (SSM) path below. Do not share a teammate's AWS profile, open
 port 22, or copy a private key to the VM.
 
-## Latest connection and VM check (18 October 2026, 10:16 EAT)
+## Latest connection and VM check (18 October 2026, 10:24 EAT)
 
 - AWS CLI v2 is installed on the operator workstation at
   `C:\Users\favou\AppData\Local\Programs\Amazon\AWSCLIV2\aws.exe`; it may
@@ -39,9 +39,10 @@ port 22, or copy a private key to the VM.
   GitHub OIDC deploy workflow remains disabled while project policy denies
   creating the OIDC provider. Do not use long-lived AWS keys as a workaround.
 - The live API has no bookable supply: `/api/routes` reports `pointCount: 0`,
-  `/api/trains` returns `{"trains":[]}`, and the 18 October trip-availability
-  query returns `hasEligibleDrivers: false` and no trips. No approved driver
-  inventory is available; do not display invented vehicles or schedules.
+  `/api/trains` returns `{"trains":[]}`, `/api/stages?q=Mtwapa` returns no
+  points, and the 18 October trip-availability query returns
+  `hasEligibleDrivers: false` and no trips. No approved driver inventory is
+  available; do not display invented vehicles or schedules.
 - `/api/v1/driver/status` reports strict mode (`simulation: false`), but phone
   and email sign-in, registration, and navigation are closed. The response says
   driver email sign-in is not configured. Keep driver sign-in closed until real
@@ -113,7 +114,7 @@ role and must never be copied into Android.
 
 ## Verified VM state
 
-The read-only state above is current as of 18 October 2026, 10:16 EAT. The VM is
+The read-only state above is current as of 18 October 2026, 10:24 EAT. The VM is
 healthy internally, but it cannot support a customer or driver pilot until its
 route and train catalogue, approved drivers, driver authentication, public
 DNS/TLS, payment callbacks, and passenger/driver email delivery are configured

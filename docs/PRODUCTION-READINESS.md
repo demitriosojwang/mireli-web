@@ -1,45 +1,51 @@
 # Mireli booking launch checklist
 
-**Status: not ready to accept customer bookings.** The AWS VM and shared API are
-healthy internally, but public DNS/TLS is not cut over. The production catalogue
-is empty, there is no approved driver, and live payment/email credentials have
-not been installed. Keep pooled cabs at zero and do not accept payment until the
-end-to-end gates below pass.
+**Status: not ready to accept customer bookings.** Read-only SSM confirmed the
+AWS VM and shared API are healthy internally, but public DNS/TLS is not cut
+over. The production catalogue is empty, there is no approved driver, and live
+payment/email credentials have not been installed. Keep pooled cabs at zero and
+do not accept payment until the end-to-end gates below pass.
 
-## AWS deployment state (last successful read-only SSM check: 18 October 2026, 08:52 EAT)
-
-An access refresh was attempted at 09:32 EAT, but this workstation had no AWS
-CLI available and Windows blocked its all-users installer with error 1925.
-That attempt ran no SSM commands and changed no AWS resources. The 08:52
-snapshot below remains the last verified VM state; see the
-[driver VM handoff](DRIVER-AGENT-VM-HANDOFF.md) for the reconnect steps.
+## AWS deployment state (read-only SSM verification: 18 October 2026, 10:24 EAT)
 
 - [x] EC2 `i-097df027e02b0708f` is running in `eu-north-1`, with SSM Online.
+- [x] The AWS CLI sign-in works and SSM reports the node Online with agent
+  `3.3.5390.0`. See the
+  [driver VM handoff](DRIVER-AGENT-VM-HANDOFF.md) for per-developer access.
 - [x] Exactly one `mireli` Docker container is healthy on image `794fb87`, bound
   to `127.0.0.1:3000`; Caddy, Docker, and the app service are active.
 - [x] Internal `GET /api/health` returns `{"status":"ok"}`.
-- [x] Internal `GET /api/routes` returns `pointCount: 0` and the confirmed
-  KSh 50 booking fee; `GET /api/trains` returns no trains; searching Mtwapa
-  returns `{"points":[],"hasMore":false}`. This is why the drop-off list is
-  empty: there are no active published stops in the production catalogue, not
-  an unbounded customer-side list request.
-- [x] Customer availability `GET /api/trips?date=2026-10-18&direction=FROM_TERMINUS` returns
-  `{"hasEligibleDrivers":false,"trips":[]}`. The web app shows zero pooled cabs
-  and does not create booking inventory when no eligible driver exists.
+- [x] Internal `GET /api/routes` returns `pointCount: 0` and a KSh 50 booking
+  fee; `GET /api/trains` returns no trains; `GET /api/stages?q=Mtwapa` returns
+  `{"points":[],"hasMore":false}`. The drop-off picker is empty because the
+  live database has no active published stops. It must stay empty until the
+  owner supplies and publishes the approved catalogue.
+- [x] Customer availability for 18 October returns
+  `{"hasEligibleDrivers":false,"trips":[]}`. The web app must show zero pooled
+  cabs and must not create booking inventory when no eligible driver exists.
 - [x] Driver API is strict (`simulation: false`); phone/email sign-in,
   registration, and navigation are currently closed. The status response says
   driver email sign-in is not configured.
 - [x] No driver or stop data was added to make the booking UI look populated.
+- [x] Cause of the slow/blank production experience is identified: the running
+  image is older than the current booking UI. In the old image, the page requests
+  unfiltered trip availability for the entire date and direction on first load,
+  and the stop bootstrap can remain in its loading skeleton if the API hangs.
+  The current source branch defers trips until a stop is selected, scopes the
+  query to that stop's route, applies request timeouts, and displays explicit
+  loading, empty, and retryable error states. The source fix is not live until
+  a reviewed image containing it is deployed.
 - [x] Local Docker is a test environment only. The AWS VM continues serving
   independently when the developer's computer is off.
 - [ ] `mirelisgr.duckdns.org` still resolves to old IP `105.161.112.67` rather
   than EIP `13.53.183.149`. Rotate the exposed DuckDNS token, update its A
   record, then verify Caddy TLS and public health/status checks from outside
   AWS. DNS has not been changed.
-- [x] GitHub Actions checks the application, both AMD64/ARM64 production
-  images, and AWS infrastructure. See the live checks on
-  [PR #4](https://github.com/demitriosojwang/mireli-web/pull/4); the feature
-  branch is not deployed to the VM until reviewed release gates pass.
+- [x] The current application source commit `795bcb6` passed GitHub Actions for
+  tests, typecheck, lint, build, Prisma validation/generation, AMD64/ARM64
+  images, Compose validation, and CloudFormation checks. See
+  [PR #4](https://github.com/demitriosojwang/mireli-web/pull/4). The VM still
+  runs `794fb87`; passing CI does not mean the branch has been deployed.
 - [ ] AWS deployment has not run for this feature branch. The release workflow
   requires a successful `main` build plus its deployment flag and role; AWS
   project policy currently denies creation of the GitHub OIDC provider. Keep
