@@ -1,6 +1,6 @@
 # Mireli Driver agent: shared VM handoff
 
-Updated 18 October 2026. Use this when connecting the Mireli Driver Android
+Updated 18 October 2026, 14:37 EAT. Use this when connecting the Mireli Driver Android
 project to the same backend used by Mireli Web.
 
 ## What is running
@@ -21,14 +21,14 @@ and inbound SSH is intentionally closed. Use the individually authorized AWS
 Systems Manager (SSM) path below. Do not share a teammate's AWS profile, open
 port 22, or copy a private key to the VM.
 
-## Latest SSM connection and VM check (18 October 2026, 14:07 EAT)
+## Latest SSM connection and VM check (18 October 2026, 14:37 EAT)
 
 AWS authentication was verified with the `mireli` profile in account
-`036834403673`. A read-only SSM Run Command reached the VM at 14:07 EAT
-(command ID `888908f4-695a-4b6c-bb47-1c315cd80ad7`) and completed successfully
-with no command errors. `docker`, `caddy`, and `mireli-app` are active. One
-healthy container named `mireli` runs image tag `794fb87` (up 47 hours). Fresh
-HTTP status checks returned:
+`036834403673`. SSM reported the VM Online (agent `3.3.5390.0`, last ping
+14:33 EAT). A read-only SSM Run Command reached the VM at 14:37 EAT (command
+ID `d8292393-e7c9-4b22-83c6-c5579703fd01`) and completed successfully with no
+command errors. One healthy container named `mireli` runs image tag `794fb87`
+(up 2 days). Fresh HTTP status checks returned:
 
 - `/api/health`: HTTP 200; body `{"status":"ok"}`.
 - `/api/routes`: HTTP 200; body reports `pointCount: 0` and a KSh 50 booking
@@ -40,11 +40,20 @@ HTTP status checks returned:
   says driver email sign-in is not configured.
 - `/api/driver-supply`: HTTP 404. This route exists in the current source
   branch, so the VM image is stale relative to source.
+- `/api/pay/options`: HTTP 500 with an empty response body. Do not expose
+  customer checkout as ready until payment configuration and signed HTTPS
+  callbacks are installed and verified. Source now returns a sanitized
+  unavailable response and blocks cash bookings before allocation when M-Pesa
+  is not ready; it still needs CI and a reviewed VM release.
+- `/api/trips?date=2026-10-18&direction=FROM_TERMINUS` returned no trips and
+  `hasEligibleDrivers: false` in the earlier 14:20 EAT check. There are no
+  approved drivers or published stops/trains, so Android sign-in and matching
+  must remain closed.
 
 EC2 reports the instance `running`, public IP `13.53.183.149`, type `t4g.small`,
-and no key pair. The SSM managed-node status is `Online` (agent `3.3.5390.0`).
-No application, VM configuration, DNS, or other AWS resources were changed by
-these checks. The SSM Run Command itself is recorded in AWS as an audit event.
+and no key pair. No application, VM configuration, DNS, or other AWS resources
+were changed by these checks. The SSM Run Command itself is recorded in AWS as
+an audit event.
 
 - AWS CLI v2 is installed on the operator workstation at
   `C:\Users\favou\AppData\Local\Programs\Amazon\AWSCLIV2\aws.exe`; it may

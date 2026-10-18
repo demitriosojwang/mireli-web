@@ -209,6 +209,22 @@ export async function getPublicPayOptions(): Promise<{
   methods: string[];
 }> {
   const creds = await resolveDaraja();
+  if (!isLocalDemoEnabled()) {
+    // STK availability includes the signed callback URL that Safaricom needs
+    // to confirm a payment. Do not advertise a method that can only fail after
+    // the passenger has created an unpaid booking.
+    const urls = callbackUrls(creds);
+    if (!urls.base) throw new Error("M-Pesa callback base URL is not configured.");
+    let callbackBase: URL;
+    try {
+      callbackBase = new URL(urls.base);
+    } catch {
+      throw new Error("M-Pesa callback base URL is invalid.");
+    }
+    if (callbackBase.protocol !== "https:") {
+      throw new Error("M-Pesa callbacks require a public HTTPS origin.");
+    }
+  }
   return {
     paybill: creds.shortcode || null,
     methods: ["mpesa_stk", ...(creds.shortcode ? ["mpesa_paybill"] : [])],

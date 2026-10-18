@@ -6,7 +6,7 @@ over. The production catalogue is empty, there is no approved driver, and live
 payment/email credentials have not been installed. Keep pooled cabs at zero and
 do not accept payment until the end-to-end gates below pass.
 
-## AWS deployment state (read-only SSM verification: 18 October 2026, 14:07 EAT)
+## AWS deployment state (read-only SSM verification: 18 October 2026, 14:37 EAT)
 
 - [x] EC2 `i-097df027e02b0708f` is running in `eu-north-1`, with SSM Online.
 - [x] AWS identity verification succeeded and SSM reports the node Online with
@@ -38,6 +38,19 @@ do not accept payment until the end-to-end gates below pass.
   `794fb87`, although the endpoint exists in the current source. This stale
   image is a release blocker; the new deployment readiness gate will reject an
   image that omits this endpoint.
+- [x] At 14:20 EAT, `/api/pay/options` on the VM returned HTTP 500 while the
+  health and booking catalogue endpoints were responding. Checkout payment
+  readiness is unresolved on the deployed image; do not assume M-Pesa is
+  configured or request customer payment. The current source now has a safe
+  503 response and a booking preflight that refuses cash bookings before
+  allocation when STK or its signed HTTPS callback is unavailable. That source
+  change still needs CI and deployment before it affects the VM.
+- [x] At 14:37 EAT, SSM still reports the VM Online and the container healthy
+  on image `794fb87`. `/api/health` returns 200, but `/api/driver-supply`
+  remains 404 and `/api/pay/options` remains 500. `/api/routes` reports zero
+  published stops, `/api/trains` is empty, and the strict driver status keeps
+  sign-in, registration, and navigation closed. No VM or DNS changes were
+  made during this verification.
 - [x] No driver or stop data was added to make the booking UI look populated.
 - [x] The drop-off problem has two confirmed causes on the two checked hosts.
   On AWS, the catalogue query succeeds but returns `pointCount: 0`; no approved
@@ -57,14 +70,12 @@ do not accept payment until the end-to-end gates below pass.
   on AWS until a reviewed image is deployed.
 - [x] Local Docker is a test environment only. The AWS VM continues serving
   independently when the developer's computer is off.
-- [ ] The 13:54 EAT DNS checks through both `1.1.1.1` and `8.8.8.8` still find
-  `mirelisgr.duckdns.org` resolving to `105.161.112.67` (TTL 60), not the VM's
-  EIP `13.53.183.149`. Public HTTPS requests to `/api/health` and `/api/routes`
-  at 13:49 EAT timed out. TCP port 443 on the VM's EIP is
-  reachable, and SSM confirms Caddy listens there with the expected hostname
-  and `127.0.0.1:3000` upstream, but a local TLS handshake for that hostname
-  fails with an internal TLS alert; no `.crt` file was listed under Caddy's
-  data directory. Rotate the exposed DuckDNS token, update its A record, then
+- [ ] At 14:18 EAT, DNS through `1.1.1.1` still returned
+  `105.161.112.67` (TTL 60) for `mirelisgr.duckdns.org`, not the VM's EIP
+  `13.53.183.149`; the public `/api/health` HTTPS request could not connect.
+  At 13:54 EAT, `8.8.8.8` returned the same stale address. An earlier check
+  found TCP 443 reachable on the EIP but Caddy's TLS handshake for the
+  hostname failed. Rotate the exposed DuckDNS token, update its A record, then
   verify certificate issuance and public health/API checks. DNS was not changed.
 - [x] Booking source commit `6b30ca4` passed
   [GitHub Actions run #39119655201](https://github.com/demitriosojwang/mireli-web/actions/runs/39119655201),

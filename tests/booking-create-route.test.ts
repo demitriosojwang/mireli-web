@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   routeFindUnique: vi.fn(),
   passengerFindUnique: vi.fn(),
   passengerUpdate: vi.fn(),
+  creditFindMany: vi.fn(),
   bookingCount: vi.fn(),
   bookingCreate: vi.fn(),
   bookingFindUnique: vi.fn(),
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   bookingDelete: vi.fn(),
   tripFindUnique: vi.fn(),
   getConfig: vi.fn(),
+  getPublicPayOptions: vi.fn(),
   allocateBooking: vi.fn(),
   audit: vi.fn(),
 }));
@@ -24,6 +26,7 @@ vi.mock("@/lib/db", () => ({
       findUnique: mocks.passengerFindUnique,
       update: mocks.passengerUpdate,
     },
+    credit: { findMany: mocks.creditFindMany },
     booking: {
       count: mocks.bookingCount,
       create: mocks.bookingCreate,
@@ -40,6 +43,7 @@ vi.mock("@/lib/money", () => ({ getConfig: mocks.getConfig }));
 vi.mock("@/lib/engine", () => ({ allocateBooking: mocks.allocateBooking }));
 vi.mock("@/lib/daraja", () => ({
   generateBookingCode: () => "MR-ABC123",
+  getPublicPayOptions: mocks.getPublicPayOptions,
   toMpesaMsISDN: () => "+254712345678",
 }));
 vi.mock("@/lib/nairobi-time", () => ({
@@ -86,6 +90,8 @@ beforeEach(() => {
     stages: [{ id: "stage-1", name: "Nyali", order: 1, fare: 500, homeSurcharge: 150 }],
   });
   mocks.passengerFindUnique.mockResolvedValue({ id: "guest-1", phone: "guest-local-1" });
+  mocks.creditFindMany.mockResolvedValue([]);
+  mocks.getPublicPayOptions.mockResolvedValue({ paybill: null, methods: ["mpesa_stk"] });
   mocks.bookingCount.mockResolvedValue(0);
   mocks.bookingCreate.mockResolvedValue({ id: "booking-1", code: "MR-ABC123" });
   mocks.bookingFindUnique.mockResolvedValue(null);
@@ -123,6 +129,34 @@ describe("booking creation with no driver supply", () => {
     expect((await response.json()).error).toContain("1 and 6 seats");
     expect(mocks.getConfig).not.toHaveBeenCalled();
     expect(mocks.bookingCreate).not.toHaveBeenCalled();
+  });
+
+  it("refuses a cash booking before creating or allocating it when M-Pesa is unavailable", async () => {
+    mocks.getPublicPayOptions.mockRejectedValue(new Error("private credential detail"));
+
+    const response = await POST(request(validBookingBody()));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "M-Pesa is temporarily unavailable. No booking was created and no payment was requested.",
+      code: "PAYMENT_OPTIONS_UNAVAILABLE",
+    });
+    expect(mocks.bookingCreate).not.toHaveBeenCalled();
+    expect(mocks.allocateBooking).not.toHaveBeenCalled();
+  });
+
+  it("allows a pooled booking fully covered by available credit without M-Pesa", async () => {
+    mocks.creditFindMany.mockResolvedValue([{ amount: 550 }]);
+    mocks.getPublicPayOptions.mockRejectedValue(new Error("M-Pesa unavailable"));
+
+    const response = await POST(request(validBookingBody({ applyCredit: true })));
+
+    // No eligible cab is configured in this test; the request reaches the
+    // allocation gate rather than being rejected for unavailable M-Pesa.
+    expect(response.status).toBe(409);
+    expect(mocks.bookingCreate).toHaveBeenCalledOnce();
+    expect(mocks.allocateBooking).toHaveBeenCalledOnce();
+    expect(mocks.getPublicPayOptions).not.toHaveBeenCalled();
   });
 
   it("rejects an inactive route before creating a booking", async () => {
@@ -279,6 +313,21 @@ describe("booking creation with no driver supply", () => {
       where: { id: "trip-1" },
       select: { capacity: true },
     });
+  });
+
+  it("removes an allocated charter draft when M-Pesa is unavailable for its capacity-priced fare", async () => {
+    mocks.passengerFindUnique.mockResolvedValue({ id: "passenger-1", phone: "+254712345678" });
+    mocks.allocateBooking.mockResolvedValue({ tripId: "trip-1", note: "Charter allocated" });
+    mocks.getPublicPayOptions.mockRejectedValue(new Error("private payment configuration"));
+
+    const response = await POST(request(validBookingBody({ isCharter: true })));
+
+    expect(response.status).toBe(503);
+    expect((await response.json()).code).toBe("PAYMENT_OPTIONS_UNAVAILABLE");
+    expect(mocks.bookingCreate).toHaveBeenCalledOnce();
+    expect(mocks.allocateBooking).toHaveBeenCalledOnce();
+    expect(mocks.bookingDelete).toHaveBeenCalledWith({ where: { id: "booking-1" } });
+    expect(mocks.audit).not.toHaveBeenCalled();
   });
 
   it("labels door service according to the journey direction", async () => {

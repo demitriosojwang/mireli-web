@@ -53,6 +53,8 @@ export function PaySheet({ open, onClose, booking, onPaid }: PaySheetProps) {
 function PaySheetContent({ open, onClose, booking, onPaid }: PaySheetProps) {
   const [method, setMethod] = useState<PayMethod>("stk");
   const [paybill, setPaybill] = useState<string | null>(null);
+  const [paymentOptionsStatus, setPaymentOptionsStatus] = useState<"loading" | "ready" | "unavailable">("loading");
+  const [paymentOptionsRetry, setPaymentOptionsRetry] = useState(0);
   const [step, setStep] = useState<PayStep>("phone");
   const [phone, setPhone] = useState(booking.passengerPhone || "");
   const [paymentPending, setPaymentPending] = useState(false);
@@ -64,14 +66,32 @@ function PaySheetContent({ open, onClose, booking, onPaid }: PaySheetProps) {
   const [copied, setCopied] = useState<string | null>(null);
 
   useEffect(() => {
-    if (open) {
-      // Which payment options are live? Paybill appears once the platform's
-      // shortcode is configured (Admin → Payments).
-      api<{ paybill: string | null; methods: string[] }>("/api/pay/options")
-        .then((res) => setPaybill(res.paybill))
-        .catch(() => setPaybill(null));
-    }
-  }, [open, booking.id]);
+    if (!open) return;
+    const controller = new AbortController();
+
+    // Do not present an STK form when the server cannot confirm that a real
+    // payment method is configured. Paybill is optional; STK is required.
+    api<{ paybill: string | null; methods: string[] }>("/api/pay/options", {
+      signal: controller.signal,
+      timeoutMs: 8_000,
+    })
+      .then((res) => {
+        if (controller.signal.aborted) return;
+        if (!Array.isArray(res.methods) || !res.methods.includes("mpesa_stk")) {
+          setPaymentOptionsStatus("unavailable");
+          return;
+        }
+        setPaybill(res.methods.includes("mpesa_paybill") && typeof res.paybill === "string" ? res.paybill : null);
+        setPaymentOptionsStatus("ready");
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        setPaybill(null);
+        setPaymentOptionsStatus("unavailable");
+      });
+
+    return () => controller.abort();
+  }, [open, booking.id, paymentOptionsRetry]);
 
   function copy(label: string, value: string) {
     navigator.clipboard?.writeText(value).catch(() => {});
@@ -152,7 +172,44 @@ function PaySheetContent({ open, onClose, booking, onPaid }: PaySheetProps) {
         )}
 
         {/* ── STK: enter number ─────────────────────────────────────────────── */}
-        {step === "phone" && (
+        {step === "phone" && paymentOptionsStatus === "loading" && (
+          <>
+            <SheetHeader>
+              <SheetTitle>Checking payment options</SheetTitle>
+              <SheetDescription>We&apos;re checking that M-Pesa is ready before you pay.</SheetDescription>
+            </SheetHeader>
+            <div role="status" className="flex items-center justify-center gap-2 px-4 py-10 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Checking M-Pesa…
+            </div>
+          </>
+        )}
+
+        {step === "phone" && paymentOptionsStatus === "unavailable" && (
+          <>
+            <SheetHeader>
+              <SheetTitle>Payment is temporarily unavailable</SheetTitle>
+              <SheetDescription>
+                Your booking is not confirmed and no payment has been requested. You can try again later from My rides.
+              </SheetDescription>
+            </SheetHeader>
+            <div role="alert" className="space-y-3 px-4 pb-5">
+              <p className="text-sm text-muted-foreground">
+                Keep the booking reference handy. If M-Pesa becomes available, you can reopen this booking and continue payment.
+              </p>
+              <Button className="w-full" variant="outline" onClick={() => {
+                setError(null);
+                setPaybill(null);
+                setPaymentOptionsStatus("loading");
+                setPaymentOptionsRetry((attempt) => attempt + 1);
+              }}>
+                Try again
+              </Button>
+              <Button className="w-full" onClick={onClose}>Pay later from My rides</Button>
+            </div>
+          </>
+        )}
+
+        {step === "phone" && paymentOptionsStatus === "ready" && (
           <>
             <SheetHeader>
               <SheetTitle className="flex items-center gap-2">
@@ -176,7 +233,7 @@ function PaySheetContent({ open, onClose, booking, onPaid }: PaySheetProps) {
                 />
               </div>
               {error && <p className="text-sm text-destructive">{error}</p>}
-              <Button className="h-11 w-full" onClick={sendPrompt} disabled={busy || phone.length < 9}>
+              <Button className="h-11 w-full" onClick={sendPrompt} disabled={busy || phone.length < 9 || paymentOptionsStatus !== "ready"}>
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : `Send M-Pesa prompt · ${ksh(booking.cashDue)}`}
               </Button>
             </div>

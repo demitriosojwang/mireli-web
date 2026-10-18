@@ -4,7 +4,7 @@ import { getPassengerSession } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import { applyCredits, getConfig, recordCollection } from "@/lib/money";
 import { allocateBooking } from "@/lib/engine";
-import { generateBookingCode, toMpesaMsISDN } from "@/lib/daraja";
+import { generateBookingCode, getPublicPayOptions, toMpesaMsISDN } from "@/lib/daraja";
 import { nairobiDate, nairobiDayRange } from "@/lib/nairobi-time";
 import { isBookingReadyForPayment } from "@/lib/booking-payment-eligibility";
 import { attemptBookingTicketEmail } from "@/lib/booking-ticket-email";
@@ -19,6 +19,18 @@ const GUEST_COUNTING_STATUSES = {
 /** The exact rule copy shown to guests who try to go past the 1-seat limit. */
 const GUEST_LIMIT_ERROR =
   "You can only book up to 1 seat without logging in. Login to book more seats.";
+
+const PAYMENT_UNAVAILABLE_ERROR =
+  "M-Pesa is temporarily unavailable. No booking was created and no payment was requested.";
+
+async function hasStkPaymentMethod(): Promise<boolean> {
+  try {
+    const options = await getPublicPayOptions();
+    return options.methods.includes("mpesa_stk");
+  } catch {
+    return false;
+  }
+}
 
 /** My bookings */
 export async function GET() {
@@ -188,6 +200,26 @@ export async function POST(req: NextRequest) {
   // a Mi-Reli account created with the exact same details. ─────────────────
   const passenger = await db.passenger.findUnique({ where: { id: session.id } });
   const isGuest = !!passenger && passenger.phone.startsWith("guest-");
+  let availableCreditBalance = 0;
+  if (applyCredit) {
+    try {
+      const credits = await db.credit.findMany({
+        where: {
+          passengerId: session.id,
+          status: "active",
+          amount: { gt: 0 },
+          expiresAt: { gt: new Date() },
+        },
+        select: { amount: true },
+      });
+      availableCreditBalance = credits.reduce((sum, credit) => sum + credit.amount, 0);
+    } catch {
+      return NextResponse.json(
+        { error: "We couldn't verify your travel credit. No booking was created; please try again." },
+        { status: 503 },
+      );
+    }
+  }
   if (isGuest) {
     const priorBookings = await db.booking.count({
       where: { passengerId: session.id, ...GUEST_COUNTING_STATUSES },
@@ -198,7 +230,21 @@ export async function POST(req: NextRequest) {
         { status: 403 },
       );
     }
-  } else if (passenger) {
+  }
+
+  // A pooled fare is already known here. Refuse before creating a booking or
+  // allocating a seat if cash will be due but the real STK method is not ready.
+  // Charter fare depends on the assigned vehicle, so it is checked below after
+  // its capacity-based price has been calculated.
+  const estimatedCashDue = total - Math.min(total, availableCreditBalance);
+  if (!isCharter && estimatedCashDue > 0 && !(await hasStkPaymentMethod())) {
+    return NextResponse.json(
+      { error: PAYMENT_UNAVAILABLE_ERROR, code: "PAYMENT_OPTIONS_UNAVAILABLE" },
+      { status: 503 },
+    );
+  }
+
+  if (!isGuest && passenger) {
     // Signed-in account — keep the profile in sync with the details they book
     // with, so future bookings prefill identically.
     await db.passenger.update({
@@ -298,6 +344,15 @@ export async function POST(req: NextRequest) {
       await db.booking.delete({ where: { id: booking.id } }).catch(() => undefined);
       return NextResponse.json(
         { error: "We couldn't confirm the assigned vehicle's fare. No payment was requested; please try again." },
+        { status: 503 },
+      );
+    }
+
+    const charterCashDue = total - Math.min(total, availableCreditBalance);
+    if (charterCashDue > 0 && !(await hasStkPaymentMethod())) {
+      await db.booking.delete({ where: { id: booking.id } }).catch(() => undefined);
+      return NextResponse.json(
+        { error: PAYMENT_UNAVAILABLE_ERROR, code: "PAYMENT_OPTIONS_UNAVAILABLE" },
         { status: 503 },
       );
     }
