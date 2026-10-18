@@ -21,24 +21,29 @@ and inbound SSH is intentionally closed. Use the individually authorized AWS
 Systems Manager (SSM) path below. Do not share a teammate's AWS profile, open
 port 22, or copy a private key to the VM.
 
-## Latest connection and VM check (18 October 2026, 07:53 EAT)
+## Latest connection and VM check (18 October 2026, 08:39 EAT)
 
-- AWS CLI v2.38.1 is installed at
-  `C:\Users\favou\AppData\Local\Programs\Amazon\AWSCLIV2\aws.exe`; this
-  Codex shell could not access it through `PATH`, so the explicit executable
-  path was used. `aws sts get-caller-identity --profile mireli` succeeded for
-  this operator. AWS credentials are temporary; every developer must sign in
-  with their own AWS identity and must not reuse this workstation's profile.
+- `aws sts get-caller-identity --profile mireli --region eu-north-1` succeeded
+  for this operator. AWS credentials are temporary; every developer must sign
+  in with their own AWS identity and must not reuse this workstation's profile.
 - SSM reports `i-097df027e02b0708f` `Online` on Amazon Linux with agent
-  `3.3.5390.0` (last ping `2026-10-18 07:48 EAT`). A read-only SSM Run
-  Command and an interactive Session Manager shell both succeeded at about
-  07:53 EAT. Docker, Caddy, and `mireli-app` are active. There is one healthy
-  container named `mireli`, image tag `794fb87`, bound to
-  `127.0.0.1:3000`; `/api/health` returns `{"status":"ok"}`.
-- The Session Manager plugin `1.2.896.0` was installed on this operator's
-  workstation from AWS's official Windows installer after verifying its
-  Amazon code signature. Each other developer must install the plugin on their
-  own workstation; never copy the AWS profile or temporary credentials.
+  `3.3.5390.0`. A new interactive Session Manager shell succeeded at 08:39 EAT.
+  Docker, Caddy, and `mireli-app` are active. There is one healthy container
+  named `mireli`, image tag `794fb87`, bound to `127.0.0.1:3000`;
+  `/api/health` returns `{"status":"ok"}`.
+- The same read-only session confirmed `/api/routes` returns
+  `pointCount: 0`, `/api/trains` returns no trains, and `/api/v1/driver/status`
+  is strict (`simulation: false`) with sign-in, registration, and navigation
+  closed. The production VM is still on image `794fb87`; this booking-flow
+  feature-branch commit has not been deployed to it.
+- The Session Manager plugin `1.2.896.0` is installed at
+  `C:\Program Files\Amazon\SessionManagerPlugin\bin\session-manager-plugin.exe`.
+  Its folder is not on this Codex PowerShell process's `PATH`, so `aws ssm
+  start-session` initially failed to locate it. Adding that directory to the
+  current shell's `PATH` made the session work. This is a per-shell workaround;
+  no persistent workstation setting was changed. Each other developer must
+  install the plugin on their own workstation; never copy the AWS profile or
+  temporary credentials.
 - In the interactive SSM shell, `ssm-user` could not access the Docker socket
   directly. `sudo -n docker ps ...` succeeded. Use `sudo` for approved Docker
   inspection; do not add `ssm-user` to the `docker` group, which grants
@@ -88,6 +93,14 @@ aws sts get-caller-identity --profile <your-profile> --region eu-north-1
 session-manager-plugin --version
 aws ssm describe-instance-information --profile <your-profile> --region eu-north-1 --filters Key=InstanceIds,Values=i-097df027e02b0708f
 aws ssm start-session --target i-097df027e02b0708f --region eu-north-1 --profile <your-profile>
+```
+
+If the session command says `SessionManagerPlugin is not found`, add the
+plugin's installed `bin` directory to that PowerShell process's `PATH` before
+retrying. For the verified workstation, run:
+
+```powershell
+$env:PATH += ';C:\Program Files\Amazon\SessionManagerPlugin\bin'
 ```
 
 If `start-session` returns `TargetNotConnected`, check that the caller has
