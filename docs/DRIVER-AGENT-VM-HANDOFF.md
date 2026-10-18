@@ -21,33 +21,31 @@ and inbound SSH is intentionally closed. Use the individually authorized AWS
 Systems Manager (SSM) path below. Do not share a teammate's AWS profile, open
 port 22, or copy a private key to the VM.
 
-## Latest successful connection and VM check (18 October 2026, 11:25 EAT)
+## Latest successful connection and VM check (18 October 2026, 12:32 EAT)
 
-The workstation's AWS CLI session expired when SSM was rechecked later on
-18 October. A new `aws login --profile mireli --remote` is waiting for the
-authorization code displayed in the browser to be entered in the CLI. Until
-that completes, the 11:25 EAT SSM snapshot below remains the last successful
-live check. Reauthentication has not changed AWS resources, the VM, DNS, or
-application state.
+AWS authentication has been refreshed and verified. A read-only SSM Run
+Command completed successfully at 12:32 EAT. No VM, application, DNS, or AWS
+resource settings were changed during this check.
 
 - AWS CLI v2 is installed on the operator workstation at
   `C:\Users\favou\AppData\Local\Programs\Amazon\AWSCLIV2\aws.exe`; it may
-  not be on every PowerShell process's `PATH`. The `mireli` profile was verified
-  with `aws sts get-caller-identity` in `eu-north-1`. AWS credentials are temporary;
-  every developer must use their own AWS identity and must not reuse this
-  workstation's profile.
-- SSM reports `i-097df027e02b0708f` `Online` on Amazon Linux with agent
-  `3.3.5390.0`. A read-only Systems Manager Run Command at 11:25 EAT verified
-  one healthy container named `mireli`, image tag `794fb87`, bound to
-  `127.0.0.1:3000`; `/api/health` returns `{"status":"ok"}`. `/api/routes`
-  reports `pointCount: 0`, `/api/trains` returns no trains,
-  `/api/stages?q=Mtwapa` returns no points, and the trip endpoint reports
-  `hasEligibleDrivers: false` with no trips. `/api/v1/driver/status` reports
-  strict mode (`simulation: false`) but phone/email sign-in, registration, and
-  navigation are closed. Driver email authentication is not configured.
-- AWS EC2 metadata confirms the instance has no key pair. A current TCP check
-  to `13.53.183.149:22` failed, so SSH is unavailable; SSM is the verified
-  connection path. Do not open port 22 as a workaround.
+  not be on every PowerShell process's `PATH`. `aws sts get-caller-identity`
+  succeeded with the `mireli` profile in `eu-north-1`. Credentials are
+  temporary; every developer must use their own AWS identity and must not
+  reuse this workstation's profile.
+- SSM reports `i-097df027e02b0708f` `Online` on Amazon Linux 2023 with agent
+  `3.3.5390.0`. The 12:32 EAT read-only Run Command verified `docker`, `caddy`,
+  and `mireli-app` are active. There is one healthy container named `mireli`,
+  image tag `794fb87`, serving the local API on port 3000;
+  `/api/health` returns `{"status":"ok"}`. `/api/routes` reports
+  `pointCount: 0`, `/api/trains` returns no trains, and
+  `/api/stages?q=Mtwapa` returns no points. `/api/v1/driver/status` reports
+  strict mode (`simulation: false`), with phone/email sign-in, registration,
+  and navigation closed. Its message says driver email sign-in is not
+  configured.
+- AWS EC2 metadata confirms the instance has no key pair. A TCP check at
+  11:25 EAT to `13.53.183.149:22` failed, so direct SSH is unavailable; SSM is
+  the verified connection path. Do not open port 22 as a workaround.
 - The VM still runs image `794fb87`. Application source commit `675f5d4` has a
   successful GitHub Actions run (#103), including application checks,
   CloudFormation validation, and AMD64/ARM64 image builds. An earlier
@@ -75,10 +73,11 @@ application state.
   driver email sign-in is not configured. Keep driver sign-in closed until real
   production authentication credentials and provider configuration are set up
   and verified.
-- This SSM check did not modify the VM, DNS, or application state. At 11:25 EAT,
-  `mirelisgr.duckdns.org` still resolved to `105.161.112.67`, not the VM's EIP
-  `13.53.183.149`, and an HTTPS request to `/api/health` could not connect on
-  port 443. Public DNS/TLS is not ready. Rotate the DuckDNS token shown in a
+- The previous DNS/TLS probe at 11:25 EAT found
+  `mirelisgr.duckdns.org` resolving to `105.161.112.67`, not the VM's EIP
+  `13.53.183.149`, and HTTPS `/api/health` could not connect on port 443.
+  DNS/TLS was not rechecked in the 12:32 SSM command, so treat that prior
+  result as the last known public status. Rotate the DuckDNS token shown in a
   screenshot before changing DNS. Never put that token in this repository or
   chat.
 
@@ -140,7 +139,7 @@ role and must never be copied into Android.
 
 ## Verified VM state
 
-The read-only state above is current as of 18 October 2026, 11:25 EAT. The VM is
+The read-only state above is current as of 18 October 2026, 12:32 EAT. The VM is
 healthy internally, but it cannot support a customer or driver pilot until its
 route and train catalogue, approved drivers, driver authentication, public
 DNS/TLS, payment callbacks, and passenger/driver email delivery are configured
