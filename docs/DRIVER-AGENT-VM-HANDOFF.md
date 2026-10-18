@@ -21,21 +21,23 @@ and inbound SSH is intentionally closed. Use the individually authorized AWS
 Systems Manager (SSM) path below. Do not share a teammate's AWS profile, open
 port 22, or copy a private key to the VM.
 
-## Latest connection and VM check (18 October 2026, 08:39 EAT)
+## Latest connection and VM check (18 October 2026, 08:52 EAT)
 
 - `aws sts get-caller-identity --profile mireli --region eu-north-1` succeeded
   for this operator. AWS credentials are temporary; every developer must sign
   in with their own AWS identity and must not reuse this workstation's profile.
 - SSM reports `i-097df027e02b0708f` `Online` on Amazon Linux with agent
-  `3.3.5390.0`. A new interactive Session Manager shell succeeded at 08:39 EAT.
-  Docker, Caddy, and `mireli-app` are active. There is one healthy container
-  named `mireli`, image tag `794fb87`, bound to `127.0.0.1:3000`;
-  `/api/health` returns `{"status":"ok"}`.
-- The same read-only session confirmed `/api/routes` returns
-  `pointCount: 0`, `/api/trains` returns no trains, and `/api/v1/driver/status`
-  is strict (`simulation: false`) with sign-in, registration, and navigation
-  closed. The production VM is still on image `794fb87`; this booking-flow
-  feature-branch commit has not been deployed to it.
+  `3.3.5390.0`. An interactive Session Manager shell succeeded earlier at
+  08:39 EAT. At 08:52 EAT, an AWS Systems Manager Run Command completed the
+  read-only service and API checks below. Docker, Caddy, and `mireli-app` are
+  active. There is one healthy container named `mireli`, image tag `794fb87`,
+  bound to `127.0.0.1:3000`; `/api/health` returns `{"status":"ok"}`.
+- The 08:52 EAT read-only check confirmed `/api/routes` returns
+  `pointCount: 0`, `/api/trains` returns no trains, and
+  `/api/v1/driver/status` is strict (`simulation: false`) with phone/email
+  sign-in, registration, and navigation closed. Its response says driver email
+  sign-in is not configured. The production VM is still on image `794fb87`; the
+  booking-flow feature-branch commit has not been deployed to it.
 - The Session Manager plugin `1.2.896.0` is installed at
   `C:\Program Files\Amazon\SessionManagerPlugin\bin\session-manager-plugin.exe`.
   Its folder is not on this Codex PowerShell process's `PATH`, so `aws ssm
@@ -122,12 +124,12 @@ role and must never be copied into Android.
 
 ## Verified VM state
 
-The read-only state above is current as of 18 October 2026. The VM is healthy
-internally, but it cannot support a customer or driver pilot until its route and
-train catalogue, approved drivers, driver authentication, public DNS/TLS,
-payment callbacks, and passenger/driver email delivery are configured and
-tested. Do not use the public URL in a production Android build until the owner
-verifies DNS, HTTPS, and strict-mode status from outside AWS.
+The read-only state above is current as of 18 October 2026, 08:52 EAT. The VM is
+healthy internally, but it cannot support a customer or driver pilot until its
+route and train catalogue, approved drivers, driver authentication, public
+DNS/TLS, payment callbacks, and passenger/driver email delivery are configured
+and tested. Do not use the public URL in a production Android build until the
+owner verifies DNS, HTTPS, and strict-mode status from outside AWS.
 
 ## Android and shared-backend contract
 
