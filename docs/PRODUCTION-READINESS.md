@@ -57,9 +57,10 @@ do not accept payment until the end-to-end gates below pass.
   on AWS until a reviewed image is deployed.
 - [x] Local Docker is a test environment only. The AWS VM continues serving
   independently when the developer's computer is off.
-- [ ] The 14:49 EAT DNS check still found `mirelisgr.duckdns.org` resolving to
-  `105.161.112.67`, not the VM's EIP `13.53.183.149`. Public HTTPS requests to
-  `/api/health` and `/api/routes` timed out. TCP port 443 on the VM's EIP is
+- [ ] The 13:54 EAT DNS checks through both `1.1.1.1` and `8.8.8.8` still find
+  `mirelisgr.duckdns.org` resolving to `105.161.112.67` (TTL 60), not the VM's
+  EIP `13.53.183.149`. Public HTTPS requests to `/api/health` and `/api/routes`
+  at 13:49 EAT timed out. TCP port 443 on the VM's EIP is
   reachable, and SSM confirms Caddy listens there with the expected hostname
   and `127.0.0.1:3000` upstream, but a local TLS handshake for that hostname
   fails with an internal TLS alert; no `.crt` file was listed under Caddy's
@@ -74,6 +75,8 @@ do not accept payment until the end-to-end gates below pass.
 - [x] The driver handoff documentation commit `6fde2be` also passed the full
   verification workflow in
   [run #39119957348](https://github.com/demitriosojwang/mireli-web/actions/runs/39119957348).
+- [x] VM handoff and TLS evidence commit `7dd46a1` passed the full workflow in
+  [run #39120951606](https://github.com/demitriosojwang/mireli-web/actions/runs/39120951606).
 - [x] Remove the unused `GET /api` Hello World scaffold from source; keep
   `/api/health` as the dedicated health endpoint. The VM still runs the older
   image until a release is promoted.

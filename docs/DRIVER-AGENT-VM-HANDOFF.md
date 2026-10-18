@@ -97,8 +97,9 @@ resource settings were changed by these checks.
   driver email sign-in is not configured. Keep driver sign-in closed until real
   production authentication credentials and provider configuration are set up
   and verified.
-- The 14:49 EAT DNS/TLS check still found `mirelisgr.duckdns.org` resolving to
-  `105.161.112.67`, not the VM's EIP `13.53.183.149`. Public HTTPS requests to
+- The 13:54 EAT DNS checks through public resolvers `1.1.1.1` and `8.8.8.8`
+  still found `mirelisgr.duckdns.org` resolving to `105.161.112.67` (TTL 60),
+  not the VM's EIP `13.53.183.149`. Public HTTPS requests at 13:49 EAT to
   `/api/health` and `/api/routes` timed out. TCP 443 on the EIP is reachable;
   Caddy listens on 443 and is configured for this hostname with upstream
   `127.0.0.1:3000`, but the local SNI TLS handshake fails with an internal TLS
