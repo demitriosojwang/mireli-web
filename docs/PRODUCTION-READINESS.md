@@ -6,7 +6,7 @@ over. The production catalogue is empty, there is no approved driver, and live
 payment/email credentials have not been installed. Keep pooled cabs at zero and
 do not accept payment until the end-to-end gates below pass.
 
-## AWS deployment state (read-only SSM verification: 18 October 2026, 14:37 EAT)
+## AWS deployment state (read-only SSM verification: 18 October 2026, 15:02 EAT)
 
 - [x] EC2 `i-097df027e02b0708f` is running in `eu-north-1`, with SSM Online.
 - [x] AWS identity verification succeeded and SSM reports the node Online with
@@ -43,9 +43,11 @@ do not accept payment until the end-to-end gates below pass.
   readiness is unresolved on the deployed image; do not assume M-Pesa is
   configured or request customer payment. The current source now has a safe
   503 response and a booking preflight that refuses cash bookings before
-  allocation when STK or its signed HTTPS callback is unavailable. That source
-  change still needs CI and deployment before it affects the VM.
-- [x] At 14:37 EAT, SSM still reports the VM Online and the container healthy
+  allocation when STK or its signed HTTPS callback is unavailable. Code commit
+  `83f59b0` passed CI run
+  [#39124074073](https://github.com/demitriosojwang/mireli-web/actions/runs/39124074073),
+  but has not been deployed to the VM.
+- [x] At 15:02 EAT, SSM still reports the VM Online and the container healthy
   on image `794fb87`. `/api/health` returns 200, but `/api/driver-supply`
   remains 404 and `/api/pay/options` remains 500. `/api/routes` reports zero
   published stops, `/api/trains` is empty, and the strict driver status keeps

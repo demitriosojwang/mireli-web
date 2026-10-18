@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { callbackUrls, stkPush, verifyCallbackToken, type DarajaCredentials } from "@/lib/daraja";
+import { callbackUrls, getPublicPayOptions, stkPush, verifyCallbackToken, type DarajaCredentials } from "@/lib/daraja";
 
 const mocks = vi.hoisted(() => ({ platformConfigFindUnique: vi.fn() }));
 vi.mock("@/lib/db", () => ({ db: { platformConfig: { findUnique: mocks.platformConfigFindUnique } } }));
@@ -12,6 +12,61 @@ afterEach(() => {
 });
 
 describe("Daraja callback authorization", () => {
+  it("does not advertise M-Pesa in strict production without complete provider credentials", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("MIRELI_DEMO_MODE", "false");
+    vi.stubEnv("MIRELI_ALLOW_UNSAFE_DEMO", "");
+    vi.stubEnv("MPESA_MODE", "");
+    vi.stubEnv("MPESA_CONSUMER_KEY", "");
+    vi.stubEnv("MPESA_CONSUMER_SECRET", "");
+    vi.stubEnv("MPESA_SHORTCODE", "");
+    vi.stubEnv("MPESA_PASSKEY", "");
+    mocks.platformConfigFindUnique.mockResolvedValue(null);
+
+    await expect(getPublicPayOptions()).rejects.toThrow("M-Pesa is not configured");
+  });
+
+  it("requires a configured public HTTPS callback before advertising strict-mode STK", async () => {
+    vi.stubEnv("SESSION_SECRET", "mireli-test-secret-that-is-long-enough-123456");
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("MIRELI_DEMO_MODE", "false");
+    vi.stubEnv("MIRELI_ALLOW_UNSAFE_DEMO", "");
+    vi.stubEnv("MPESA_MODE", "");
+    vi.stubEnv("MPESA_CONSUMER_KEY", "test-consumer-key");
+    vi.stubEnv("MPESA_CONSUMER_SECRET", "test-consumer-secret");
+    vi.stubEnv("MPESA_SHORTCODE", "174379");
+    vi.stubEnv("MPESA_PASSKEY", "test-passkey");
+    mocks.platformConfigFindUnique.mockResolvedValue(null);
+
+    vi.stubEnv("MPESA_CALLBACK_BASE_URL", "");
+    await expect(getPublicPayOptions()).rejects.toThrow("callback base URL is not configured");
+
+    vi.stubEnv("MPESA_CALLBACK_BASE_URL", "http://mireli.example");
+    await expect(getPublicPayOptions()).rejects.toThrow("require a public HTTPS origin");
+  });
+
+  it("advertises strict-mode STK only after credentials, callback URL, and signer are ready", async () => {
+    vi.stubEnv("SESSION_SECRET", "mireli-test-secret-that-is-long-enough-123456");
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("MIRELI_DEMO_MODE", "false");
+    vi.stubEnv("MIRELI_ALLOW_UNSAFE_DEMO", "");
+    vi.stubEnv("MPESA_MODE", "");
+    vi.stubEnv("MPESA_CONSUMER_KEY", "test-consumer-key");
+    vi.stubEnv("MPESA_CONSUMER_SECRET", "test-consumer-secret");
+    vi.stubEnv("MPESA_SHORTCODE", "174379");
+    vi.stubEnv("MPESA_PASSKEY", "test-passkey");
+    vi.stubEnv("MPESA_CALLBACK_BASE_URL", "https://mireli.example");
+    mocks.platformConfigFindUnique.mockResolvedValue(null);
+
+    await expect(getPublicPayOptions()).resolves.toEqual({
+      paybill: "174379",
+      methods: ["mpesa_stk", "mpesa_paybill"],
+    });
+  });
+
   it("signs each configured webhook URL for its own callback type", () => {
     vi.stubEnv("SESSION_SECRET", "mireli-test-secret-that-is-long-enough-123456");
     vi.stubEnv("NODE_ENV", "production");

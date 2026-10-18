@@ -1,6 +1,6 @@
 # Mireli Driver agent: shared VM handoff
 
-Updated 18 October 2026, 14:37 EAT. Use this when connecting the Mireli Driver Android
+Updated 18 October 2026, 15:02 EAT. Use this when connecting the Mireli Driver Android
 project to the same backend used by Mireli Web.
 
 ## What is running
@@ -21,12 +21,12 @@ and inbound SSH is intentionally closed. Use the individually authorized AWS
 Systems Manager (SSM) path below. Do not share a teammate's AWS profile, open
 port 22, or copy a private key to the VM.
 
-## Latest SSM connection and VM check (18 October 2026, 14:37 EAT)
+## Latest SSM connection and VM check (18 October 2026, 15:02 EAT)
 
 AWS authentication was verified with the `mireli` profile in account
-`036834403673`. SSM reported the VM Online (agent `3.3.5390.0`, last ping
-14:33 EAT). A read-only SSM Run Command reached the VM at 14:37 EAT (command
-ID `d8292393-e7c9-4b22-83c6-c5579703fd01`) and completed successfully with no
+`036834403673`. SSM reported the VM Online (agent `3.3.5390.0`). A read-only
+SSM Run Command reached the VM at 15:02 EAT (command
+ID `213ad552-5194-41c0-b06e-13b2a4f8e550`) and completed successfully with no
 command errors. One healthy container named `mireli` runs image tag `794fb87`
 (up 2 days). Fresh HTTP status checks returned:
 
@@ -44,7 +44,9 @@ command errors. One healthy container named `mireli` runs image tag `794fb87`
   customer checkout as ready until payment configuration and signed HTTPS
   callbacks are installed and verified. Source now returns a sanitized
   unavailable response and blocks cash bookings before allocation when M-Pesa
-  is not ready; it still needs CI and a reviewed VM release.
+  is not ready. Code commit `83f59b0` passed CI run
+  [#39124074073](https://github.com/demitriosojwang/mireli-web/actions/runs/39124074073),
+  but has not been deployed to the VM.
 - `/api/trips?date=2026-10-18&direction=FROM_TERMINUS` returned no trips and
   `hasEligibleDrivers: false` in the earlier 14:20 EAT check. There are no
   approved drivers or published stops/trains, so Android sign-in and matching
@@ -178,7 +180,7 @@ role and must never be copied into Android.
 
 ## Verified VM state
 
-The read-only state above is current as of 18 October 2026, 14:37 EAT. The VM is
+The read-only state above is current as of 18 October 2026, 15:02 EAT. The VM is
 healthy internally, but it cannot support a customer or driver pilot until its
 route and train catalogue, approved drivers, driver authentication, public
 DNS/TLS, payment callbacks, and passenger/driver email delivery are configured
