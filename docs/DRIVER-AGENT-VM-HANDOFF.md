@@ -50,11 +50,11 @@ application state.
   connection path. Do not open port 22 as a workaround.
 - The VM still runs image `794fb87`. Application source commit `675f5d4` has a
   successful GitHub Actions run (#103), including application checks,
-  CloudFormation validation, and AMD64/ARM64 image builds. The latest docs
-  commit `b0c7830` also passed CI run #106. The application source commit has
-  not been deployed. PR #4 remains open and unmerged. The AWS GitHub OIDC deploy
-  workflow remains disabled while project policy denies creating the OIDC
-  provider. Do not use long-lived AWS keys as a workaround.
+  CloudFormation validation, and AMD64/ARM64 image builds. An earlier
+  docs-only checkpoint `b0c7830` passed CI run #106; the application source
+  commit has not been deployed. PR #4 remains open and unmerged. The AWS GitHub
+  OIDC deploy workflow remains disabled while project policy denies creating
+  the OIDC provider. Do not use long-lived AWS keys as a workaround.
 - The last read-only production database inspection (18 October, 11:14 EAT)
   found four applied migrations:
   `20261001_initial_postgres`, `20261006_driver_services`,
