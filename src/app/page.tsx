@@ -9,7 +9,6 @@ import { PaySheet } from "@/components/pay-sheet";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Command,
@@ -100,6 +99,10 @@ interface TrainRow {
 
 type CatalogueStatus = "loading" | "ready" | "empty" | "error";
 
+const CATALOGUE_TIMEOUT_MS = 8_000;
+const STAGE_SEARCH_TIMEOUT_MS = 8_000;
+const TRIP_AVAILABILITY_TIMEOUT_MS = 12_000;
+
 function coastOf(routeName: string): "north" | "south" {
   return routeName.toLowerCase().includes("south") ? "south" : "north";
 }
@@ -133,6 +136,7 @@ export default function Home() {
   const [pointSearchStatus, setPointSearchStatus] = useState<CatalogueStatus | "idle">("idle");
   const [pointSearchHasMore, setPointSearchHasMore] = useState(false);
   const [pointSearchRetry, setPointSearchRetry] = useState(0);
+  const [journeyCollapsed, setJourneyCollapsed] = useState(false);
   // selection state (original store equivalents)
   const [trainKey, setTrainKey] = useState<string | null>(null);
   const [selectedPoint, setSelectedPoint] = useState<SelectedPoint | null>(null);
@@ -163,6 +167,23 @@ export default function Home() {
     setCatalogueRetry((attempt) => attempt + 1);
   }, []);
 
+  const changeDirection = useCallback((nextDirection: "FROM_TERMINUS" | "TO_TERMINUS") => {
+    if (nextDirection === direction) return;
+    setDirection(nextDirection);
+    setTrainKey(null);
+    setSelectedPoint(null);
+    setHomePickup(false);
+    setJourneyCollapsed(false);
+    setPointPickerOpen(false);
+    setPointSearch("");
+    setPointMatches([]);
+    setPointSearchStatus("idle");
+    setPointSearchHasMore(false);
+    setTrips(null);
+    setLoadedQuery(null);
+    setTripsStatus("loading");
+  }, [direction]);
+
   const loadMyBookings = useCallback(async () => {
     try {
       const res = await api<{ bookings: BookingRow[] }>("/api/bookings");
@@ -174,18 +195,26 @@ export default function Home() {
 
   useEffect(() => {
     const controller = new AbortController();
-    api<{ pointCount: number; bookingFeeAmount: number }>("/api/routes", { signal: controller.signal })
+    api<{ pointCount: number; bookingFeeAmount: number; hasEligibleDrivers: boolean | null }>("/api/routes", {
+      signal: controller.signal,
+      timeoutMs: CATALOGUE_TIMEOUT_MS,
+    })
       .then((response) => {
         setPointCount(response.pointCount);
         setBookingFeeAmount(response.bookingFeeAmount);
+        setHasEligibleDrivers(response.hasEligibleDrivers);
         setRoutesStatus(response.pointCount ? "ready" : "empty");
       })
       .catch(() => {
         if (controller.signal.aborted) return;
         setPointCount(0);
+        setHasEligibleDrivers(null);
         setRoutesStatus("error");
       });
-    api<{ trains: TrainRow[] }>("/api/trains", { signal: controller.signal })
+    api<{ trains: TrainRow[] }>("/api/trains", {
+      signal: controller.signal,
+      timeoutMs: CATALOGUE_TIMEOUT_MS,
+    })
       .then((response) => {
         setTimetable(response.trains);
         setTimetableStatus(response.trains.length ? "ready" : "empty");
@@ -206,19 +235,21 @@ export default function Home() {
     if (!shouldSearchStagePoints(query, pointPickerOpen)) return;
 
     const controller = new AbortController();
+    let active = true;
     const timeout = window.setTimeout(() => {
       setPointSearchStatus("loading");
       api<{ points: PointSearchResult[]; hasMore: boolean }>(
         `/api/stages?q=${encodeURIComponent(query)}`,
-        { signal: controller.signal },
+        { signal: controller.signal, timeoutMs: STAGE_SEARCH_TIMEOUT_MS },
       )
         .then((response) => {
+          if (!active) return;
           setPointMatches(response.points);
           setPointSearchHasMore(response.hasMore);
           setPointSearchStatus(response.points.length ? "ready" : "empty");
         })
         .catch(() => {
-          if (controller.signal.aborted) return;
+          if (!active || controller.signal.aborted) return;
           setPointMatches([]);
           setPointSearchHasMore(false);
           setPointSearchStatus("error");
@@ -226,6 +257,7 @@ export default function Home() {
     }, query.length >= 2 ? 250 : 0);
 
     return () => {
+      active = false;
       window.clearTimeout(timeout);
       controller.abort();
     };
@@ -247,7 +279,7 @@ export default function Home() {
     let active = true;
     api<{ trips: BookableTrip[]; hasEligibleDrivers: boolean }>(
       `/api/trips?date=${date}&direction=${direction}&routeId=${encodeURIComponent(selectedPoint.route.id)}`,
-      { signal: controller.signal },
+      { signal: controller.signal, timeoutMs: TRIP_AVAILABILITY_TIMEOUT_MS },
     )
       .then((res) => {
         if (!active) return;
@@ -258,7 +290,6 @@ export default function Home() {
       .catch(() => {
         if (!active || controller.signal.aborted) return;
         setTrips([]);
-        setHasEligibleDrivers(null);
         setTripsStatus("error");
       })
       .finally(() => {
@@ -311,6 +342,8 @@ export default function Home() {
   }, [timetable, direction, trips, hasEligibleDrivers, selectedPoint, loadedQuery, queryKey]);
 
   const selectedTrainGone = trainKey ? (trainOptions.find((o) => o.key === trainKey)?.gone ?? false) : false;
+  const selectedTrain = trainKey ? trainOptions.find((option) => option.key === trainKey) ?? null : null;
+  const journeyStepDone = Boolean(selectedPoint && journeyCollapsed);
 
   const pointLabelCap = direction === "FROM_TERMINUS" ? "Drop-off" : "Pickup";
 
@@ -385,10 +418,7 @@ export default function Home() {
 
       {/* Direction switcher — the signature pill row */}
       <div className="mx-auto max-w-md w-full px-4 pt-3">
-        <Tabs value={direction} onValueChange={(v) => {
-          setDirection(v as "FROM_TERMINUS" | "TO_TERMINUS");
-          setTrainKey(null);
-        }}>
+        <Tabs value={direction} onValueChange={(v) => changeDirection(v as "FROM_TERMINUS" | "TO_TERMINUS")}>
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="FROM_TERMINUS" className="flex items-center gap-1.5">
               <Anchor className="h-3.5 w-3.5" /> From Terminus
@@ -411,6 +441,38 @@ export default function Home() {
             transition={{ duration: 0.18 }}
             className="space-y-4"
           >
+            <ol aria-label="Booking steps" className="flex items-center gap-2 text-[11px]">
+              <li aria-current={journeyStepDone ? undefined : "step"} className={cn("flex items-center gap-1.5", journeyStepDone ? "text-emerald-700" : "font-semibold text-primary")}>
+                <span className={cn("grid h-5 w-5 place-items-center rounded-full border text-[10px]", journeyStepDone ? "border-emerald-600 bg-emerald-600 text-white" : "border-primary bg-primary text-primary-foreground")}>
+                  {journeyStepDone ? <Check className="h-3 w-3" /> : "1"}
+                </span>
+                Your journey
+              </li>
+              <li aria-hidden="true" className="h-px flex-1 bg-border" />
+              <li aria-current={journeyStepDone ? "step" : undefined} className={cn("flex items-center gap-1.5", journeyStepDone ? "font-semibold text-primary" : "text-muted-foreground")}>
+                <span className={cn("grid h-5 w-5 place-items-center rounded-full border text-[10px]", journeyStepDone ? "border-primary bg-primary text-primary-foreground" : "border-border")}>2</span>
+                Ride and cabs
+              </li>
+            </ol>
+
+            {selectedPoint && journeyCollapsed && (
+              <div className="flex items-center justify-between gap-3 rounded-xl border bg-card px-3.5 py-3" aria-label="Selected journey">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-700">Journey selected</p>
+                  <p className="truncate text-sm font-semibold">
+                    {direction === "FROM_TERMINUS" ? "Mombasa Terminus →" : "→ Mombasa Terminus"} {selectedPoint.point.name}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {fmtDateShort(date)}{selectedTrain ? ` · ${selectedTrain.name} ${selectedTrain.time}` : ""}
+                  </p>
+                </div>
+                <Button type="button" size="sm" variant="outline" className="h-9 shrink-0" onClick={() => setJourneyCollapsed(false)}>
+                  Change
+                </Button>
+              </div>
+            )}
+
+            <div className="space-y-4" hidden={journeyStepDone}>
             {/* Date */}
             <div>
               <div className="mb-2 flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
@@ -469,19 +531,21 @@ export default function Home() {
                     setSelectedPoint(null);
                     setHomePickup(false);
                     setTrips(null);
-                    setHasEligibleDrivers(null);
                     setLoadedQuery(null);
                     setTripsStatus("loading");
+                    setJourneyCollapsed(false);
                   }} className="text-[11px] text-primary hover:underline">
                     Clear selection
                   </button>
                 )}
               </div>
               {routesStatus === "loading" ? (
-                <Skeleton className="h-11 w-full" />
+                <div role="status" className="flex h-11 items-center gap-2 rounded-xl border bg-card px-4 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Checking available stops…
+                </div>
               ) : routesStatus === "empty" || (routesStatus === "ready" && pointCount === 0) ? (
                 <div className="rounded-xl border border-dashed bg-card px-4 py-3 text-sm text-muted-foreground">
-                  {pointLabelCap} points are being set up. Bookings open when the route list is published.
+                  {pointLabelCap} stops aren’t available yet. We’ll show them here once the approved route list is published.
                 </div>
               ) : (
                 <div className="space-y-1.5">
@@ -580,6 +644,7 @@ export default function Home() {
                                       route,
                                       coast,
                                     });
+                                    setJourneyCollapsed(true);
                                     setPointPickerOpen(false);
                                   }}
                                   className="min-h-11"
@@ -612,6 +677,7 @@ export default function Home() {
                   )}
                 </div>
               )}
+            </div>
             </div>
 
             {/* Ride type and door service: compact choices with explicit states. */}
@@ -734,7 +800,7 @@ export default function Home() {
             )}
 
             {/* Available cabs */}
-            {selectedPoint && <div className="space-y-2">
+            {(selectedPoint || hasEligibleDrivers === false) && <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium">
                   {charter ? "Available for charter" : "Available pooled cabs"}

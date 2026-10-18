@@ -6,6 +6,9 @@ import {applicableRequirements, POLICY_VERSION, maxDocumentBytes, requirements, 
 import {deleteDocument, saveDocument} from "./storage";
 import {nairobiDate} from "@/lib/nairobi-time";
 import {phoneNumber} from "./auth";
+import {evaluateDriverApplication} from "./eligibility";
+
+export {evaluateDriverApplication} from "./eligibility";
 
 const documentFields = {id:true,type:true,mime:true,bytes:true,expiresAt:true,state:true,scanState:true,reviewReason:true,createdAt:true} as const;
 export async function onboarding(driverId: string) {
@@ -74,17 +77,4 @@ export async function submitApplication(driverId:string,body:Record<string,unkno
 export async function driverEligibility(driverId:string) {
   const app=await db.driverApplication.findUnique({where:{driverId},include:{driver:true,documents:{where:{state:{not:"replaced"}}}}});
   return evaluateDriverApplication(app,app?.driver.status??"applicant");
-}
-type EligibilityApplication={status:string;policyVersion:string|null;ownsVehicle:boolean;documents:{type:string;state:string;scanState:string;expiresAt:Date|null}[]};
-export function evaluateDriverApplication(app:EligibilityApplication|null,driverStatus:string,now=new Date(),demo=isLocalDemoEnabled()) {
-  const reasons:string[]=[];
-  if(!app || app.status!=="approved") reasons.push("Your application requires compliance approval.");
-  if(app) {
-    if(driverStatus!=="active") reasons.push("Your driver account is not active.");
-    if(app.policyVersion!==POLICY_VERSION)reasons.push("Your driver policy acknowledgement needs updating.");
-    applicableRequirements(app.ownsVehicle).filter(r=>r.required).forEach(r=>{
-      if(!app.documents.some(d=>d.type===r.id && d.state==="approved" && (d.scanState==="clean" || (demo && d.scanState==="clean_demo")) && (!d.expiresAt || d.expiresAt>now))) reasons.push(`${r.title} needs current approved evidence.`);
-    });
-  }
-  return {eligible:reasons.length===0,reasons};
 }

@@ -65,8 +65,9 @@ the intended web/API host; the local Docker stack does not serve production.
 - [x] Keep the booking UI and API aligned at a maximum of six pooled seats,
   reject out-of-range server requests instead of silently clamping them, and
   disable a cab card that cannot fit the requested seats.
-- [x] Show cab inventory only after the passenger chooses a stop, reducing
-  unnecessary page length and keeping the no-approved-driver state at zero.
+- [x] Keep route/date trip inventory deferred until a passenger chooses a
+  stop, while showing a small, truthful zero-cab state on the homepage when
+  the shared approved-driver check confirms there is no eligible supply.
 - [x] Defer trip-availability requests until a stop is chosen, and filter the
   availability query to that stop's active route instead of loading every route
   for the selected date and direction on the initial page view.
@@ -74,6 +75,10 @@ the intended web/API host; the local Docker stack does not serve production.
   non-terminus stop in the booking API; reject malformed ride-option booleans
   and invalid fare data before writing a booking.
 - [x] Keep available cabs at zero when there are no active, approved drivers.
+- [x] Reuse the same approved-driver eligibility check in the booking bootstrap
+  and trip-availability API, so the homepage can show zero cabs without running
+  the scheduler or loading trip schedules. An unavailable driver check remains
+  unknown and does not block stop discovery.
 - [x] Return that empty supply state before running the scheduling tick, and
   limit availability reads to approved-driver and booking-display fields.
 - [x] Count and search only active customer stops with a positive fare and a

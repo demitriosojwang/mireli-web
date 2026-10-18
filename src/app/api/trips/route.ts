@@ -3,8 +3,7 @@ import { db } from "@/lib/db";
 import { runOperationalTick, CAB_LEAD_MINUTES } from "@/lib/engine";
 import { getConfig } from "@/lib/money";
 import { nairobiDayRange } from "@/lib/nairobi-time";
-import { evaluateDriverApplication } from "@/lib/driver/onboarding";
-import { isLocalDemoEnabled } from "@/lib/runtime-mode";
+import { getEligibleDriverIds } from "@/lib/driver/availability";
 import { DriverError } from "@/lib/driver/errors";
 
 /** Bookable departures for a date + direction. */
@@ -28,27 +27,7 @@ export async function GET(req: NextRequest) {
     // drivers there can be no customer-facing trips, and the scheduler would
     // otherwise perform config, route, document, and trip queries on every
     // availability request just to return an empty list.
-    const activeDrivers = await db.driver.findMany({
-      where: { status: "active" },
-      select: {
-        id: true,
-        status: true,
-        application: {
-          select: {
-            status: true,
-            policyVersion: true,
-            ownsVehicle: true,
-            documents: {
-              where: { state: { not: "replaced" } },
-              select: { type: true, state: true, scanState: true, expiresAt: true },
-            },
-          },
-        },
-      },
-    });
-    const eligibleDriverIds = activeDrivers
-      .filter((driver) => isLocalDemoEnabled() || evaluateDriverApplication(driver.application, driver.status).eligible)
-      .map((driver) => driver.id);
+    const eligibleDriverIds = await getEligibleDriverIds();
 
     if (eligibleDriverIds.length === 0) {
       return NextResponse.json({ hasEligibleDrivers: false, trips: [] });

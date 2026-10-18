@@ -20,7 +20,7 @@ vi.mock("@/lib/money", () => ({ getConfig: mocks.getConfig }));
 vi.mock("@/lib/nairobi-time", () => ({
   nairobiDayRange: () => ({ start: new Date("2026-10-11T00:00:00.000Z"), end: new Date("2026-10-12T00:00:00.000Z") }),
 }));
-vi.mock("@/lib/driver/onboarding", () => ({ evaluateDriverApplication: mocks.evaluateDriverApplication }));
+vi.mock("@/lib/driver/eligibility", () => ({ evaluateDriverApplication: mocks.evaluateDriverApplication }));
 vi.mock("@/lib/runtime-mode", () => ({ isLocalDemoEnabled: () => false }));
 
 import { GET } from "@/app/api/trips/route";

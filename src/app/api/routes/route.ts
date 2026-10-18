@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
+import { getEligibleDriverIds } from "@/lib/driver/availability";
 
 function logCatalogueDatabaseError(operation: string, error: unknown) {
   const code =
@@ -44,5 +45,14 @@ export async function GET() {
     logCatalogueDatabaseError("fee config", error);
   }
 
-  return NextResponse.json({ bookingFeeAmount, pointCount });
+  // Keep this bootstrap cheap: expose whether there is any approved supply,
+  // without asking the scheduler for all route/date combinations.
+  let hasEligibleDrivers: boolean | null = null;
+  try {
+    hasEligibleDrivers = (await getEligibleDriverIds()).length > 0;
+  } catch (error) {
+    logCatalogueDatabaseError("driver availability", error);
+  }
+
+  return NextResponse.json({ bookingFeeAmount, pointCount, hasEligibleDrivers });
 }

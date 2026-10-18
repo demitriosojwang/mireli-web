@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import {evaluateDriverApplication} from "@/lib/driver/onboarding";
+import {evaluateDriverApplication} from "@/lib/driver/eligibility";
 import { getConfig, onTripCompleted, runReconciliationSweep, isPayoutBatchDue, runPayoutBatch } from "@/lib/money";
 import { audit } from "@/lib/audit";
 import { nairobiDate, nairobiDayRange, nairobiEventAt, nairobiTrainArrivalAt } from "@/lib/nairobi-time";
