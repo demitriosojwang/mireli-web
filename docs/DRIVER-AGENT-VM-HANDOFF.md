@@ -21,13 +21,29 @@ and inbound SSH is intentionally closed. Use the individually authorized AWS
 Systems Manager (SSM) path below. Do not share a teammate's AWS profile, open
 port 22, or copy a private key to the VM.
 
-## Latest SSM connection and VM check (18 October 2026, 13:21 EAT)
+## Latest SSM connection and VM check (18 October 2026, 13:35 EAT)
 
 AWS authentication was verified. A read-only SSM Run Command reached the VM
-at 13:21 EAT (command ID `b3bc2651-2516-429d-89be-22dca2c02676`). The command
-reported status `Failed` with response code 22 because its final `curl` received
-HTTP 404 from `/api/driver-supply`; earlier health and catalogue probes
-succeeded. No VM, application, DNS, or AWS resource settings were changed.
+at 13:35 EAT (command ID `822b9cbc-1313-4db2-b9ba-4811360690e2`). The SSM
+command succeeded. `docker`, `caddy`, and `mireli-app` are active. One healthy
+container named `mireli` runs image tag `794fb87` (up 47 hours). The read-only
+API checks returned:
+
+- `/api/health`: HTTP 200, `{"status":"ok"}`.
+- `/api/routes`: HTTP 200, `pointCount: 0`, booking fee KSh 50.
+- `/api/trains`: HTTP 200, no trains.
+- `/api/stages?q=Mtwapa`: HTTP 200, no points and `hasMore: false`.
+- `/api/v1/driver/status`: HTTP 200, strict mode (`simulation: false`), but
+  phone/email sign-in, registration, and navigation are closed. The response
+  says driver email sign-in is not configured.
+- `/api/driver-supply`: HTTP 404 (the live Next.js app rendered its not-found
+  page). This route exists in the current source branch, so the VM image is
+  stale relative to source.
+
+AWS CLI identity was verified in account `036834403673`; EC2 reports the
+instance `running`, public IP `13.53.183.149`, type `t4g.small`, and no key pair.
+The SSM managed-node status is `Online`. No VM, application, DNS, or AWS
+resource settings were changed by these checks.
 
 - AWS CLI v2 is installed on the operator workstation at
   `C:\Users\favou\AppData\Local\Programs\Amazon\AWSCLIV2\aws.exe`; it may
@@ -51,15 +67,16 @@ succeeded. No VM, application, DNS, or AWS resource settings were changed.
 - AWS EC2 metadata confirms the instance has no key pair. A TCP check at
   11:25 EAT to `13.53.183.149:22` failed, so direct SSH is unavailable; SSM is
   the verified connection path. Do not open port 22 as a workaround.
-- The VM still runs image `794fb87`. The booking-flow source revision is
-  `10a3d26` on branch `codex/booking-flow-production-readiness`; its full CI
-  passed run [#39117363934](https://github.com/demitriosojwang/mireli-web/actions/runs/39117363934).
-  Documentation checkpoint `f7652e3` also passed the full suite in
-  [#39118544935](https://github.com/demitriosojwang/mireli-web/actions/runs/39118544935).
-  The feature branch has not been deployed. PR #4 remains open and unmerged.
-  The AWS GitHub OIDC deploy workflow remains disabled while project policy
-  denies creating the OIDC provider. Do not use long-lived AWS keys as a
-  workaround.
+- The VM still runs image `794fb87`. Current source revision `6b30ca4` is on
+  branch `codex/booking-flow-production-readiness`. Full CI passed in run
+  [#39119655201](https://github.com/demitriosojwang/mireli-web/actions/runs/39119655201),
+  including database validation, tests, typecheck, lint, production build,
+  CloudFormation lint/Guard, and AMD64/ARM64 container builds. The feature
+  branch has not been deployed. PR #4 has not been merged. The AWS GitHub OIDC
+  deploy workflow remains disabled while project policy denies creating the
+  OIDC provider. Do not use long-lived AWS keys as a workaround. The new
+  release workflow also checks route, train, stage-search, driver-supply, and
+  health API contracts before declaring a deployment ready.
 - The last read-only production database inspection (18 October, 11:14 EAT)
   found four applied migrations:
   `20261001_initial_postgres`, `20261006_driver_services`,
@@ -146,7 +163,7 @@ role and must never be copied into Android.
 
 ## Verified VM state
 
-The read-only state above is current as of 18 October 2026, 13:21 EAT. The VM is
+The read-only state above is current as of 18 October 2026, 13:35 EAT. The VM is
 healthy internally, but it cannot support a customer or driver pilot until its
 route and train catalogue, approved drivers, driver authentication, public
 DNS/TLS, payment callbacks, and passenger/driver email delivery are configured
