@@ -12,7 +12,16 @@ const local = join(root, ".local");
 mkdirSync(local, { recursive: true });
 const schema = readFileSync(join(root, "prisma/schema.prisma"), "utf8")
   .replace('provider = "postgresql"', 'provider = "sqlite"')
-  .replace('provider = "prisma-client-js"', 'provider = "prisma-client-js"\n  output = "../node_modules/.prisma/client"');
+  .replace('provider = "prisma-client-js"', 'provider = "prisma-client-js"\n  output = "../node_modules/.prisma/client"')
+  // SQLite does not support primitive list columns. JSON keeps the preview's
+  // runtime value an ordinary weekday array while production stays PostgreSQL Int[].
+  .replace(
+    /serviceDays\s+Int\[\]\s+@default\(\[0, 1, 2, 3, 4, 5, 6\]\)/,
+    'serviceDays Json @default("[0, 1, 2, 3, 4, 5, 6]")',
+  );
+if (/serviceDays\s+Int\[\]/.test(schema)) {
+  throw new Error("The local SQLite preview could not adapt Train.serviceDays; update its schema adapter.");
+}
 writeFileSync(join(local, "schema.prisma"), schema);
 const withSamples = process.argv.includes("--with-sample-data");
 const databaseUrl = withSamples ? "file:./preview.db" : "file:./fresh-preview.db";
