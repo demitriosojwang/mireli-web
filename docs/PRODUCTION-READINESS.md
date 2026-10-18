@@ -71,9 +71,11 @@ do not accept payment until the end-to-end gates below pass.
   image until a release is promoted.
 - [ ] AWS deployment has not run for this feature branch. The release workflow
   requires a successful `main` build plus its deployment flag and role; AWS
-  project policy currently denies creation of the GitHub OIDC provider. Keep
-  static AWS keys out of GitHub and use the reviewed short-lived CLI/SSM release
-  process until the project policy is resolved.
+  project policy explicitly denies creating a GitHub OIDC provider and also
+  denies listing existing providers. The current role listing returned no
+  GitHub/Mireli deploy role. The provider inventory and deployment role cannot
+  be verified with the current CLI identity. Keep deployment disabled and
+  static AWS keys out of GitHub until the project policy is resolved.
 - [ ] Real passenger/driver authentication, M-Pesa callbacks and reconciliation,
   Brevo ticket delivery, and post-trip payouts are not configured on the VM.
 - [ ] Approved stage catalogue, timetable, and driver supply are missing. The
@@ -120,6 +122,10 @@ AWS EC2 is the intended web/API host; the local Docker stack is for testing only
 - [x] Count and search only active customer stops with a positive fare and a
   non-negative door surcharge; return only that count on initial load and search
   at most 12 matching points on demand instead of downloading every stage.
+- [x] Gate VM releases on JSON contracts for `/api/routes`, `/api/trains`,
+  `/api/stages?q=Mtwapa`, and `/api/driver-supply` in addition to `/api/health`.
+  A missing endpoint or failed database-backed response now triggers rollback;
+  an empty catalogue and `hasEligibleDrivers: false` remain valid responses.
 - [x] Keep the stop picker request-free until the passenger enters at least two
   letters; opening it no longer sends a blank query or claims the catalogue is
   empty while only the search prompt is empty.

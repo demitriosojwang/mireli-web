@@ -7,7 +7,7 @@
   allocation. Source commit `10a3d26` passed GitHub Actions run
   [#39117363934](https://github.com/demitriosojwang/mireli-web/actions/runs/39117363934)
   with the full test, typecheck, lint, production build, CloudFormation,
--  Compose, AMD64, and ARM64 checks. Documentation checkpoint `f7652e3`
+  Compose, AMD64, and ARM64 checks. Documentation checkpoint `f7652e3`
   also passed [run #39118544935](https://github.com/demitriosojwang/mireli-web/actions/runs/39118544935).
 - Read-only AWS SSM checks at 13:21 EAT found one healthy app container on
   image `794fb87`, `GET /api/health` healthy, zero published route stops, and
