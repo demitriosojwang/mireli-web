@@ -1,6 +1,6 @@
 # Mireli Driver agent: shared VM handoff
 
-Updated 18 October 2026, 15:17 EAT. Use this when connecting the Mireli Driver Android
+Updated 18 October 2026, 15:45 EAT. Use this when connecting the Mireli Driver Android
 project to the same backend used by Mireli Web.
 
 ## What is running
@@ -21,21 +21,21 @@ and inbound SSH is intentionally closed. Use the individually authorized AWS
 Systems Manager (SSM) path below. Do not share a teammate's AWS profile, open
 port 22, or copy a private key to the VM.
 
-## Latest SSM connection and VM check (18 October 2026, 15:13–15:15 EAT)
+## Latest SSM connection and VM check (18 October 2026, 15:43 EAT)
 
 AWS authentication was verified with the `mireli` profile in account
 `036834403673`. SSM reported the VM Online (Amazon Linux 2023, agent
-`3.3.5390.0`). Read-only SSM Run Commands at 15:13 EAT (command ID
-`0d8f4b77-f34d-415d-8a13-e3ee4d0e68e4`) and 15:15 EAT (command ID
-`df1d344f-6bb7-4773-a6ec-decf6bf20a21`) both completed successfully. Docker,
-Caddy, and `mireli-app` are active. One healthy container named `mireli` runs
-image tag `794fb87` (up 2 days). Fresh HTTP status checks returned:
+`3.3.5390.0`, last ping 15:43 EAT). The read-only SSM Run Command at 15:43 EAT
+(command ID `04972fa3-995a-423a-968a-e7d4e13ca038`) completed successfully.
+One healthy container named `mireli` runs image tag `794fb87` (up 2 days).
+Fresh HTTP checks returned:
 
 - `/api/health`: HTTP 200; body `{"status":"ok"}`.
 - `/api/routes`: HTTP 200; body reports `pointCount: 0` and a KSh 50 booking
   fee.
 - `/api/trains`: HTTP 200; no trains are published.
-- `/api/stages?q=Mtwapa`: HTTP 200; body `{"points":[],"hasMore":false}`.
+- `/api/stages?q=Mtwapa`: HTTP 200. The 15:15 EAT check returned an empty
+  point list, consistent with the current `/api/routes` count of zero.
 - `/api/driver-supply`: HTTP 404 on this deployed image, although the route
   exists in current source.
 - `/api/pay/options`: HTTP 500 with an empty response body. Do not expose
@@ -44,10 +44,11 @@ image tag `794fb87` (up 2 days). Fresh HTTP status checks returned:
 - `/api/v1/driver/status`: HTTP 200, strict mode (`simulation: false`), but
   phone/email sign-in, registration, and navigation are closed. The response
   says driver email sign-in is not configured.
-- Source revision `0e02c6a` passes the latest full CI run
-  [#39125753729](https://github.com/demitriosojwang/mireli-web/actions/runs/39125753729),
-  but the VM still runs older image `794fb87`; source changes have not been
-  deployed there.
+- Remote source revision `48dfc11` passes full CI run
+  [#39126644869](https://github.com/demitriosojwang/mireli-web/actions/runs/39126644869).
+  The newer local revision `e91edf2` has not been pushed or run in CI; its
+  tests, typecheck, lint, and production build passed locally. The VM still runs
+  older image `794fb87`; no source changes have been deployed there.
 - `/api/trips?date=2026-10-18&direction=FROM_TERMINUS` returned no trips and
   `hasEligibleDrivers: false` in the earlier 14:20 EAT check. There are no
   approved drivers or published stops/trains, so Android sign-in and matching
@@ -181,7 +182,7 @@ role and must never be copied into Android.
 
 ## Verified VM state
 
-The read-only state above is current as of 18 October 2026, 15:15 EAT. The VM is
+The read-only state above is current as of 18 October 2026, 15:43 EAT. The VM is
 healthy internally, but it cannot support a customer or driver pilot until its
 route and train catalogue, approved drivers, driver authentication, public
 DNS/TLS, payment callbacks, and passenger/driver email delivery are configured

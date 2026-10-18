@@ -6,7 +6,7 @@ over. The production catalogue is empty, there is no approved driver, and live
 payment/email credentials have not been installed. Keep pooled cabs at zero and
 do not accept payment until the end-to-end gates below pass.
 
-## AWS deployment state (read-only SSM verification: 18 October 2026, 15:15 EAT)
+## AWS deployment state (read-only SSM verification: 18 October 2026, 15:43 EAT)
 
 - [x] EC2 `i-097df027e02b0708f` is running in `eu-north-1`, with SSM Online.
 - [x] AWS identity verification succeeded and SSM reports the node Online with
@@ -63,6 +63,12 @@ do not accept payment until the end-to-end gates below pass.
   IDs are `0d8f4b77-f34d-415d-8a13-e3ee4d0e68e4` and
   `df1d344f-6bb7-4773-a6ec-decf6bf20a21`. No VM configuration, application
   image, or DNS record was changed.
+- [x] A new read-only SSM check at 15:43 EAT reconfirmed SSM Online and the
+  healthy `794fb87` container. `/api/health` is 200, `/api/routes` reports zero
+  points, `/api/trains` is empty, stage search is 200, `/api/driver-supply` is
+  404, `/api/pay/options` is 500, and driver sign-in, registration, and
+  navigation remain closed. Command ID:
+  `04972fa3-995a-423a-968a-e7d4e13ca038`. No VM or DNS configuration changed.
 - [x] No driver or stop data was added to make the booking UI look populated.
 - [x] The drop-off problem has two confirmed causes on the two checked hosts.
   On AWS, the catalogue query succeeds but returns `pointCount: 0`; no approved
