@@ -21,73 +21,46 @@ and inbound SSH is intentionally closed. Use the individually authorized AWS
 Systems Manager (SSM) path below. Do not share a teammate's AWS profile, open
 port 22, or copy a private key to the VM.
 
-## Latest connection and VM check (18 October 2026, 08:52 EAT)
+## Latest connection and VM check (18 October 2026, 10:16 EAT)
 
-**Access refresh attempt (18 October 2026, 09:32 EAT):** This workstation's
-current shell could not find `aws` and the AWS console redirected to sign-in, so
-no new SSM query or VM command ran. The official AWS CLI v2 installer returned
-Windows Installer error 1925 (insufficient privileges for an all-users
-install); it was not installed. Temporary installer/log files were removed.
-No VM, DNS, or AWS resource state was changed. The verified VM state below is
-therefore still the 08:52 EAT snapshot. To refresh it, install AWS CLI v2 with
-an administrator-approved install or restore its path, complete `aws login
---profile mireli`, verify with `aws sts get-caller-identity`, then run the
-read-only SSM checks below. Do not treat the browser's “Done” response as proof
-that this shell has working credentials.
-
-- `aws sts get-caller-identity --profile mireli --region eu-north-1` succeeded
-  for this operator. AWS credentials are temporary; every developer must sign
-  in with their own AWS identity and must not reuse this workstation's profile.
+- AWS CLI v2 is installed on the operator workstation at
+  `C:\Users\favou\AppData\Local\Programs\Amazon\AWSCLIV2\aws.exe`; it may
+  not be on every PowerShell process's `PATH`. The `mireli` profile was verified
+  with `aws sts get-caller-identity` in `eu-north-1`. AWS credentials are temporary;
+  every developer must use their own AWS identity and must not reuse this
+  workstation's profile.
 - SSM reports `i-097df027e02b0708f` `Online` on Amazon Linux with agent
-  `3.3.5390.0`. An interactive Session Manager shell succeeded earlier at
-  08:39 EAT. At 08:52 EAT, an AWS Systems Manager Run Command completed the
-  read-only service and API checks below. Docker, Caddy, and `mireli-app` are
-  active. There is one healthy container named `mireli`, image tag `794fb87`,
-  bound to `127.0.0.1:3000`; `/api/health` returns `{"status":"ok"}`.
-- The 08:52 EAT read-only check confirmed `/api/routes` returns
-  `pointCount: 0`, `/api/trains` returns no trains, and
-  `/api/v1/driver/status` is strict (`simulation: false`) with phone/email
-  sign-in, registration, and navigation closed. Its response says driver email
-  sign-in is not configured. The production VM is still on image `794fb87`; the
-  booking-flow feature-branch commit has not been deployed to it.
-- The Session Manager plugin `1.2.896.0` is installed at
-  `C:\Program Files\Amazon\SessionManagerPlugin\bin\session-manager-plugin.exe`.
-  Its folder is not on this Codex PowerShell process's `PATH`, so `aws ssm
-  start-session` initially failed to locate it. Adding that directory to the
-  current shell's `PATH` made the session work. This is a per-shell workaround;
-  no persistent workstation setting was changed. Each other developer must
-  install the plugin on their own workstation; never copy the AWS profile or
-  temporary credentials.
-- In the interactive SSM shell, `ssm-user` could not access the Docker socket
-  directly. `sudo -n docker ps ...` succeeded. Use `sudo` for approved Docker
-  inspection; do not add `ssm-user` to the `docker` group, which grants
-  root-equivalent access.
-- `/api/v1/driver/status` returns strict mode (`simulation: false`), with
-  phone/email sign-in, registration, and navigation closed. The response says
-  driver email sign-in is not configured.
-- The production catalogue is empty: `/api/routes` reports `pointCount: 0`,
-  `/api/trains` returns no trains, and `/api/stages?q=Mtwapa` returns no
-  points. The 18 October trip-availability query returns
-  `hasEligibleDrivers: false` and no trips. The driver app must not display
-  invented vehicles or schedules.
-- The public DNS finding below is from the earlier DNS check; this SSM check
-  did not change VM configuration, DNS, or application state.
-- `mirelisgr.duckdns.org` resolves to `105.161.112.67`, not the VM's EIP
-  `13.53.183.149`. Public DNS/TLS is not ready. Rotate the DuckDNS token that
-  appeared in a screenshot before changing DNS.
-- The prior SSH attempt timed out on port 22. The instance has no EC2 key pair
-  and inbound SSH is intentionally closed. Do not open SSH as a workaround.
-- All VM checks were read-only; no VM configuration, DNS, or application state
-  was changed. The only workstation change was installing the AWS-signed
-  Session Manager plugin so this operator could establish the keyless shell.
+  `3.3.5390.0`. A read-only Systems Manager Run Command verified Docker, Caddy,
+  and `mireli-app` are active. There is one healthy container named `mireli`,
+  image tag `794fb87`, bound to `127.0.0.1:3000`; `/api/health` returns
+  `{"status":"ok"}`.
+- The VM still runs image `794fb87`. The latest source branch commit is
+  `795bcb6` and its GitHub CI is green, but it has not been deployed. The AWS
+  GitHub OIDC deploy workflow remains disabled while project policy denies
+  creating the OIDC provider. Do not use long-lived AWS keys as a workaround.
+- The live API has no bookable supply: `/api/routes` reports `pointCount: 0`,
+  `/api/trains` returns `{"trains":[]}`, and the 18 October trip-availability
+  query returns `hasEligibleDrivers: false` and no trips. No approved driver
+  inventory is available; do not display invented vehicles or schedules.
+- `/api/v1/driver/status` reports strict mode (`simulation: false`), but phone
+  and email sign-in, registration, and navigation are closed. The response says
+  driver email sign-in is not configured. Keep driver sign-in closed until real
+  production authentication credentials and provider configuration are set up
+  and verified.
+- This SSM check did not modify the VM, DNS, or application state. The earlier
+  DNS check found `mirelisgr.duckdns.org` resolving to `105.161.112.67`, not the
+  VM's EIP `13.53.183.149`; public DNS/TLS remains unverified. Rotate the
+  DuckDNS token shown in a screenshot before changing DNS. Never put that token
+  in this repository or chat.
+- SSH on port 22 previously timed out. The instance has no EC2 key pair and
+  inbound SSH is intentionally closed. Use SSM; do not open SSH as a workaround.
 
-For another developer to use the same VM, invite them as an AWS project team
-member and grant only the SSM session permissions they need. They must use
-their own AWS sign-in. The VM is shared runtime infrastructure, not a shared
-development checkout; coordinate deployments and avoid editing the live
-container. Session Manager is the supported path. Only switch to SSH if the
-owner deliberately provisions a key pair and narrowly scopes TCP 22 to the
-developer's current IP.
+For another developer to use this VM, invite them as an AWS project team member
+and grant only the SSM session permissions they need. They must sign in with
+their own AWS identity. This VM is shared runtime infrastructure, not a shared
+development checkout; coordinate deployments and do not edit the live container
+as source. Session Manager is the supported access path. SSH would require the
+owner to deliberately provision a key pair and narrowly scope port 22.
 
 ## Connect with an individual AWS identity
 
@@ -98,15 +71,19 @@ uses their own AWS sign-in/profile. AWS CLI v2 and the Session Manager plugin
 are both needed for an interactive CLI session. The tested operator workstation
 has AWS CLI `2.38.1` and plugin `1.2.896.0`; other developers must install the
 plugin themselves using the [official AWS Windows install steps](https://docs.aws.amazon.com/systems-manager/latest/userguide/install-plugin-windows.html).
+The AWS CLI path recorded above is specific to this workstation; on another
+machine, use that developer's own AWS CLI installation.
 
 PowerShell commands (replace `<your-profile>` with that developer's own profile
-name):
+name. Replace `$aws` with that developer's local AWS CLI path if it is not on
+`PATH`):
 
 ```powershell
-aws sts get-caller-identity --profile <your-profile> --region eu-north-1
+$aws = 'C:\Users\favou\AppData\Local\Programs\Amazon\AWSCLIV2\aws.exe'
+& $aws sts get-caller-identity --profile <your-profile> --region eu-north-1
 session-manager-plugin --version
-aws ssm describe-instance-information --profile <your-profile> --region eu-north-1 --filters Key=InstanceIds,Values=i-097df027e02b0708f
-aws ssm start-session --target i-097df027e02b0708f --region eu-north-1 --profile <your-profile>
+& $aws ssm describe-instance-information --profile <your-profile> --region eu-north-1 --filters Key=InstanceIds,Values=i-097df027e02b0708f
+& $aws ssm start-session --target i-097df027e02b0708f --region eu-north-1 --profile <your-profile>
 ```
 
 If the session command says `SessionManagerPlugin is not found`, add the
@@ -136,7 +113,7 @@ role and must never be copied into Android.
 
 ## Verified VM state
 
-The read-only state above is current as of 18 October 2026, 08:52 EAT. The VM is
+The read-only state above is current as of 18 October 2026, 10:16 EAT. The VM is
 healthy internally, but it cannot support a customer or driver pilot until its
 route and train catalogue, approved drivers, driver authentication, public
 DNS/TLS, payment callbacks, and passenger/driver email delivery are configured
