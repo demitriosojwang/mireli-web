@@ -131,6 +131,12 @@ AWS EC2 is the intended web/API host; the local Docker stack is for testing only
 - [x] Replace the oversized drop-off list with a searchable, grouped point picker.
 - [x] Show loading, empty, and retryable error states for route/timetable data;
   do not leave a blank loading bar when the database has no stages.
+- [x] While approved stops load, show only a compact progress state. When the
+  stop count is zero, replace journey and ride controls with one booking-closed
+  card and a refresh action. Show “0 pooled cabs” only when the shared
+  driver-supply check confirms no eligible drivers, skip timetable requests
+  until customer stops exist, and clear stale stop selections when a refresh
+  confirms an empty catalogue.
 - [x] Start a passenger guest session without creating default operator
   settings; issue the welcome credit only when configured credit validity is
   present, and retry guest creation only for a unique-phone collision.

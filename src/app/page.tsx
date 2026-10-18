@@ -18,6 +18,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { api, useMe } from "@/lib/client";
+import { getBookingCatalogueView, hasPublishedCustomerPoints, shouldLoadTrainTimetable, type CatalogueStatus } from "@/lib/booking-catalogue";
 import { fmtTime, ksh } from "@/lib/format";
 import { DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
 import { addNairobiDays, nairobiWeekday } from "@/lib/nairobi-time";
@@ -100,8 +101,6 @@ interface TrainRow {
   serviceDays: number[];
 }
 
-type CatalogueStatus = "loading" | "ready" | "empty" | "error";
-
 const CATALOGUE_TIMEOUT_MS = 8_000;
 const STAGE_SEARCH_TIMEOUT_MS = 8_000;
 const TRIP_AVAILABILITY_TIMEOUT_MS = 12_000;
@@ -146,6 +145,7 @@ export default function Home() {
   const [homePickup, setHomePickup] = useState(false);
   const [charter, setCharter] = useState(false);
   const [requestedSeats, setSeats] = useState(1);
+  const bookingCatalogueView = getBookingCatalogueView(routesStatus, pointCount);
 
   // Availability is route-specific and is fetched only after a passenger
   // chooses a stop. This keeps the initial booking form free of broad trip
@@ -203,8 +203,19 @@ export default function Home() {
       timeoutMs: CATALOGUE_TIMEOUT_MS,
     })
       .then((response) => {
-        setPointCount(response.pointCount);
-        setRoutesStatus(response.pointCount ? "ready" : "empty");
+        const nextPointCount = hasPublishedCustomerPoints(response.pointCount) ? response.pointCount : 0;
+        setPointCount(nextPointCount);
+        setRoutesStatus(nextPointCount ? "ready" : "empty");
+        if (!nextPointCount) {
+          setTimetable([]);
+          setTimetableStatus("empty");
+          setTrainKey(null);
+          setSelectedPoint(null);
+          setHomePickup(false);
+          setJourneyCollapsed(false);
+          setTrips(null);
+          setLoadedQuery(null);
+        }
       })
       .catch(() => {
         if (controller.signal.aborted) return;
@@ -227,11 +238,19 @@ export default function Home() {
       .catch(() => {
         if (!controller.signal.aborted) setHasEligibleDrivers(null);
       });
+    return () => controller.abort();
+  }, [catalogueRetry]);
+
+  useEffect(() => {
+    if (!shouldLoadTrainTimetable(routesStatus, pointCount)) return;
+
+    const controller = new AbortController();
     api<{ trains: TrainRow[] }>("/api/trains", {
       signal: controller.signal,
       timeoutMs: CATALOGUE_TIMEOUT_MS,
     })
       .then((response) => {
+        if (controller.signal.aborted) return;
         setTimetable(response.trains);
         setTimetableStatus(response.trains.length ? "ready" : "empty");
       })
@@ -241,7 +260,7 @@ export default function Home() {
         setTimetableStatus("error");
       });
     return () => controller.abort();
-  }, [catalogueRetry]);
+  }, [routesStatus, pointCount]);
 
   useEffect(() => {
     const query = pointSearch.trim();
@@ -460,7 +479,7 @@ export default function Home() {
             transition={{ duration: 0.18 }}
             className="space-y-4"
           >
-            <ol aria-label="Booking steps" className="flex items-center gap-2 text-[11px]">
+            {bookingCatalogueView === "booking" && <ol aria-label="Booking steps" className="flex items-center gap-2 text-[11px]">
               <li aria-current={journeyStepDone ? undefined : "step"} className={cn("flex items-center gap-1.5", journeyStepDone ? "text-emerald-700" : "font-semibold text-primary")}>
                 <span className={cn("grid h-5 w-5 place-items-center rounded-full border text-[10px]", journeyStepDone ? "border-emerald-600 bg-emerald-600 text-white" : "border-primary bg-primary text-primary-foreground")}>
                   {journeyStepDone ? <Check className="h-3 w-3" /> : "1"}
@@ -472,9 +491,9 @@ export default function Home() {
                 <span className={cn("grid h-5 w-5 place-items-center rounded-full border text-[10px]", journeyStepDone ? "border-primary bg-primary text-primary-foreground" : "border-border")}>2</span>
                 Ride and cabs
               </li>
-            </ol>
+            </ol>}
 
-            {selectedPoint && journeyCollapsed && (
+            {bookingCatalogueView === "booking" && selectedPoint && journeyCollapsed && (
               <div className="flex items-center justify-between gap-3 rounded-xl border bg-card px-3.5 py-3" aria-label="Selected journey">
                 <div className="min-w-0">
                   <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-700">Journey selected</p>
@@ -491,6 +510,31 @@ export default function Home() {
               </div>
             )}
 
+            {bookingCatalogueView === "checking" ? (
+              <div role="status" className="flex items-center gap-2 rounded-xl border bg-card px-4 py-3 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> Checking approved stops…
+              </div>
+            ) : bookingCatalogueView === "closed" ? (
+              <section className="rounded-2xl border bg-card p-4" aria-labelledby="catalogue-empty-title">
+                <div className="flex items-start gap-3">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
+                    <MapPin className="h-5 w-5" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <h2 id="catalogue-empty-title" className="text-sm font-semibold">Bookings aren’t open yet</h2>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                      Approved {pointLabelCap.toLowerCase()} stops haven’t been published for this direction. We’ll open bookings when the route is ready.
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                  <Button type="button" size="sm" variant="outline" onClick={retryCatalogues}>Refresh availability</Button>
+                  {hasEligibleDrivers === false && (
+                    <p className="text-xs text-muted-foreground"><span className="font-semibold text-foreground">0 pooled cabs</span> · no approved drivers yet</p>
+                  )}
+                </div>
+              </section>
+            ) : (
             <div className="space-y-4" hidden={journeyStepDone}>
             {/* Date */}
             <div>
@@ -558,23 +602,14 @@ export default function Home() {
                   </button>
                 )}
               </div>
-              {routesStatus === "loading" ? (
-                <div role="status" className="flex h-11 items-center gap-2 rounded-xl border bg-card px-4 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" /> Checking available stops…
-                </div>
-              ) : routesStatus === "empty" || (routesStatus === "ready" && pointCount === 0) ? (
-                <div className="rounded-xl border border-dashed bg-card px-4 py-3 text-sm text-muted-foreground">
-                  {pointLabelCap} stops aren’t available yet. We’ll show them here once the approved route list is published.
-                </div>
-              ) : (
-                <div className="space-y-1.5">
-                  {routesStatus === "error" && (
-                    <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950" role="status">
-                      <span>We couldn’t check the full point list. Search to see whether your stop is available.</span>
-                      <button type="button" className="shrink-0 font-medium underline underline-offset-2" onClick={retryCatalogues}>Retry</button>
-                    </div>
-                  )}
-                  <Popover
+              <div className="space-y-1.5">
+                {routesStatus === "error" && (
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950" role="status">
+                    <span>We couldn’t check the full point list. Search to see whether your stop is available.</span>
+                    <button type="button" className="shrink-0 font-medium underline underline-offset-2" onClick={retryCatalogues}>Retry</button>
+                  </div>
+                )}
+                <Popover
                     open={pointPickerOpen}
                     onOpenChange={(open) => {
                       setPointPickerOpen(open);
@@ -683,24 +718,24 @@ export default function Home() {
                         )}
                       </Command>
                     </PopoverContent>
-                  </Popover>
-                  {selectedPoint && (
-                    <p className="px-1 text-[11px] text-muted-foreground">
-                      {selectedPoint.coast === "south" ? "South Coast" : "North Coast"} · {ksh(selectedPoint.point.fare)} per seat
-                    </p>
-                  )}
-                  {!selectedPoint && routesStatus === "ready" && pointCount > 0 && (
-                    <p className="px-1 text-[11px] text-muted-foreground">
-                      Choose a stop to see ride options and cabs for that route.
-                    </p>
-                  )}
-                </div>
-              )}
+                </Popover>
+                {selectedPoint && (
+                  <p className="px-1 text-[11px] text-muted-foreground">
+                    {selectedPoint.coast === "south" ? "South Coast" : "North Coast"} · {ksh(selectedPoint.point.fare)} per seat
+                  </p>
+                )}
+                {!selectedPoint && routesStatus === "ready" && pointCount > 0 && (
+                  <p className="px-1 text-[11px] text-muted-foreground">
+                    Choose a stop to see ride options and cabs for that route.
+                  </p>
+                )}
+              </div>
             </div>
             </div>
+            )}
 
             {/* Ride type and door service: compact choices with explicit states. */}
-            {selectedPoint && <section className="space-y-2.5" aria-labelledby="ride-options-title">
+            {bookingCatalogueView === "booking" && selectedPoint && <section className="space-y-2.5" aria-labelledby="ride-options-title">
               <div className="flex items-baseline justify-between">
                 <h2 id="ride-options-title" className="text-sm font-semibold">Choose your ride</h2>
                 <span className="text-[11px] text-muted-foreground">You can review the fare next</span>
@@ -799,7 +834,7 @@ export default function Home() {
             </section>}
 
             {/* Seats (pooled only) */}
-            {selectedPoint && !charter && (
+            {bookingCatalogueView === "booking" && selectedPoint && !charter && (
               <div>
                 <div className="mb-2 flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
                   <Users className="h-3.5 w-3.5" /> How many seats?
@@ -819,7 +854,7 @@ export default function Home() {
             )}
 
             {/* Available cabs */}
-            {(selectedPoint || hasEligibleDrivers === false) && <div className="space-y-2">
+            {bookingCatalogueView === "booking" && (selectedPoint || (hasEligibleDrivers === false && routesStatus !== "loading" && routesStatus !== "empty")) && <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium">
                   {charter ? "Available for charter" : "Available pooled cabs"}
@@ -876,12 +911,12 @@ export default function Home() {
                 ))}
             </div>}
 
-            <details className="rounded-xl border bg-card px-3.5 py-3 text-sm">
+            {bookingCatalogueView === "booking" && (routesStatus === "ready" || routesStatus === "error") && <details className="rounded-xl border bg-card px-3.5 py-3 text-sm">
               <summary className="cursor-pointer font-medium">Fare and service details</summary>
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
                 The fare is based on your selected point and ride type. Door-to-door surcharges go to your driver in full. A private cab reserves the whole vehicle. Review the complete amount and cancellation terms before you pay.
               </p>
-            </details>
+            </details>}
 
             {/* My bookings */}
             {myBookings.length > 0 && (
