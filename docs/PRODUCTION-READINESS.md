@@ -6,31 +6,31 @@ over. The production catalogue is empty, there is no approved driver, and live
 payment/email credentials have not been installed. Keep pooled cabs at zero and
 do not accept payment until the end-to-end gates below pass.
 
-## AWS deployment state (read-only SSM verification: 18 October 2026, 11:25 EAT)
+## AWS deployment state (read-only SSM verification: 18 October 2026, 12:32 EAT)
 
 - [x] EC2 `i-097df027e02b0708f` is running in `eu-north-1`, with SSM Online.
-- [x] The AWS CLI sign-in works and SSM reports the node Online with agent
-  `3.3.5390.0`. See the
+- [x] AWS identity verification succeeded and SSM reports the node Online with
+  agent `3.3.5390.0`. See the
   [driver VM handoff](DRIVER-AGENT-VM-HANDOFF.md) for per-developer access.
-- [x] Exactly one `mireli` Docker container is healthy on image `794fb87`, bound
-  to `127.0.0.1:3000`. The last service-manager check at 11:14 EAT also
-  confirmed Caddy, Docker, and the app service are active.
-- [x] A read-only SSM check at 11:25 EAT confirms internal
+- [x] The 12:32 EAT SSM check confirmed Docker, Caddy, and `mireli-app` are
+  active. Exactly one `mireli` container is healthy on image `794fb87`, bound
+  to `127.0.0.1:3000`.
+- [x] A read-only SSM check at 12:32 EAT confirms internal
   `GET /api/health` returns `{"status":"ok"}`.
 - [x] A read-only SSM check at 11:14 EAT verified the database currently has
   four migrations through `20261011_booking_fee_charter_commission`. The VM
   enables migrations at application startup. Source commit `d8382e8` includes
   three additional migrations for booking ticket email, train service days,
   and durable refund attempts; they are not yet applied in production.
-- [x] Current internal `GET /api/routes` returns `pointCount: 0` and a KSh 50
-  booking fee; `GET /api/trains` returns no trains; and
+- [x] The 12:32 EAT internal `GET /api/routes` returns `pointCount: 0` and a
+  KSh 50 booking fee; `GET /api/trains` returns no trains; and
   `GET /api/stages?q=Mtwapa` returns `{"points":[],"hasMore":false}`. The
   AWS database has no active published stops, so the drop-off picker must stay
   empty until the owner supplies and publishes the approved catalogue.
-- [x] Customer availability for 18 October returns
+- [x] The 11:25 EAT customer availability check for 18 October returned
   `{"hasEligibleDrivers":false,"trips":[]}`. The web app must show zero pooled
   cabs and must not create booking inventory when no eligible driver exists.
-- [x] Driver API is strict (`simulation: false`); phone/email sign-in,
+- [x] The 12:32 EAT driver API status is strict (`simulation: false`); phone/email sign-in,
   registration, and navigation are currently closed. The status response says
   driver email sign-in is not configured.
 - [x] No driver or stop data was added to make the booking UI look populated.
@@ -49,16 +49,15 @@ do not accept payment until the end-to-end gates below pass.
   on AWS until a reviewed image is deployed.
 - [x] Local Docker is a test environment only. The AWS VM continues serving
   independently when the developer's computer is off.
-- [ ] `mirelisgr.duckdns.org` still resolves to old IP `105.161.112.67` rather
-  than EIP `13.53.183.149`. Rotate the exposed DuckDNS token, update its A
-  record, then verify Caddy TLS and public health/status checks from outside
-  AWS. HTTPS could not connect to the current DNS target on port 443. DNS has
-  not been changed.
-- [x] Application source commit `675f5d4` passed GitHub Actions run #103. The
-  current branch head `90912a7` passed
-  [GitHub Actions run #105](https://github.com/demitriosojwang/mireli-web/actions/runs/39111499990),
+- [ ] The last DNS check at 11:25 EAT found `mirelisgr.duckdns.org` resolving to
+  `105.161.112.67` instead of the VM's EIP `13.53.183.149`. Rotate the exposed
+  DuckDNS token, update its A record, then verify Caddy TLS and public
+  health/status checks from outside AWS. HTTPS could not connect to that DNS
+  target on port 443. DNS has not been changed.
+- [x] Branch commit `3fb7a70` passed
+  [GitHub Actions run #39116936206](https://github.com/demitriosojwang/mireli-web/actions/runs/39116936206),
   including tests, typecheck, lint, build, Prisma validation/generation,
-  AMD64/ARM64 images, Compose validation, and CloudFormation checks. See
+  AMD64/ARM64 image builds, Compose validation, and CloudFormation checks. See
   [PR #4](https://github.com/demitriosojwang/mireli-web/pull/4). The VM still
   runs `794fb87`; passing CI does not mean the branch has been deployed.
 - [x] Remove the unused `GET /api` Hello World scaffold from source; keep

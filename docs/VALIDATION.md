@@ -1,5 +1,28 @@
 # Alignment validation — 6 October 2026
 
+## Current booking-flow verification — 18 October 2026
+
+- The focused booking checks passed: 30 existing tests across stage search,
+  stage API responses, zero-driver supply, trip availability, and booking
+  allocation. GitHub Actions run
+  [#39116936206](https://github.com/demitriosojwang/mireli-web/actions/runs/39116936206)
+  for commit `3fb7a70` passed the full test, typecheck, lint, production build,
+  CloudFormation, Compose, AMD64, and ARM64 checks.
+- Read-only AWS SSM checks at 12:32 EAT found one healthy app container on
+  image `794fb87`, `GET /api/health` healthy, zero published route stops, and
+  no active train schedule. Driver status remains strict with sign-in closed.
+  The source branch is not deployed to the VM.
+- The page currently served at this workstation's `localhost:3000` is a stale
+  local preview, not a rendering of the current source: its visible controls
+  differ from `src/app/page.tsx`, and `/api/driver-supply` returns 404 there.
+  Do not use that process to verify current-branch UI behavior.
+- The isolated preview now converts PostgreSQL's train `Int[]` field into a
+  SQLite JSON array. Prisma schema validation and client generation succeed,
+  but `db push` returns a blank `Schema engine error` on this Windows host even
+  with a minimal SQLite schema. No sample records were inserted. A current
+  source browser preview remains unverified until the local Prisma schema
+  engine issue is resolved or another isolated preview host is used.
+
 ## Driver services increment
 
 - 23 unit tests, TypeScript and ESLint pass. Local HTTP checks cover verified OTP

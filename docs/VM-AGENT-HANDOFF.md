@@ -15,7 +15,7 @@ For Android API setup and flavor rules, read
 - ECR repository: `036834403673.dkr.ecr.eu-north-1.amazonaws.com/mireli-sgr-pilot-appimagerepository-juxctzu7badb`.
 - Intended public hostname: `mirelisgr.duckdns.org`; DNS has not been pointed to this VM and HTTPS has not been verified. The old DuckDNS token was exposed in a screenshot; the owner must rotate it before changing DNS.
 - Security group opens only inbound TCP 80/443. Port 22 is not open. The web app binds to host loopback port 3000 behind Caddy.
-- Latest SSM health check (18 October 2026): Docker, Caddy, and `mireli-app` are active; the single `mireli` container is healthy on image tag `794fb87`; `http://127.0.0.1:3000/api/health` returns `{"status":"ok"}`. The API reports zero route points and no active trains.
+- Latest SSM health check (18 October 2026, 12:32 EAT): Docker, Caddy, and `mireli-app` are active; the single `mireli` container is healthy on image tag `794fb87`; `http://127.0.0.1:3000/api/health` returns `{"status":"ok"}`. The API reports zero route points and no active trains.
 - Driver status is strict (`simulation: false`), but phone/email sign-in, registration, and navigation are closed because production provider credentials are absent. The current trip query reports no eligible drivers and no trips.
 - DuckDNS currently resolves to `105.161.112.67`, not the VM's EIP. HTTPS and public driver API access are unverified. Rotate the exposed token and point the A record to `13.53.183.149` before treating the site as online for customers.
 - Runtime database is PostgreSQL 16 embedded in the one Mireli image and persisted on the VM volume. Daily `pg_dump` backups are sent to the private, versioned S3 bucket `mireli-sgr-pilot-036834403673-db-backups-eu-north-1`, with 30-day expiry.
@@ -77,11 +77,11 @@ Create a protected `production` environment with required owner reviewers and br
 
 The AWS VM is not a substitute for operational data. Keep bookings honest and pooled inventory empty until all applicable gates are met:
 
-- Owner-approved stages, coordinates, fares/surcharges, and Madaraka Express timetable have been loaded. No approved catalogue has been supplied yet.
-- At least one driver has been onboarded, vetted, and approved by the shared driver platform. Until then available pooled cabs remain zero and driver assignment is not a successful end-to-end flow.
-- Production authentication, staff review/roles, M-Pesa collection, post-trip driver payout, SMS/email, callback reconciliation, and monitoring are configured and verified.
-- The customer booking-to-trip flow passes in strict mode, including payment callback, driver match/acceptance, pickup PIN, trip completion, payout, and ledger reconciliation.
-- The backup has been restored in a drill, and TLS plus passenger/driver access have been checked from outside AWS over mobile networks.
-- The owner reviews Free-plan credit use and chooses a sustainable plan before the temporary credits/window expire.
+- Owner-approved stages, coordinates, fares/surcharges, and Madaraka Express timetable have not been loaded; no approved catalogue has been supplied yet.
+- At least one driver must be onboarded, vetted, and approved by the shared driver platform. Until then available pooled cabs remain zero and driver assignment is not a successful end-to-end flow.
+- Production authentication, staff review/roles, M-Pesa collection, post-trip driver payout, SMS/email, callback reconciliation, and monitoring must be configured and verified.
+- The customer booking-to-trip flow must pass in strict mode, including payment callback, driver match/acceptance, pickup PIN, trip completion, payout, and ledger reconciliation.
+- A backup restore drill must succeed, and TLS plus passenger/driver access must be checked from outside AWS over mobile networks.
+- The owner should review Free-plan credit use and choose a sustainable plan before the temporary credits/window expire.
 
 Do not point DuckDNS at the VM or report the product launch-ready until the DNS token has been rotated, HTTPS and both API checks work publicly, and the booking/driver/payment gates above pass.
