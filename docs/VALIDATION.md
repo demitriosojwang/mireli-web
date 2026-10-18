@@ -4,10 +4,11 @@
 
 - The focused booking checks passed: 30 existing tests across stage search,
   stage API responses, zero-driver supply, trip availability, and booking
-  allocation. GitHub Actions run
+  allocation. Source commit `10a3d26` passed GitHub Actions run
   [#39117363934](https://github.com/demitriosojwang/mireli-web/actions/runs/39117363934)
-  for commit `10a3d26` passed the full test, typecheck, lint, production build,
-  CloudFormation, Compose, AMD64, and ARM64 checks.
+  with the full test, typecheck, lint, production build, CloudFormation,
+  Compose, AMD64, and ARM64 checks. The latest handoff commit `b45a322` also
+  passed [run #39117923507](https://github.com/demitriosojwang/mireli-web/actions/runs/39117923507).
 - Read-only AWS SSM checks at 13:04 EAT found one healthy app container on
   image `794fb87`, `GET /api/health` healthy, zero published route stops, and
   no active train schedule. Driver status remains strict with sign-in closed.
@@ -19,9 +20,14 @@
 - The isolated preview now converts PostgreSQL's train `Int[]` field into a
   SQLite JSON array. Prisma schema validation and client generation succeed,
   but `db push` returns a blank `Schema engine error` on this Windows host even
-  with a minimal SQLite schema. No sample records were inserted. A current
-  source browser preview remains unverified until the local Prisma schema
-  engine issue is resolved or another isolated preview host is used.
+  with a minimal SQLite schema. No sample records were inserted. A current-source
+  Next dev render at `localhost:3100` returned HTTP 200 with a deliberately
+  unreachable local PostgreSQL URL. Its browser accessibility snapshot showed
+  the compact booking steps, date/train controls, labelled drop-off picker, and
+  retry states. Local API calls returned 503/500 because the isolated database
+  was not running, so this verifies rendering only; it does not verify
+  database-backed booking or the production empty-catalogue state. No sample
+  drivers or routes were inserted.
 
 ## Driver services increment
 
