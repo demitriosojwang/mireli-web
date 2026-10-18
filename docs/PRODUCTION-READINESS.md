@@ -6,7 +6,7 @@ over. The production catalogue is empty, there is no approved driver, and live
 payment/email credentials have not been installed. Keep pooled cabs at zero and
 do not accept payment until the end-to-end gates below pass.
 
-## AWS deployment state (read-only SSM verification: 18 October 2026, 10:40 EAT)
+## AWS deployment state (read-only SSM verification: 18 October 2026, 11:14 EAT)
 
 - [x] EC2 `i-097df027e02b0708f` is running in `eu-north-1`, with SSM Online.
 - [x] The AWS CLI sign-in works and SSM reports the node Online with agent
@@ -15,7 +15,7 @@ do not accept payment until the end-to-end gates below pass.
 - [x] Exactly one `mireli` Docker container is healthy on image `794fb87`, bound
   to `127.0.0.1:3000`; Caddy, Docker, and the app service are active.
 - [x] Internal `GET /api/health` returns `{"status":"ok"}`.
-- [x] A read-only SSM check at 10:40 EAT verified the database currently has
+- [x] A read-only SSM check at 11:14 EAT verified the database currently has
   four migrations through `20261011_booking_fee_charter_commission`. The VM
   enables migrations at application startup. Source commit `d8382e8` includes
   three additional migrations for booking ticket email, train service days,
@@ -46,11 +46,14 @@ do not accept payment until the end-to-end gates below pass.
   than EIP `13.53.183.149`. Rotate the exposed DuckDNS token, update its A
   record, then verify Caddy TLS and public health/status checks from outside
   AWS. DNS has not been changed.
-- [x] Source commit `d8382e8` passed GitHub Actions run #101 for tests,
+- [x] Source commit `675f5d4` passed GitHub Actions run #103 for tests,
   typecheck, lint, build, Prisma validation/generation, AMD64/ARM64 images,
   Compose validation, and CloudFormation checks. See
   [PR #4](https://github.com/demitriosojwang/mireli-web/pull/4). The VM still
   runs `794fb87`; passing CI does not mean the branch has been deployed.
+- [x] Remove the unused `GET /api` Hello World scaffold from source; keep
+  `/api/health` as the dedicated health endpoint. The VM still runs the older
+  image until a release is promoted.
 - [ ] AWS deployment has not run for this feature branch. The release workflow
   requires a successful `main` build plus its deployment flag and role; AWS
   project policy currently denies creation of the GitHub OIDC provider. Keep

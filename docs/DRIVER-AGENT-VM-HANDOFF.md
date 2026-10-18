@@ -21,7 +21,7 @@ and inbound SSH is intentionally closed. Use the individually authorized AWS
 Systems Manager (SSM) path below. Do not share a teammate's AWS profile, open
 port 22, or copy a private key to the VM.
 
-## Latest connection and VM check (18 October 2026, 10:40 EAT)
+## Latest connection and VM check (18 October 2026, 11:14 EAT)
 
 - AWS CLI v2 is installed on the operator workstation at
   `C:\Users\favou\AppData\Local\Programs\Amazon\AWSCLIV2\aws.exe`; it may
@@ -30,14 +30,14 @@ port 22, or copy a private key to the VM.
   every developer must use their own AWS identity and must not reuse this
   workstation's profile.
 - SSM reports `i-097df027e02b0708f` `Online` on Amazon Linux with agent
-  `3.3.5390.0`; its last ping was 10:38:15 EAT. A read-only Systems Manager Run
-  Command verified Docker, Caddy, and `mireli-app` are active. There is one
+  `3.3.5390.0`. A read-only Systems Manager Run Command at 11:14 EAT verified
+  Docker, Caddy, and `mireli-app` are active. There is one
   healthy container named `mireli`, image tag `794fb87`, bound to
   `127.0.0.1:3000`; `/api/health` returns `{"status":"ok"}`. This session used
   SSM rather than SSH because the instance has no key pair and inbound SSH is
   closed.
-- The VM still runs image `794fb87`. Source commit `d8382e8` has a successful
-  GitHub Actions run (#101), including application checks, CloudFormation
+- The VM still runs image `794fb87`. Source commit `675f5d4` has a successful
+  GitHub Actions run (#103), including application checks, CloudFormation
   validation, and AMD64/ARM64 image builds, but it has not been deployed. The
   AWS GitHub OIDC deploy workflow remains disabled while project policy denies
   creating the OIDC provider. Do not use long-lived AWS keys as a workaround.
@@ -126,7 +126,7 @@ role and must never be copied into Android.
 
 ## Verified VM state
 
-The read-only state above is current as of 18 October 2026, 10:40 EAT. The VM is
+The read-only state above is current as of 18 October 2026, 11:14 EAT. The VM is
 healthy internally, but it cannot support a customer or driver pilot until its
 route and train catalogue, approved drivers, driver authentication, public
 DNS/TLS, payment callbacks, and passenger/driver email delivery are configured
