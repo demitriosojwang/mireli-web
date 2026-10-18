@@ -23,6 +23,18 @@ port 22, or copy a private key to the VM.
 
 ## Latest connection and VM check (18 October 2026, 08:52 EAT)
 
+**Access refresh attempt (18 October 2026, 09:32 EAT):** This workstation's
+current shell could not find `aws` and the AWS console redirected to sign-in, so
+no new SSM query or VM command ran. The official AWS CLI v2 installer returned
+Windows Installer error 1925 (insufficient privileges for an all-users
+install); it was not installed. Temporary installer/log files were removed.
+No VM, DNS, or AWS resource state was changed. The verified VM state below is
+therefore still the 08:52 EAT snapshot. To refresh it, install AWS CLI v2 with
+an administrator-approved install or restore its path, complete `aws login
+--profile mireli`, verify with `aws sts get-caller-identity`, then run the
+read-only SSM checks below. Do not treat the browser's “Done” response as proof
+that this shell has working credentials.
+
 - `aws sts get-caller-identity --profile mireli --region eu-north-1` succeeded
   for this operator. AWS credentials are temporary; every developer must sign
   in with their own AWS identity and must not reuse this workstation's profile.

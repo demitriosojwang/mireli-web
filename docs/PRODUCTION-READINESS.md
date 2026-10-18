@@ -89,13 +89,24 @@ the intended web/API host; the local Docker stack does not serve production.
   empty while only the search prompt is empty.
 - [x] Present stage and door-to-door service as explicit, compact choices;
   show the door surcharge with its full driver pass-through before booking.
+- [x] Add a protected, audited Admin → Routes directory for entering and
+  reviewing approved routes/stops. New routes start unpublished; route stops
+  require coordinates and validated fares/surcharges; publishing requires a
+  complete ordered stop list. Published routes must be paused before editing.
+  No sample/candidate catalogue is inserted by the app.
+- [x] Add a protected, audited Admin → Timetable editor. Train entries start
+  unpublished, and entries linked to trip history cannot be rewritten. Each
+  train can be limited to confirmed origin-departure weekdays; overnight
+  arrivals retain their origin service date.
 - [x] Label the selected stop as a pickup or drop-off according to journey
   direction in booking records and ticket emails; format legacy door-service
   bookings correctly when an email is retried.
-- [x] Keep customer stop discovery independent of the booking-fee config read;
-  use the confirmed KSh 50 display fee as a discovery fallback and log only a
-  sanitized database error code. Trip and booking APIs still require full
-  operating settings before they can proceed.
+- [x] Keep customer stop discovery independent from booking-fee and driver
+  eligibility reads: `/api/routes` now performs only the active-stop count,
+  while fee and boolean-only driver-supply checks run separately. The fee check
+  falls back to the confirmed KSh 50 display fee, and logs only a sanitized
+  database error code. Trip and booking APIs still require full operating
+  settings before they can proceed.
 - [x] Allocate eligible drivers across every active route, matching the
   current operating policy.
 - [x] Show the flat booking fee in the fare preview and booking total.
@@ -121,8 +132,8 @@ the intended web/API host; the local Docker stack does not serve production.
 - [ ] Publish the approved routes and stage names, in order, with coordinates,
   per-stage fare, and door-to-door surcharge. Charter fares are calculated from
   the assigned vehicle capacity and per-stage fare.
-- [ ] Add a protected admin route/stage directory or a reviewed data-entry
-  workflow. There is no customer-facing source for this catalogue today.
+- [x] Add a protected admin route/stage directory or a reviewed data-entry
+  workflow. Use Admin → Routes to enter the owner-approved values.
 - [ ] Check each route for at least one non-terminus stage, valid fares, and
   coordinates before making it active.
 - [ ] Confirm the current flat booking fee is KSh 50 and verify shared-ride
@@ -130,6 +141,10 @@ the intended web/API host; the local Docker stack does not serve production.
 
 ### Madaraka Express timetable
 
+- [x] Add a protected timetable data-entry screen; do not auto-import a
+  schedule whose effective date and operating days are unconfirmed.
+- [x] Filter customer availability and generated feeder trips by each train's
+  declared origin service weekdays, including next-day arrivals.
 - [ ] Confirm that the attached schedule is still current; the PDF has no
   effective date. Enter the confirmed trains in the production timetable.
 - [x] Apply each train's destination-day offset when scheduling Mombasa arrival

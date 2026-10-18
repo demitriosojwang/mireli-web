@@ -66,6 +66,7 @@ model Train {
   originTime    String // "HH:MM" departure at origin terminus
   destTime      String // "HH:MM" arrival at destination terminus
   destDayOffset Int     @default(0) // 1 when arrival is next calendar day (night train)
+  serviceDays   Int[]   @default([0, 1, 2, 3, 4, 5, 6]) // ISO-independent JS weekdays: Sunday 0 through Saturday 6, at origin terminus
   active        Boolean @default(true)
   trips         Trip[]
 }

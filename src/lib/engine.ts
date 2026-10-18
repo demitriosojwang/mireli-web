@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import {evaluateDriverApplication} from "@/lib/driver/eligibility";
 import { getConfig, onTripCompleted, runReconciliationSweep, isPayoutBatchDue, runPayoutBatch } from "@/lib/money";
 import { audit } from "@/lib/audit";
-import { nairobiDate, nairobiDayRange, nairobiEventAt, nairobiTrainArrivalAt } from "@/lib/nairobi-time";
+import { nairobiDate, nairobiDayRange, nairobiEventAt, nairobiTrainArrivalAt, nairobiWeekday } from "@/lib/nairobi-time";
 import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 
 /**
@@ -140,8 +140,14 @@ export async function ensureTrips(): Promise<number> {
       : rotated;
   };
 
-  for (let dayOffset = 0; dayOffset <= cfg.tripHorizonDays; dayOffset++) {
+  // Include the previous origin day when a next-day arrival can still create
+  // a future Mombasa feeder departure today (for example, the 03:55 arrival).
+  const firstDayOffset = Math.min(0, ...trains.map((train) => -train.destDayOffset));
+  for (let dayOffset = firstDayOffset; dayOffset <= cfg.tripHorizonDays; dayOffset++) {
     for (const train of trains) {
+      const serviceDate = nairobiDate(dayAt(now, dayOffset, train.originTime));
+      if (!train.serviceDays.includes(nairobiWeekday(serviceDate))) continue;
+
       if (train.direction === "MBA_TO_NBO") {
         // Departure event at MTM → every stage's cab pulls out exactly 2h
         // before the train leaves, regardless of route length.
@@ -244,6 +250,7 @@ export async function allocateBooking(params: {
       direction: params.direction,
       departureAt: { gte: from, lt: dayEnd },
       status: { in: ["scheduled", "locked"] },
+      train: { is: { active: true } },
     },
     orderBy: { departureAt: "asc" },
     include: {
@@ -259,16 +266,20 @@ export async function allocateBooking(params: {
     // that cached counter.
     const reservation = await db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT "id" FROM "Trip" WHERE "id" = ${t.id} FOR UPDATE`;
+      if (t.trainId) {
+        await tx.$queryRaw`SELECT "id" FROM "Train" WHERE "id" = ${t.trainId} FOR SHARE`;
+      }
       const current = await tx.trip.findUnique({
         where: { id: t.id },
         include: {
+          train: { select: { active: true } },
           bookings: {
             where: { status: { in: ["awaiting_payment", "confirmed", "boarded"] } },
             select: { seats: true, isCharter: true },
           },
         },
       });
-      if (!current || !["scheduled", "locked"].includes(current.status)) return null;
+      if (!current || !current.train?.active || !["scheduled", "locked"].includes(current.status)) return null;
 
       const hasCharter = current.bookings.some((booking) => booking.isCharter);
       const occupiedSeats = hasCharter ? current.capacity : current.bookings.reduce((sum, booking) => sum + booking.seats, 0);

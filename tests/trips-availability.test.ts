@@ -94,6 +94,7 @@ describe("customer trip availability", () => {
     expect(result.trips[0].driver).not.toHaveProperty("phone");
     expect(mocks.tripFindMany.mock.calls[0][0].where.routeId).toBe("route-1");
     expect(mocks.tripFindMany.mock.calls[0][0].where.route).toEqual({ is: { active: true } });
+    expect(mocks.tripFindMany.mock.calls[0][0].where.train).toEqual({ is: { active: true } });
     expect(mocks.tripFindMany.mock.calls[0][0].where.driverId.in).toEqual([eligibleDriver.id]);
     expect(mocks.driverFindMany.mock.calls[0][0].select.application.select.documents.select)
       .toEqual({ type: true, state: true, scanState: true, expiresAt: true });

@@ -44,6 +44,7 @@ export async function GET(req: NextRequest) {
         departureAt: { gte: dayStart, lt: dayEnd },
         status: { in: ["scheduled", "locked", "departed"] },
         route: { is: { active: true } },
+        train: { is: { active: true } },
       },
       orderBy: { departureAt: "asc" },
       select: {

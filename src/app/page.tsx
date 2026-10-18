@@ -20,6 +20,7 @@ import {
 import { api, useMe } from "@/lib/client";
 import { fmtTime, ksh } from "@/lib/format";
 import { DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
+import { addNairobiDays, nairobiWeekday } from "@/lib/nairobi-time";
 import { calculateCharterFare } from "@/lib/charter-pricing";
 import { MAX_STAGE_SEARCH_LENGTH, MIN_STAGE_SEARCH_LENGTH, isStageSearchReady, shouldSearchStagePoints } from "@/lib/stage-search";
 import { SplashScreen, useSplashOnce } from "@/components/app/splash-screen";
@@ -95,6 +96,8 @@ interface TrainRow {
   direction: "MBA_TO_NBO" | "NBO_TO_MBA";
   originTime: string;
   destTime: string;
+  destDayOffset: number;
+  serviceDays: number[];
 }
 
 type CatalogueStatus = "loading" | "ready" | "empty" | "error";
@@ -195,21 +198,34 @@ export default function Home() {
 
   useEffect(() => {
     const controller = new AbortController();
-    api<{ pointCount: number; bookingFeeAmount: number; hasEligibleDrivers: boolean | null }>("/api/routes", {
+    api<{ pointCount: number }>("/api/routes", {
       signal: controller.signal,
       timeoutMs: CATALOGUE_TIMEOUT_MS,
     })
       .then((response) => {
         setPointCount(response.pointCount);
-        setBookingFeeAmount(response.bookingFeeAmount);
-        setHasEligibleDrivers(response.hasEligibleDrivers);
         setRoutesStatus(response.pointCount ? "ready" : "empty");
       })
       .catch(() => {
         if (controller.signal.aborted) return;
         setPointCount(0);
-        setHasEligibleDrivers(null);
         setRoutesStatus("error");
+      });
+    api<{ bookingFeeAmount: number }>("/api/booking-fee", {
+      signal: controller.signal,
+      timeoutMs: CATALOGUE_TIMEOUT_MS,
+    })
+      .then((response) => setBookingFeeAmount(response.bookingFeeAmount))
+      .catch(() => {
+        if (!controller.signal.aborted) setBookingFeeAmount(DEFAULT_BOOKING_FEE_AMOUNT);
+      });
+    api<{ hasEligibleDrivers: boolean }>("/api/driver-supply", {
+      signal: controller.signal,
+      timeoutMs: CATALOGUE_TIMEOUT_MS,
+    })
+      .then((response) => setHasEligibleDrivers(response.hasEligibleDrivers))
+      .catch(() => {
+        if (!controller.signal.aborted) setHasEligibleDrivers(null);
       });
     api<{ trains: TrainRow[] }>("/api/trains", {
       signal: controller.signal,
@@ -320,13 +336,16 @@ export default function Home() {
 
   /* ─── Derived data (all hooks run before any early return) ──────────────── */
 
-  // Train pills — always the full Madaraka timetable for this direction
-  // (08:00 Inter-County · 15:00 Express · 22:00 Night Train), each marked
-  // "gone" when its meet-cab for the selected day has already left.
+  // Show only trains operating on the selected Kenya service date. A train
+  // arriving at MTM after midnight belongs to its previous origin date.
   const trainOptions = useMemo(() => {
     const wantDir = direction === "FROM_TERMINUS" ? "NBO_TO_MBA" : "MBA_TO_NBO";
     return timetable
-      .filter((t) => t.direction === wantDir)
+      .filter((t) => {
+        if (t.direction !== wantDir) return false;
+        const serviceDate = direction === "FROM_TERMINUS" ? addNairobiDays(date, -t.destDayOffset) : date;
+        return t.serviceDays.includes(nairobiWeekday(serviceDate));
+      })
       .map((t) => {
         const mtmTime = t.direction === "MBA_TO_NBO" ? t.originTime : t.destTime;
         const key = `${t.name}-${mtmTime}`;
@@ -339,7 +358,7 @@ export default function Home() {
         };
       })
       .sort((a, b) => a.time.localeCompare(b.time));
-  }, [timetable, direction, trips, hasEligibleDrivers, selectedPoint, loadedQuery, queryKey]);
+  }, [timetable, direction, date, trips, hasEligibleDrivers, selectedPoint, loadedQuery, queryKey]);
 
   const selectedTrainGone = trainKey ? (trainOptions.find((o) => o.key === trainKey)?.gone ?? false) : false;
   const selectedTrain = trainKey ? trainOptions.find((option) => option.key === trainKey) ?? null : null;
@@ -479,7 +498,7 @@ export default function Home() {
                 <CalendarDays className="h-3.5 w-3.5" />
                 {direction === "FROM_TERMINUS" ? "Travelling on which date?" : "Catching the train on which date?"}
               </div>
-              <DatePicker value={date} onChange={setDate} />
+              <DatePicker value={date} onChange={(nextDate) => { setDate(nextDate); setTrainKey(null); }} />
               <div className="mt-1.5 text-xs text-muted-foreground">
                 Selected: <span className="font-medium text-foreground">{fmtDateShort(date)}</span>
               </div>
