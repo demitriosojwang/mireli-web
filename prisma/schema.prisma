@@ -224,6 +224,28 @@ model RefundRecord {
   failureReason      String?
   initiatedAt        DateTime @default(now())
   completedAt        DateTime?
+  attempts           RefundAttempt[]
+}
+
+// Every provider refund is correlated to a private callback capability before
+// submission. An accepted HTTP response is pending, never proof of settlement.
+model RefundAttempt {
+  id                String   @id @default(cuid())
+  refundId          String
+  refund            RefundRecord @relation(fields: [refundId], references: [id], onDelete: Restrict)
+  callbackHash      String   @unique
+  method            String // reversal | b2c
+  amount            Int
+  receiverPhone     String?
+  originalReceipt   String?
+  state             String   @default("submitting") // submitting | processing | ambiguous | confirmed | failed
+  conversationId    String?  @unique
+  originatorId      String?  @unique
+  receipt           String?  @unique
+  resultCode        String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  @@index([refundId, state])
 }
 
 model PayoutRecord {

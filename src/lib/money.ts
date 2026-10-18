@@ -6,6 +6,7 @@ import {calculateSettlement} from "@/lib/payout-settlement";
 import {DriverError} from "@/lib/driver/errors";
 import { attemptBookingTicketEmail } from "@/lib/booking-ticket-email";
 import { isLocalDemoEnabled } from "@/lib/runtime-mode";
+import { submitRefund } from "@/lib/refund-settlement";
 
 /**
  * The money engine.
@@ -265,28 +266,9 @@ export async function executeCancellation(params: {
       },
     });
 
+    let refundStatus: "completed" | "pending" | "failed" = "completed";
     if (entry.cashAmount > 0) {
-      const result =
-        method === "reversal"
-          ? await daraja.reversal({ transactionId: entry.mpesaReceipt || booking.code, amount: entry.cashAmount })
-          : await daraja.b2c({ receiverPhone: await passengerPhone(booking.passengerId), amount: entry.cashAmount });
-      const ok = result.resultCode === daraja.RESULT_CODES.SUCCESS;
-      await db.refundRecord.update({
-        where: { id: refund.id },
-        data: {
-          status: ok ? "completed" : "failed",
-          mpesaResultCode: result.resultCode,
-          failureReason: ok ? null : result.resultDesc,
-          completedAt: ok ? new Date() : null,
-        },
-      });
-      await db.ledgerEntry.update({
-        where: { id: entry.id },
-        data: {
-          status: ok ? "refunded" : "partially_refunded",
-          statusChangedAt: new Date(),
-        },
-      });
+      refundStatus = await submitRefund(refund.id);
     } else {
       // Credit-only booking: no cash to move, ledger simply releases the hold
       await db.refundRecord.update({
@@ -321,37 +303,19 @@ export async function executeCancellation(params: {
       entityId: booking.id,
       metadata: { code: booking.code, amount: entry.cashAmount, method, tier },
     });
-    return { outcome: "refunded", tier };
+    return { outcome: refundStatus === "completed" ? "refunded" : refundStatus === "pending" ? "refund_pending" : "refund_failed", tier };
   }
 
   if (tier === "late") {
     if (params.trigger === "admin_override") {
       // Discretionary cash refund by admin (disputes) — amount from params
-      const amount = Math.min(params.overrideAmount ?? entry.cashAmount, entry.cashAmount);
-      const refund = await db.refundRecord.create({
-        data: {
-          ledgerEntryId: entry.id,
-          bookingId: booking.id,
-          amount,
-          reason: "admin_override",
-          method: "b2c",
-          status: "pending",
-        },
+      const priorRefunds = await db.refundRecord.aggregate({
+        where: { ledgerEntryId: entry.id, status: { in: ["pending", "completed"] } },
+        _sum: { amount: true },
       });
-      const result = await daraja.b2c({
-        receiverPhone: await passengerPhone(booking.passengerId),
-        amount,
-      });
-      const ok = result.resultCode === daraja.RESULT_CODES.SUCCESS;
-      await db.refundRecord.update({
-        where: { id: refund.id },
-        data: {
-          status: ok ? "completed" : "failed",
-          mpesaResultCode: result.resultCode,
-          failureReason: ok ? null : result.resultDesc,
-          completedAt: ok ? new Date() : null,
-        },
-      });
+      const remainingCash = Math.max(0, entry.cashAmount - (priorRefunds._sum.amount || 0));
+      const amount = Math.min(params.overrideAmount ?? remainingCash, remainingCash);
+      if (amount <= 0) throw new DriverError(409, "REFUND_BALANCE_EXHAUSTED", "No unrefunded cash remains on this booking.");
       // Commission reversal is proportional — the platform never keeps a
       // commission on a refunded fare.
       const cfgC = await getConfig();
@@ -368,17 +332,19 @@ export async function executeCancellation(params: {
         ? Math.round(platformRetained * refundedShare)
         : 0;
       const driverClawback = amount - commissionReversed;
-      await db.refundRecord.update({
-        where: { id: refund.id },
-        data: { commissionReversed, driverClawback },
-      });
-      await db.ledgerEntry.update({
-        where: { id: entry.id },
+      const refund = await db.refundRecord.create({
         data: {
-          status: amount >= entry.cashAmount ? "refunded" : "partially_refunded",
-          statusChangedAt: new Date(),
+          ledgerEntryId: entry.id,
+          bookingId: booking.id,
+          amount,
+          reason: "admin_override",
+          method: "b2c",
+          status: "pending",
+          commissionReversed,
+          driverClawback,
         },
       });
+      const refundStatus = await submitRefund(refund.id);
       await db.booking.update({
         where: { id: booking.id },
         data: { status: "cancelled", cancelledAt: now, cancelTier: "late" },
@@ -392,7 +358,7 @@ export async function executeCancellation(params: {
         entityId: booking.id,
         metadata: { code: booking.code, amount, commissionReversed, driverClawback },
       });
-      return { outcome: "admin_refund", tier: "late" };
+      return { outcome: refundStatus === "completed" ? "admin_refund" : refundStatus === "pending" ? "refund_pending" : "refund_failed", tier: "late" };
     }
 
     // Passenger late cancellation: NO cash moves — full fare converts to a
@@ -448,11 +414,6 @@ export async function executeCancellation(params: {
     metadata: { code: booking.code, amount: entry.totalAmount },
   });
   return { outcome: "forfeited", tier: "no_show" };
-}
-
-async function passengerPhone(passengerId: string): Promise<string> {
-  const p = await db.passenger.findUnique({ where: { id: passengerId } });
-  return p?.phone || "";
 }
 
 // ─── Trip completion → payout records ────────────────────────────────────────

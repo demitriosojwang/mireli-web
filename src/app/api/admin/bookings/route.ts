@@ -135,8 +135,13 @@ export async function POST(req: NextRequest) {
     if (!booking.ledgerEntry) {
       return NextResponse.json({ error: "No payment collected on this booking" }, { status: 400 });
     }
-    const amount = Math.max(0, Math.min(parseInt(body.amount, 10) || 0, booking.ledgerEntry.cashAmount));
-    if (amount <= 0) return NextResponse.json({ error: "Refund amount must be positive" }, { status: 400 });
+    const priorRefunds = await db.refundRecord.aggregate({
+      where: { ledgerEntryId: booking.ledgerEntry.id, status: { in: ["pending", "completed"] } },
+      _sum: { amount: true },
+    });
+    const remainingCash = Math.max(0, booking.ledgerEntry.cashAmount - (priorRefunds._sum.amount || 0));
+    const amount = Math.max(0, Math.min(parseInt(body.amount, 10) || 0, remainingCash));
+    if (amount <= 0) return NextResponse.json({ error: remainingCash <= 0 ? "No refundable cash remains on this booking" : "Refund amount must be positive" }, { status: 400 });
     const result = await executeCancellation({
       bookingId,
       actor,

@@ -598,9 +598,14 @@ export interface DarajaResultCode {
 export async function reversal(params: {
   transactionId: string; // original M-Pesa receipt
   amount: number;
+  resultUrl?: string;
+  timeoutUrl?: string;
+  remarks?: string;
 }): Promise<DarajaResultCode> {
   const creds = await resolveDaraja();
-  if(creds.mode!=="mock")return {resultCode:"NOT_CONFIGURED",resultDesc:"Live refunds require a durable refund attempt and verified settlement callback. No reversal was sent."};
+  if (creds.mode !== "mock" && (!params.resultUrl || !params.timeoutUrl)) {
+    return { resultCode: "NOT_CONFIGURED", resultDesc: "Live refunds require a durable attempt and correlated callback URLs. No reversal was sent." };
+  }
   if (creds.mode === "mock") {
     if (state.injectNextRefundFailure) {
       state.injectNextRefundFailure = false;
@@ -612,6 +617,8 @@ export async function reversal(params: {
     return {
       resultCode: RESULT_CODES.SUCCESS,
       resultDesc: `Reversal of KSh ${params.amount} on ${params.transactionId} accepted`,
+      settled: true,
+      receipt: generateMpesaReceipt(),
     };
   }
 
@@ -622,7 +629,6 @@ export async function reversal(params: {
       resultDesc: "Reversal needs the B2C initiator name + security credential (Admin → Payments)",
     };
   }
-  const urls = callbackUrls(creds);
   try {
     const token = await getAccessToken(creds);
     const res = await darajaFetch(`${apiBase(creds)}/mpesa/reversal/v1/request`, {
@@ -636,20 +642,25 @@ export async function reversal(params: {
         Amount: Math.round(params.amount),
         ReceiverParty: creds.b2cShortcode || creds.shortcode,
         RecieverIdentifierType: "11", // Safaricom's spelling — do not "fix"
-        ResultURL: urls.b2cResult,
-        QueueTimeOutURL: urls.stkTimeout,
-        Remarks: "Mi-Reli refund",
+        ResultURL: params.resultUrl,
+        QueueTimeOutURL: params.timeoutUrl,
+        Remarks: (params.remarks || "Mi-Reli refund").slice(0, 100),
       }),
     });
     const data = (await res.json().catch(() => ({}))) as {
       ResponseCode?: string;
       ResponseDescription?: string;
       errorMessage?: string;
+      ConversationID?: string;
+      OriginatorConversationID?: string;
     };
     if (data.ResponseCode === "0") {
       return {
-        resultCode: RESULT_CODES.SUCCESS,
+        resultCode: "ACCEPTED",
         resultDesc: data.ResponseDescription || "Reversal accepted",
+        settled: false,
+        conversationId: data.ConversationID,
+        originatorId: data.OriginatorConversationID,
       };
     }
     return {

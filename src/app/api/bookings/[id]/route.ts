@@ -295,6 +295,8 @@ export async function POST(req: NextRequest, { params }: Params) {
     const messages: Record<string, string> = {
       voided_unpaid: "Booking cancelled — nothing was collected.",
       refunded: "Full cash refund sent to your M-Pesa.",
+      refund_pending: "Your booking is cancelled. Your M-Pesa refund is processing and will be confirmed after Safaricom responds.",
+      refund_failed: "Your booking is cancelled, but the M-Pesa refund needs support review. Please contact Mireli support.",
       converted_to_credit: "Your fare is saved as travel credit for your next ride.",
       forfeited: "Fare forfeited.",
     };

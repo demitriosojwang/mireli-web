@@ -187,9 +187,17 @@ the intended web/API host; the local Docker stack does not serve production.
   amount due. Mismatched receipts stay unconfirmed and appear in the admin
   exceptions view with received and expected amounts; the passenger is told to
   contact support before trying another payment.
-- [ ] Add durable, correlated production refund attempts and settle them only from
-  verified Daraja results. The current B2C/reversal callback is audit-only, so
-  live refunds still need end-to-end implementation and provider sandbox tests.
+- [x] Persist refund attempts before provider submission, use a private
+  per-attempt HTTPS callback, and keep accepted or timed-out transfers pending.
+  Only a correlated terminal Daraja result completes the refund and changes the
+  ledger; duplicate/conflicting callback handling is idempotent and audited.
+- [x] Route admin retries through that same callback flow. An uncertain or
+  timed-out attempt cannot be resent; only a confirmed provider failure can be
+  retried deliberately, avoiding duplicate refunds.
+- [ ] Verify reversal and B2C refund callbacks in Safaricom sandbox, including
+  callback query-string preservation and timeout/reconciliation behavior. Keep
+  `MPESA_LIVE_REFUNDS_ENABLED=false` until sandbox results are reviewed and the
+  public HTTPS callback endpoint is stable.
 - [ ] Define and implement handling for a successful payment callback after its
   trip has departed or been cancelled. The closed-booking exception path currently
   covers booking states `cancelled` and `no_show`; verify other trip cutoffs.

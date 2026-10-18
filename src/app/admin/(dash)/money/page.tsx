@@ -127,6 +127,7 @@ interface RefundRow {
   method: string;
   status: string;
   stuck: boolean;
+  attemptState: string | null;
   result: string | null;
   failureReason: string | null;
   initiatedAt: string;
@@ -141,11 +142,11 @@ function RefundsTab() {
   async function retry(id: string) {
     setBusyId(id);
     try {
-      const res = await api<{ ok: boolean; result: string }>("/api/admin/refunds", { body: { id } });
+      const res = await api<{ ok: boolean; state: string; result: string }>("/api/admin/refunds", { body: { id } });
       toast({
-        title: res.ok ? "Refund completed" : "Refund failed again",
+        title: res.state === "completed" ? "Refund completed" : res.state === "failed" ? "Refund failed" : "Refund submitted",
         description: res.result,
-        variant: res.ok ? "default" : "destructive",
+        variant: res.state === "failed" ? "destructive" : "default",
       });
       refresh();
     } finally {
@@ -175,6 +176,9 @@ function RefundsTab() {
                     <AlertTriangle className="h-3 w-3" /> stuck — flagged for review
                   </Badge>
                 )}
+              {r.status === "pending" && r.attemptState && (
+                <p className="mt-1 text-xs text-amber-800">Provider outcome is unknown. Reconcile this attempt before sending again.</p>
+              )}
               </div>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {reasonLabels[r.reason] || r.reason} · {r.method.toUpperCase()} · initiated {fmtDateTime(r.initiatedAt)}
@@ -192,9 +196,9 @@ function RefundsTab() {
                 <p className="font-semibold">{ksh(r.amount)}</p>
                 {r.creditRestored > 0 && <p className="text-xs text-violet-700">+{ksh(r.creditRestored)} credit restored</p>}
               </div>
-              {(r.status === "failed" || r.stuck) && (
+              {(r.status === "failed" || (r.status === "pending" && !r.attemptState)) && (
                 <Button size="sm" variant="outline" onClick={() => retry(r.id)} disabled={busyId === r.id}>
-                  {r.status === "failed" ? "Retry refund" : "Force resolve"}
+                  {r.status === "failed" ? "Retry refund" : "Submit refund"}
                 </Button>
               )}
             </div>
@@ -204,8 +208,8 @@ function RefundsTab() {
       {data && data.refunds.length === 0 && (
         <Card>
           <CardContent className="p-8 text-center text-sm text-muted-foreground">
-            No refunds yet. Early cancellations and platform cancels land here with a terminal state
-            and a timestamp.
+            No refunds yet. Early and platform cancellations will appear here while the payment
+            provider confirms the refund.
           </CardContent>
         </Card>
       )}
