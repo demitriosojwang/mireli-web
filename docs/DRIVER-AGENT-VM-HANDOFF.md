@@ -97,13 +97,15 @@ resource settings were changed by these checks.
   driver email sign-in is not configured. Keep driver sign-in closed until real
   production authentication credentials and provider configuration are set up
   and verified.
-- The previous DNS/TLS probe at 11:25 EAT found
-  `mirelisgr.duckdns.org` resolving to `105.161.112.67`, not the VM's EIP
-  `13.53.183.149`, and HTTPS `/api/health` could not connect on port 443.
-  DNS/TLS was not rechecked in the 13:21 SSM command, so treat that prior
-  result as the last known public status. Rotate the DuckDNS token shown in a
-  screenshot before changing DNS. Never put that token in this repository or
-  chat.
+- The 14:49 EAT DNS/TLS check still found `mirelisgr.duckdns.org` resolving to
+  `105.161.112.67`, not the VM's EIP `13.53.183.149`. Public HTTPS requests to
+  `/api/health` and `/api/routes` timed out. TCP 443 on the EIP is reachable;
+  Caddy listens on 443 and is configured for this hostname with upstream
+  `127.0.0.1:3000`, but the local SNI TLS handshake fails with an internal TLS
+  alert. No `.crt` file was listed under `/var/lib/caddy`. Rotate the exposed
+  DuckDNS token, point its A record to the EIP, and verify the certificate and
+  public API from outside AWS before using the HTTPS origin in Android. Never
+  put the token in this repository or chat.
 
 For another developer to use this VM, invite them as an AWS project team member
 and grant only the SSM session permissions they need. They must sign in with

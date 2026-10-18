@@ -57,17 +57,23 @@ do not accept payment until the end-to-end gates below pass.
   on AWS until a reviewed image is deployed.
 - [x] Local Docker is a test environment only. The AWS VM continues serving
   independently when the developer's computer is off.
-- [ ] The last DNS check at 11:25 EAT found `mirelisgr.duckdns.org` resolving to
-  `105.161.112.67` instead of the VM's EIP `13.53.183.149`. Rotate the exposed
-  DuckDNS token, update its A record, then verify Caddy TLS and public
-  health/status checks from outside AWS. HTTPS could not connect to that DNS
-  target on port 443. DNS has not been changed.
-- [x] Current branch commit `6fde2be` passed
-  [GitHub Actions run #39119957348](https://github.com/demitriosojwang/mireli-web/actions/runs/39119957348),
+- [ ] The 14:49 EAT DNS check still found `mirelisgr.duckdns.org` resolving to
+  `105.161.112.67`, not the VM's EIP `13.53.183.149`. Public HTTPS requests to
+  `/api/health` and `/api/routes` timed out. TCP port 443 on the VM's EIP is
+  reachable, and SSM confirms Caddy listens there with the expected hostname
+  and `127.0.0.1:3000` upstream, but a local TLS handshake for that hostname
+  fails with an internal TLS alert; no `.crt` file was listed under Caddy's
+  data directory. Rotate the exposed DuckDNS token, update its A record, then
+  verify certificate issuance and public health/API checks. DNS was not changed.
+- [x] Booking source commit `6b30ca4` passed
+  [GitHub Actions run #39119655201](https://github.com/demitriosojwang/mireli-web/actions/runs/39119655201),
   including tests, typecheck, lint, build, Prisma validation/generation,
   AMD64/ARM64 image builds, Compose validation, and CloudFormation checks. See
   [PR #4](https://github.com/demitriosojwang/mireli-web/pull/4). The VM still
   runs `794fb87`; passing CI does not mean the branch has been deployed.
+- [x] The driver handoff documentation commit `6fde2be` also passed the full
+  verification workflow in
+  [run #39119957348](https://github.com/demitriosojwang/mireli-web/actions/runs/39119957348).
 - [x] Remove the unused `GET /api` Hello World scaffold from source; keep
   `/api/health` as the dedicated health endpoint. The VM still runs the older
   image until a release is promoted.
