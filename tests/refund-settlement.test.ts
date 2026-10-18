@@ -87,7 +87,7 @@ describe("Daraja refund settlement", () => {
     const resultUrl = new URL(payload.resultUrl);
 
     expect(status).toBe("pending");
-    expect(payload.originatorId).toBe("MR-originator");
+    expect(payload.originatorId).toMatch(/^MR-[a-f0-9]{16}$/);
     expect(resultUrl.pathname).toMatch(/^\/api\/pay\/mpesa\/refund-result\/[a-f0-9]{64}$/);
     expect(resultUrl.searchParams.get("mireli_token")).toBe("token");
     expect(payload.timeoutUrl).toContain("timeout=1");
@@ -100,8 +100,7 @@ describe("Daraja refund settlement", () => {
     const attempt = { id: "attempt-1", refundId: "refund-1", method: "b2c", amount: 1000,
       receiverPhone: "254712345678", originatorId: "MR-originator", conversationId: "AG-conversation",
       state: "processing", refund: { id: "refund-1", amount: 1000, ledgerEntry: { id: "ledger-1", cashAmount: 1500 } } };
-    mocks.attemptFindUnique.mockImplementation(async (args: { where: { callbackHash?: string } }) =>
-      args.where.callbackHash ? attempt : { id: "attempt-1", state: "processing" });
+    mocks.attemptFindUnique.mockImplementation(async () => attempt);
     const result = await settleRefundCallback("a".repeat(64), {
       ResultCode: 0, ResultType: 0, OriginatorConversationID: "MR-originator", ConversationID: "AG-conversation",
       TransactionID: "ABC1234567", ResultParameters: { ResultParameter: [
