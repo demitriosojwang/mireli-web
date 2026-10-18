@@ -6,16 +6,16 @@ over. The production catalogue is empty, there is no approved driver, and live
 payment/email credentials have not been installed. Keep pooled cabs at zero and
 do not accept payment until the end-to-end gates below pass.
 
-## AWS deployment state (read-only SSM verification: 18 October 2026, 13:21 EAT)
+## AWS deployment state (read-only SSM verification: 18 October 2026, 13:35 EAT)
 
 - [x] EC2 `i-097df027e02b0708f` is running in `eu-north-1`, with SSM Online.
 - [x] AWS identity verification succeeded and SSM reports the node Online with
   agent `3.3.5390.0`. See the
   [driver VM handoff](DRIVER-AGENT-VM-HANDOFF.md) for per-developer access.
-- [x] The 13:21 EAT SSM check confirmed Docker, Caddy, and `mireli-app` are
+- [x] The 13:35 EAT SSM check confirmed Docker, Caddy, and `mireli-app` are
   active. Exactly one `mireli` container is healthy on image `794fb87`, bound
-  to `127.0.0.1:3000`.
-- [x] A read-only SSM check at 13:21 EAT confirms internal
+  to `127.0.0.1:3000`; it had been up 47 hours.
+- [x] A read-only SSM check at 13:35 EAT confirms internal
   `GET /api/health` returns `{"status":"ok"}`.
 - [x] A read-only SSM check at 11:14 EAT found four database migrations through
   `20261011_booking_fee_charter_commission`. The VM enables migrations at
@@ -23,7 +23,7 @@ do not accept payment until the end-to-end gates below pass.
   additional migrations for booking ticket email, train service days, and
   durable refund attempts; they were not yet applied in production at the last
   database inspection. The 13:04 EAT health check did not query migrations.
-- [x] The 13:21 EAT internal `GET /api/routes` returns `pointCount: 0` and a
+- [x] The 13:35 EAT internal `GET /api/routes` returns `pointCount: 0` and a
   KSh 50 booking fee; `GET /api/trains` returns no trains; and
   `GET /api/stages?q=Mtwapa` returns `{"points":[],"hasMore":false}`. The
   AWS database has no active published stops, so the drop-off picker must stay
@@ -31,9 +31,13 @@ do not accept payment until the end-to-end gates below pass.
 - [x] The 11:25 EAT customer availability check for 18 October returned
   `{"hasEligibleDrivers":false,"trips":[]}`. The web app must show zero pooled
   cabs and must not create booking inventory when no eligible driver exists.
-- [x] The 13:21 EAT driver API status is strict (`simulation: false`); phone/email sign-in,
+- [x] The 13:35 EAT driver API status is strict (`simulation: false`); phone/email sign-in,
   registration, and navigation are currently closed. The status response says
   driver email sign-in is not configured.
+- [x] The 13:35 EAT `/api/driver-supply` probe returns HTTP 404 on image
+  `794fb87`, although the endpoint exists in the current source. This stale
+  image is a release blocker; the new deployment readiness gate will reject an
+  image that omits this endpoint.
 - [x] No driver or stop data was added to make the booking UI look populated.
 - [x] The drop-off problem has two confirmed causes on the two checked hosts.
   On AWS, the catalogue query succeeds but returns `pointCount: 0`; no approved
@@ -58,14 +62,12 @@ do not accept payment until the end-to-end gates below pass.
   DuckDNS token, update its A record, then verify Caddy TLS and public
   health/status checks from outside AWS. HTTPS could not connect to that DNS
   target on port 443. DNS has not been changed.
-- [x] Branch commit `10a3d26` passed
-  [GitHub Actions run #39117363934](https://github.com/demitriosojwang/mireli-web/actions/runs/39117363934),
+- [x] Current branch commit `6fde2be` passed
+  [GitHub Actions run #39119957348](https://github.com/demitriosojwang/mireli-web/actions/runs/39119957348),
   including tests, typecheck, lint, build, Prisma validation/generation,
   AMD64/ARM64 image builds, Compose validation, and CloudFormation checks. See
   [PR #4](https://github.com/demitriosojwang/mireli-web/pull/4). The VM still
   runs `794fb87`; passing CI does not mean the branch has been deployed.
-- [x] Documentation checkpoint `f7652e3` passed the same complete CI suite
-  in [run #39118544935](https://github.com/demitriosojwang/mireli-web/actions/runs/39118544935).
 - [x] Remove the unused `GET /api` Hello World scaffold from source; keep
   `/api/health` as the dedicated health endpoint. The VM still runs the older
   image until a release is promoted.
