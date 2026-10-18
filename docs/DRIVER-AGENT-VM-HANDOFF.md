@@ -21,7 +21,7 @@ and inbound SSH is intentionally closed. Use the individually authorized AWS
 Systems Manager (SSM) path below. Do not share a teammate's AWS profile, open
 port 22, or copy a private key to the VM.
 
-## Latest connection and VM check (18 October 2026, 10:24 EAT)
+## Latest connection and VM check (18 October 2026, 10:40 EAT)
 
 - AWS CLI v2 is installed on the operator workstation at
   `C:\Users\favou\AppData\Local\Programs\Amazon\AWSCLIV2\aws.exe`; it may
@@ -30,14 +30,26 @@ port 22, or copy a private key to the VM.
   every developer must use their own AWS identity and must not reuse this
   workstation's profile.
 - SSM reports `i-097df027e02b0708f` `Online` on Amazon Linux with agent
-  `3.3.5390.0`. A read-only Systems Manager Run Command verified Docker, Caddy,
-  and `mireli-app` are active. There is one healthy container named `mireli`,
-  image tag `794fb87`, bound to `127.0.0.1:3000`; `/api/health` returns
-  `{"status":"ok"}`.
-- The VM still runs image `794fb87`. The latest source branch commit is
-  `795bcb6` and its GitHub CI is green, but it has not been deployed. The AWS
-  GitHub OIDC deploy workflow remains disabled while project policy denies
+  `3.3.5390.0`; its last ping was 10:38:15 EAT. A read-only Systems Manager Run
+  Command verified Docker, Caddy, and `mireli-app` are active. There is one
+  healthy container named `mireli`, image tag `794fb87`, bound to
+  `127.0.0.1:3000`; `/api/health` returns `{"status":"ok"}`. This session used
+  SSM rather than SSH because the instance has no key pair and inbound SSH is
+  closed.
+- The VM still runs image `794fb87`. Source commit `d8382e8` has a successful
+  GitHub Actions run (#101), including application checks, CloudFormation
+  validation, and AMD64/ARM64 image builds, but it has not been deployed. The
+  AWS GitHub OIDC deploy workflow remains disabled while project policy denies
   creating the OIDC provider. Do not use long-lived AWS keys as a workaround.
+- The production database currently has four applied migrations:
+  `20261001_initial_postgres`, `20261006_driver_services`,
+  `20261008_driver_email_auth`, and
+  `20261011_booking_fee_charter_commission`. Runtime settings currently enable
+  migrations at application startup. The current source branch adds three
+  additive migrations (`20261016_booking_ticket_email`,
+  `20261018_train_service_days`, and
+  `20261018_z_durable_refund_attempts`); they are not yet applied in production.
+  Review the release and backup plan before deploying the new image.
 - The live API has no bookable supply: `/api/routes` reports `pointCount: 0`,
   `/api/trains` returns `{"trains":[]}`, `/api/stages?q=Mtwapa` returns no
   points, and the 18 October trip-availability query returns
@@ -114,7 +126,7 @@ role and must never be copied into Android.
 
 ## Verified VM state
 
-The read-only state above is current as of 18 October 2026, 10:24 EAT. The VM is
+The read-only state above is current as of 18 October 2026, 10:40 EAT. The VM is
 healthy internally, but it cannot support a customer or driver pilot until its
 route and train catalogue, approved drivers, driver authentication, public
 DNS/TLS, payment callbacks, and passenger/driver email delivery are configured
