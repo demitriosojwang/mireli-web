@@ -10,6 +10,8 @@ Next.js server and PostgreSQL 16; the database listens only on container
 loopback, so only the web port is published. Database files and encrypted
 driver documents remain in separate named volumes and survive image rebuilds.
 Runtime secrets and settings stay in `.env.docker` rather than image layers.
+The host port binds to `127.0.0.1` by default, keeping the local demo and its
+prototype sign-in off the local network.
 For Android/shared-backend configuration, see
 [DRIVER-SHARED-BACKEND-SETUP.md](DRIVER-SHARED-BACKEND-SETUP.md).
 
@@ -47,7 +49,7 @@ curl http://localhost:3000/api/health   # {"status":"ok"}
 
 | Container | Image | Published port | Persistent state |
 | --- | --- | --- | --- |
-| `app` | `mireli-web` (Next.js + PostgreSQL 16) | `${MIRELI_PORT:-3000}` → 3000 | `db-data` → PostgreSQL files; `app-state` → encrypted driver documents |
+| `app` | `mireli-web` (Next.js + PostgreSQL 16) | `127.0.0.1:${MIRELI_PORT:-3000}` → 3000 | `db-data` → PostgreSQL files; `app-state` → encrypted driver documents |
 
 At startup the container starts its private PostgreSQL process, runs
 `prisma migrate deploy` (versioned migrations only — never seeds, never resets)

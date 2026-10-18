@@ -6,7 +6,13 @@ is empty, there is no approved driver, and live payment/email credentials have
 not been installed. Keep pooled cabs at zero and do not accept payment until the
 end-to-end gates below pass.
 
-## AWS deployment state (read-only SSM verification, 18 October 2026)
+## AWS deployment state (last successful read-only SSM check: 18 October 2026, 08:52 EAT)
+
+An access refresh was attempted at 09:32 EAT, but this workstation had no AWS
+CLI available and Windows blocked its all-users installer with error 1925.
+That attempt ran no SSM commands and changed no AWS resources. The 08:52
+snapshot below remains the last verified VM state; see the
+[driver VM handoff](DRIVER-AGENT-VM-HANDOFF.md) for the reconnect steps.
 
 - [x] EC2 `i-097df027e02b0708f` is running in `eu-north-1`, with SSM Online.
 - [x] Exactly one `mireli` Docker container is healthy on image `794fb87`, bound
@@ -30,9 +36,10 @@ end-to-end gates below pass.
   than EIP `13.53.183.149`. Rotate the exposed DuckDNS token, update its A
   record, then verify Caddy TLS and public health/status checks from outside
   AWS. DNS has not been changed.
-- [x] The latest application source commit `1d6b5ae` passed GitHub Actions on
-  16 October 2026: application verification, AWS infrastructure validation,
-  and AMD64/ARM64 production image builds all succeeded ([run 38946592991](https://github.com/demitriosojwang/mireli-web/actions/runs/38946592991)).
+- [x] GitHub Actions checks the application, both AMD64/ARM64 production
+  images, and AWS infrastructure. See the live checks on
+  [PR #4](https://github.com/demitriosojwang/mireli-web/pull/4); the feature
+  branch is not deployed to the VM until reviewed release gates pass.
 - [ ] AWS deployment has not run for this feature branch. The release workflow
   requires a successful `main` build plus its deployment flag and role; AWS
   project policy currently denies creation of the GitHub OIDC provider. Keep

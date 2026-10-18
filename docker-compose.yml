@@ -20,7 +20,8 @@ services:
     environment:
       PGDATA: /var/lib/postgresql/data
     ports:
-      - "${MIRELI_PORT:-3000}:3000"
+      # The local demo stack must stay on this machine; don't expose it to the LAN.
+      - "127.0.0.1:${MIRELI_PORT:-3000}:3000"
     volumes:
       - db-data:/var/lib/postgresql/data
       - app-state:/app/.local

@@ -37,6 +37,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
+      - name: Validate the local single-container Compose stack
+        run: docker compose --env-file .env.docker.example config --quiet
       - name: Build and test the Linux application image
         uses: docker/build-push-action@v7
         with:
