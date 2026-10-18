@@ -21,29 +21,30 @@ and inbound SSH is intentionally closed. Use the individually authorized AWS
 Systems Manager (SSM) path below. Do not share a teammate's AWS profile, open
 port 22, or copy a private key to the VM.
 
-## Latest SSM connection and VM check (18 October 2026, 13:35 EAT)
+## Latest SSM connection and VM check (18 October 2026, 14:07 EAT)
 
-AWS authentication was verified. A read-only SSM Run Command reached the VM
-at 13:35 EAT (command ID `822b9cbc-1313-4db2-b9ba-4811360690e2`). The SSM
-command succeeded. `docker`, `caddy`, and `mireli-app` are active. One healthy
-container named `mireli` runs image tag `794fb87` (up 47 hours). The read-only
-API checks returned:
+AWS authentication was verified with the `mireli` profile in account
+`036834403673`. A read-only SSM Run Command reached the VM at 14:07 EAT
+(command ID `888908f4-695a-4b6c-bb47-1c315cd80ad7`) and completed successfully
+with no command errors. `docker`, `caddy`, and `mireli-app` are active. One
+healthy container named `mireli` runs image tag `794fb87` (up 47 hours). Fresh
+HTTP status checks returned:
 
-- `/api/health`: HTTP 200, `{"status":"ok"}`.
-- `/api/routes`: HTTP 200, `pointCount: 0`, booking fee KSh 50.
-- `/api/trains`: HTTP 200, no trains.
-- `/api/stages?q=Mtwapa`: HTTP 200, no points and `hasMore: false`.
+- `/api/health`: HTTP 200; body `{"status":"ok"}`.
+- `/api/routes`: HTTP 200; body reports `pointCount: 0` and a KSh 50 booking
+  fee.
+- `/api/trains`: HTTP 200; no trains are published.
+- `/api/stages?q=Mtwapa`: HTTP 200; no points and `hasMore: false`.
 - `/api/v1/driver/status`: HTTP 200, strict mode (`simulation: false`), but
   phone/email sign-in, registration, and navigation are closed. The response
   says driver email sign-in is not configured.
-- `/api/driver-supply`: HTTP 404 (the live Next.js app rendered its not-found
-  page). This route exists in the current source branch, so the VM image is
-  stale relative to source.
+- `/api/driver-supply`: HTTP 404. This route exists in the current source
+  branch, so the VM image is stale relative to source.
 
-AWS CLI identity was verified in account `036834403673`; EC2 reports the
-instance `running`, public IP `13.53.183.149`, type `t4g.small`, and no key pair.
-The SSM managed-node status is `Online`. No VM, application, DNS, or AWS
-resource settings were changed by these checks.
+EC2 reports the instance `running`, public IP `13.53.183.149`, type `t4g.small`,
+and no key pair. The SSM managed-node status is `Online` (agent `3.3.5390.0`).
+No application, VM configuration, DNS, or other AWS resources were changed by
+these checks. The SSM Run Command itself is recorded in AWS as an audit event.
 
 - AWS CLI v2 is installed on the operator workstation at
   `C:\Users\favou\AppData\Local\Programs\Amazon\AWSCLIV2\aws.exe`; it may
