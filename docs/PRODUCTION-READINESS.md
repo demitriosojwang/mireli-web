@@ -88,6 +88,13 @@ do not accept payment until the end-to-end gates below pass.
   [run #39119957348](https://github.com/demitriosojwang/mireli-web/actions/runs/39119957348).
 - [x] VM handoff and TLS evidence commit `7dd46a1` passed the full workflow in
   [run #39120951606](https://github.com/demitriosojwang/mireli-web/actions/runs/39120951606).
+- [x] Payment preflight and driver handoff commit `83f59b0` passed all GitHub
+  Actions checks in
+  [run #39124074073](https://github.com/demitriosojwang/mireli-web/actions/runs/39124074073),
+  including tests, typecheck, lint, production build, infrastructure checks,
+  and AMD64/ARM64 container builds. PR #4 remains open; CI passing does not
+  deploy the VM. GitHub still has a pending Vercel status on the PR, though
+  Vercel is not the AWS runtime target.
 - [x] Remove the unused `GET /api` Hello World scaffold from source; keep
   `/api/health` as the dedicated health endpoint. The VM still runs the older
   image until a release is promoted.

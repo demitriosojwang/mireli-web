@@ -77,12 +77,14 @@ an audit event.
 - AWS EC2 metadata confirms the instance has no key pair. A TCP check at
   11:25 EAT to `13.53.183.149:22` failed, so direct SSH is unavailable; SSM is
   the verified connection path. Do not open port 22 as a workaround.
-- The VM still runs image `794fb87`. Current source revision `6b30ca4` is on
+- The VM still runs image `794fb87`. Current source revision `83f59b0` is on
   branch `codex/booking-flow-production-readiness`. Full CI passed in run
-  [#39119655201](https://github.com/demitriosojwang/mireli-web/actions/runs/39119655201),
+  [#39124074073](https://github.com/demitriosojwang/mireli-web/actions/runs/39124074073),
   including database validation, tests, typecheck, lint, production build,
   CloudFormation lint/Guard, and AMD64/ARM64 container builds. The feature
-  branch has not been deployed. PR #4 has not been merged. The AWS GitHub OIDC
+  branch has not been deployed. PR #4 has not been merged. GitHub still reports
+  a pending Vercel status on the PR; no Vercel deployment is used for the AWS
+  host. The AWS GitHub OIDC
   deploy workflow remains disabled while project policy denies creating the
   OIDC provider. Do not use long-lived AWS keys as a workaround. The new
   release workflow also checks route, train, stage-search, driver-supply, and
