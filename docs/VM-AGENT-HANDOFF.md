@@ -1,6 +1,13 @@
 # Mireli VM and shared driver API handoff
 
-Updated 18 October 2026. This guide is for the developer or agent building Mireli Driver and working on the shared API. The Android app stays in its own repository; this repository contains the shared backend and web application.
+Updated 19 October 2026, 22:53 EAT. This guide is for the developer or agent building Mireli Driver and working on the shared API. The Android app stays in its own repository; this repository contains the shared backend and web application.
+
+For a current AWS browser inspection, the EC2 instance is running with 3/3
+status checks, but AWS currently reports `Managed: false`; Session Manager's
+Connect action is disabled and EC2 Instance Connect reports SSH port 22 is not
+authorized. The older 18 October SSM Online result is historical. Read the
+[driver VM handoff](DRIVER-AGENT-VM-HANDOFF.md) for the verified state and do
+not assume a live VM shell is available.
 
 For Android API setup and flavor rules, read
 [DRIVER-SHARED-BACKEND-SETUP.md](DRIVER-SHARED-BACKEND-SETUP.md) and the focused
@@ -10,27 +17,46 @@ For Android API setup and flavor rules, read
 
 - AWS project plan: Free, temporary pilot only. Region: `eu-north-1`.
 - CloudFormation stack: `mireli-sgr-pilot` (`CREATE_COMPLETE`). Template: `infra/aws/mireli-vm.yaml`.
-- EC2: `i-097df027e02b0708f` (Amazon Linux 2023, ARM64 `t4g.small`). EC2 status checks are `ok`; Systems Manager reports `Online`.
+- EC2: `i-097df027e02b0708f` (Amazon Linux 2023, ARM64 `t4g.small`), running with 3/3 EC2 status checks at the 19 October 2026, 22:53 EAT browser check. The current console reports `Managed: false`; the 18 October SSM `Online` result is historical.
 - Elastic IP: `13.53.183.149`.
 - ECR repository: `036834403673.dkr.ecr.eu-north-1.amazonaws.com/mireli-sgr-pilot-appimagerepository-juxctzu7badb`.
 - Intended public hostname: `mirelisgr.duckdns.org`; as of 18 October 2026, 13:54 EAT, public resolvers `1.1.1.1` and `8.8.8.8` still return `105.161.112.67` instead of this VM's EIP. Public HTTPS timed out at 13:49 EAT; TCP 443 on the EIP is reachable, but Caddy's local TLS handshake for the hostname fails. The old DuckDNS token was exposed in a screenshot; the owner must rotate it before changing DNS.
-- Security group opens only inbound TCP 80/443. Port 22 is not open. The web app binds to host loopback port 3000 behind Caddy.
-- Latest SSM check (18 October 2026, 13:35 EAT): Docker, Caddy, and `mireli-app` are active; the single `mireli` container is healthy on image tag `794fb87`; `http://127.0.0.1:3000/api/health` returns `{"status":"ok"}`. `/api/routes` reports `pointCount: 0`, `/api/trains` is empty, and `/api/stages?q=Mtwapa` returns no points. `/api/driver-supply` returns 404 on this deployed image, while that API route exists in the current source branch.
+- Security group opens only inbound TCP 80/443. Port 22 is not open; EC2 Instance Connect specifically reports that its regional range `13.48.4.200/30` is not authorized. The web app binds to host loopback port 3000 behind Caddy.
+- Previous SSM check (18 October 2026, 13:35 EAT; historical): Docker, Caddy, and `mireli-app` were active; the single `mireli` container was healthy on image tag `794fb87`; `http://127.0.0.1:3000/api/health` returned `{"status":"ok"}`. `/api/routes` reported `pointCount: 0`, `/api/trains` was empty, and `/api/stages?q=Mtwapa` returned no points. `/api/driver-supply` returned 404 on that deployed image, while that API route exists in the current source branch. This runtime has not been rechecked since the current console reported `Managed: false`.
 - Driver status at 13:35 EAT is strict (`simulation: false`); phone/email sign-in, registration, and navigation are closed. The status response says driver email sign-in is not configured. The last trip-availability query (18 October, 11:25 EAT) found no eligible drivers and no trips; that query was not repeated at 13:35.
 - As of 18 October 2026, 13:54 EAT, public resolvers `1.1.1.1` and `8.8.8.8` still return `105.161.112.67`, not the VM's EIP. HTTPS health/catalogue requests timed out at 13:49 EAT. TCP 443 is reachable on the EIP, but a local SNI TLS request to Caddy fails with an internal TLS alert; public driver API access is unverified. Rotate the exposed token and point the A record to `13.53.183.149` before treating the site as online for customers.
 - Runtime database is PostgreSQL 16 embedded in the one Mireli image and persisted on the VM volume. Daily `pg_dump` backups are sent to the private, versioned S3 bucket `mireli-sgr-pilot-036834403673-db-backups-eu-north-1`, with 30-day expiry.
 
-The first cloud-init run failed because Amazon Linux `curl-minimal` conflicts with installing `curl`, and an unquoted heredoc expanded a database variable too early. Both issues are fixed in the template and the resolved user-data script was successfully rerun through SSM. Cloud-init still records the first run's error; the current systemd, Docker, SSM, and HTTP health checks are authoritative. Do not reset cloud-init or replace the VM to clear that historical error.
+The first cloud-init run failed because Amazon Linux `curl-minimal` conflicts with installing `curl`, and an unquoted heredoc expanded a database variable too early. Both issues were fixed in the template and the resolved user-data script was successfully rerun through SSM at an earlier check. Cloud-init still records the first run's error. Those shell-based checks are historical; the current EC2 console reports `Managed: false`, and VM service health is unverified until shell access is restored. Do not reset cloud-init or replace the VM to clear that historical error.
 
-## Get a keyless shell on the VM
+## Restore a keyless shell on the VM
 
-Use an individual AWS identity and SSM rather than sharing SSH keys. The owner must invite each developer as a team member in AWS Settings and grant the narrowest available permission to start a session on this named instance. Each developer uses their own AWS CLI profile and the Session Manager plugin:
+SSM is not currently verified as available: the EC2 console shows `Managed:
+false`, its SSM connection details remain loading, and Connect is disabled. The
+instance profile role is visible, but the instance must be registered as a
+managed node and the profile must allow Systems Manager. The owner should verify
+the attached role includes `AmazonSSMManagedInstanceCore` (or an equivalent
+least-privilege policy), that the SSM agent is running, and that the instance
+can reach the regional SSM endpoints. Do not change IAM or security-group
+settings without the owner approving the specific change.
+
+When the managed node reports Online, use an individual AWS identity and SSM
+rather than sharing SSH keys. The owner must invite each developer as a team
+member in AWS Settings and grant the narrowest available permission to start a
+session on this named instance. Each developer uses their own AWS CLI profile
+and the Session Manager plugin:
 
 ```powershell
 aws ssm start-session --target i-097df027e02b0708f --region eu-north-1 --profile mireli
 ```
 
-The instance profile includes `AmazonSSMManagedInstanceCore` and the required service permissions. Do not open port 22, share the owner's profile, copy private keys to the VM, or put AWS credentials into the repository. If a developer needs a shell but cannot start a session, check their AWS project/team permissions and the SSM agent's `Online` status.
+Do not assume that the instance profile currently includes the required SSM
+policy; confirm it in the console before attempting a session. Do not open port
+22, share the owner's profile, copy private keys to the VM, or put AWS
+credentials into the repository. If the owner deliberately chooses EC2 Instance
+Connect instead, its documented regional source range is `13.48.4.200/30`; add
+only the narrowly scoped rule after explicit approval, then remove it when no
+longer needed.
 
 ## Safe VM checks
 

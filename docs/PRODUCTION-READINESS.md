@@ -1,12 +1,33 @@
 # Mireli booking launch checklist
 
-**Status: not ready to accept customer bookings.** The last read-only SSM check
-on 18 October found the AWS VM and API healthy internally, but public DNS/TLS
-was not cut over. The production catalogue was empty and the deployed image
-could not report eligible driver supply. The `mireli` AWS CLI session is now
-expired, so those production findings have not been rechecked today. Live
-payment/email credentials have not been verified. Keep pooled cabs at zero and
-do not accept payment until the end-to-end gates below pass.
+**Status: not ready to accept customer bookings.** The 19 October 2026, 22:53
+EAT browser check confirmed EC2 `i-097df027e02b0708f` is running and passes
+3/3 status checks, but the console now reports `Managed: false`; SSM Connect is
+disabled and EC2 Instance Connect says SSH port 22 is not authorized. The last
+successful VM shell/API check is historical (18 October). The latest workstation
+DNS/TLS check at 21:37 EAT resolved `mirelisgr.duckdns.org` to
+`105.161.112.67` rather than the VM EIP `13.53.183.149` and timed out. The
+production catalogue was empty at the last successful API check, while live
+payment/email credentials remain unverified. Keep pooled cabs at zero and do
+not accept payment until the end-to-end gates below pass.
+
+## Latest AWS browser access check (19 October 2026, 22:53 EAT)
+
+- [x] The Chrome AWS console is authenticated to project `036834403673` in
+  `eu-north-1`; it confirms the Mireli EC2 instance is Running with 3/3 status
+  checks. Instance type is `t4g.small`, OS is Amazon Linux 2023 ARM64, and the
+  Elastic IP is `13.53.183.149`.
+- [ ] EC2 currently reports `Managed: false`. The SSM Session Manager connect
+  pane remains on “Loading SSM Session Manager details” with Connect disabled.
+  Treat the 18 October `Online` observation as historical, not current.
+- [ ] No EC2 key pair is assigned. EC2 Instance Connect reports inbound TCP 22
+  is not authorized; its UI specifies source range `13.48.4.200/30`. No SSH
+  security-group rule, instance setting, DNS record, or image was changed. The
+  CloudShell panel did not reach a prompt and no commands were run.
+- [ ] VM shell, deployed container, and production API were not inspected in
+  this browser check. Restore SSM managed-node status or obtain explicit owner
+  approval for a narrowly scoped EC2 Instance Connect rule before attempting
+  interactive access.
 
 ## Local Docker verification (19 October 2026, 21:18 EAT)
 

@@ -1,7 +1,35 @@
 # Mireli Driver agent: shared VM handoff
 
-Updated 19 October 2026, 21:18 EAT. Use this when connecting the Mireli Driver Android
+Updated 19 October 2026, 22:53 EAT. Use this when connecting the Mireli Driver Android
 project to the same backend used by Mireli Web.
+
+## Latest AWS browser access check (19 October 2026, 22:53 EAT)
+
+The authenticated Chrome AWS console is in project `036834403673`, selected
+Region `eu-north-1`. EC2 confirms `i-097df027e02b0708f`
+(`mireli-sgr-pilot-web`) is running and passes all 3/3 EC2 status checks. The
+instance is Amazon Linux 2023 ARM64 (`t4g.small`) at Elastic IP `13.53.183.149`.
+No EC2 key pair is assigned.
+
+The current EC2 details page reports `Managed: false`. Selecting SSM Session
+Manager in the browser leaves the agent details loading and the Connect action
+disabled. The instance profile field resolves to the Mireli app role, but this
+does not prove that the SSM agent is registered or has the required permissions.
+The earlier 18 October SSM `Online` result is historical and must not be used as
+current access evidence.
+
+EC2 Instance Connect reports that inbound SSH port 22 is not authorized by the
+security group. Its prompt specifies the regional EC2 Instance Connect source
+range `13.48.4.200/30`. No security-group rule, instance setting, DNS record, or
+application image was changed. The CloudShell panel did not reach a prompt and
+no commands were run. Do not open port 22 or share a private key as a workaround.
+Restore and verify SSM through the instance profile, SSM agent, and its network
+path; if the owner chooses browser SSH instead, the required security-group
+change needs explicit owner approval and must be restricted to the current
+regional EC2 Instance Connect range.
+
+The EC2 console did not provide an interactive shell during this check. The VM
+application, current container, and production APIs were therefore not inspected.
 
 ## Current local preview check (19 October 2026, 21:18 EAT)
 
@@ -20,13 +48,12 @@ cannot be tested against real published catalogue data yet. The local preview
 is marked as simulation; its `/api/pay/options` response must not be treated as
 live M-Pesa readiness. The demo sitemap is empty and robots disallows indexing.
 
-No SSM check was possible at this timestamp because the local `mireli` AWS CLI
-session had expired. A fresh workstation probe at 21:37 EAT resolves the public
-hostname to `105.161.112.67`, not the VM's `13.53.183.149`; TCP 443 is
+No VM shell/API check was possible at this timestamp. A fresh workstation probe
+at 21:37 EAT resolves the public hostname to `105.161.112.67`, not the VM's
+`13.53.183.149`; TCP 443 is
 unreachable and the HTTPS health request timed out. No VM, AWS, or DNS
 configuration was changed. The production VM details and previous verified
-observations below remain historical until a new read-only SSM check is
-completed.
+observations below remain historical until a read-only SSM session is restored.
 
 ## What is running
 
@@ -41,12 +68,12 @@ completed.
 - Driver API status: `/api/v1/driver/status`
 
 The AWS access validation email confirms the EC2 access request was validated;
-it does not create an SSH key or open port 22. The instance has no EC2 key pair,
-and inbound SSH is intentionally closed. Use the individually authorized AWS
-Systems Manager (SSM) path below. Do not share a teammate's AWS profile, open
-port 22, or copy a private key to the VM.
+it does not create an SSH key or open port 22. The instance has no EC2 key pair.
+SSM is the preferred access path, but its current managed-node state is not
+verified (see the latest browser check above). Do not share a teammate's AWS
+profile, open port 22, or copy a private key to the VM.
 
-## Latest live VM check (18 October 2026, 18:18 EAT)
+## Previous live VM check (18 October 2026, 18:18 EAT; historical)
 
 The `mireli` AWS profile authenticated successfully to project `036834403673`.
 EC2 reports this instance running at `13.53.183.149`; SSM reports Online on
@@ -285,11 +312,12 @@ Never run `env`, print `/etc/mireli/runtime.env`, dump full `docker inspect`, or
 read Secrets Manager values in a transcript. Runtime secrets come from the VM
 role and must never be copied into Android.
 
-## Verified VM state
+## Previous verified VM state (18 October 2026, 18:18 EAT; historical)
 
-The read-only state above is current as of 18 October 2026, 18:18 EAT. The VM is
-healthy internally, but it cannot support a customer or driver pilot until its
-route and train catalogue, approved drivers, driver authentication, public
+The last shell-based read-only state above is from 18 October 2026, 18:18 EAT.
+The VM was healthy internally then, but it cannot support a customer or driver
+pilot until its route and train catalogue, approved drivers, driver
+authentication, public
 DNS/TLS, payment callbacks, and passenger/driver email delivery are configured
 and tested. Do not use the public URL in a production Android build until the
 owner verifies DNS, HTTPS, and strict-mode status from outside AWS.
