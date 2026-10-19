@@ -43,8 +43,8 @@ describe("driver identity and evidence",()=>{
   });
 });
 describe("settlement proof",()=>{
-  it("keeps the booking fee and passes the full pooled fare and home surcharge to the driver",()=>{
-    expect(calculateSettlement(1100,100,50,1000,false)).toEqual({gross:1100,surcharge:100,platformFee:50,commission:0,net:1050});
+  it("keeps the per-seat booking fee and passes the full pooled fare and home surcharge to the driver",()=>{
+    expect(calculateSettlement(1200,100,100,1000,false)).toEqual({gross:1200,surcharge:100,platformFee:100,commission:0,net:1100});
   });
   it("includes the booking fee within the charter's 10% platform share and sends the remainder to the driver",()=>{
     expect(calculateSettlement(1100,100,50,1000,true)).toEqual({gross:1100,surcharge:100,platformFee:50,commission:50,net:1000});

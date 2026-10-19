@@ -3,12 +3,15 @@ import { db } from "@/lib/db";
 import { getPassengerSession } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import { applyCredits, getConfig, recordCollection } from "@/lib/money";
-import { allocateBooking } from "@/lib/engine";
+import { allocateBooking, releaseUnpaidBookingReservation } from "@/lib/engine";
 import { generateBookingCode, getPublicPayOptions, toMpesaMsISDN } from "@/lib/daraja";
 import { nairobiDate, nairobiDayRange } from "@/lib/nairobi-time";
 import { isBookingReadyForPayment } from "@/lib/booking-payment-eligibility";
 import { attemptBookingTicketEmail } from "@/lib/booking-ticket-email";
 import { calculateCharterFare, calculateCharterPlatformShare } from "@/lib/charter-pricing";
+import { calculateBookingFeeAmount, calculateSharedFare } from "@/lib/pricing";
+import { getApprovedStageFare } from "@/lib/fare-catalogue";
+import { expireUnpaidBookingReservations } from "@/lib/unpaid-booking-expiry";
 
 /** Statuses that count towards the guest booking limit — a cancelled booking
  *  frees the guest to rebook their single no-login seat. */
@@ -182,7 +185,8 @@ export async function POST(req: NextRequest) {
   if (!stage) {
     return NextResponse.json({ error: "Choose a published pickup or drop-off stop." }, { status: 409 });
   }
-  if (!Number.isSafeInteger(stage.fare) || stage.fare <= 0 ||
+  const stageFare = getApprovedStageFare(stage.name) ?? stage.fare;
+  if (!Number.isSafeInteger(stageFare) || stageFare <= 0 ||
       !Number.isSafeInteger(stage.homeSurcharge) || stage.homeSurcharge < 0) {
     return NextResponse.json({ error: "This stop's fare is not configured for booking yet." }, { status: 503 });
   }
@@ -190,11 +194,47 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Door-to-door service needs a pickup or drop-off address" }, { status: 400 });
   }
 
+  // Quote every booking from the exact cab the passenger selected. Shared
+  // 10/11-seat vehicles get the approved KSh 50 per-seat fare reduction;
+  // charter fares continue to use the listed base fare and the 10% split.
+  const selectedTrip = await db.trip.findUnique({
+    where: { id: tripId },
+    select: { capacity: true, routeId: true, direction: true },
+  });
+  if (!selectedTrip || selectedTrip.routeId !== route.id || selectedTrip.direction !== direction ||
+      !Number.isSafeInteger(selectedTrip.capacity) || selectedTrip.capacity < 1) {
+    return NextResponse.json(
+      { error: "That cab is no longer available. Refresh the list and choose another cab or date." },
+      { status: 409 },
+    );
+  }
+
   const tripSeats = isCharter ? 0 : seats;
-  let fare = isCharter ? 0 : stage.fare * tripSeats;
+  let fare: number;
+  let platformFeeAmount: number;
+  try {
+    fare = isCharter
+      ? calculateCharterFare(selectedTrip.capacity, stageFare)
+      : calculateSharedFare(stageFare, selectedTrip.capacity, tripSeats);
+    platformFeeAmount = calculateBookingFeeAmount(cfg.bookingFeeAmount, isCharter ? 1 : tripSeats, isCharter);
+  } catch {
+    return NextResponse.json(
+      { error: "We couldn't confirm this cab's fare. No booking was created; please try again." },
+      { status: 503 },
+    );
+  }
   const homeSurcharge = homePickup ? (isCharter ? stage.homeSurcharge : stage.homeSurcharge * tripSeats) : 0;
-  const platformFeeAmount = cfg.bookingFeeAmount;
   let total = fare + homeSurcharge + (isCharter ? 0 : platformFeeAmount);
+
+  if (isCharter) {
+    if (calculateCharterPlatformShare(fare, Math.round(cfg.commissionRate * 10000)) < platformFeeAmount) {
+      return NextResponse.json(
+        { error: "This vehicle's charter fare cannot cover the booking fee. Choose another cab." },
+        { status: 409 },
+      );
+    }
+    total = fare + homeSurcharge;
+  }
 
   // ── Guest rule: 1 seat, 1 booking — no login required. Anything more needs
   // a Mi-Reli account created with the exact same details. ─────────────────
@@ -232,12 +272,11 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // A pooled fare is already known here. Refuse before creating a booking or
-  // allocating a seat if cash will be due but the real STK method is not ready.
-  // Charter fare depends on the assigned vehicle, so it is checked below after
-  // its capacity-based price has been calculated.
+  // Refuse before creating a booking or allocating a seat if cash will be due
+  // but the real STK method is not ready. Charter total is based on the exact
+  // selected vehicle capacity above.
   const estimatedCashDue = total - Math.min(total, availableCreditBalance);
-  if (!isCharter && estimatedCashDue > 0 && !(await hasStkPaymentMethod())) {
+  if (estimatedCashDue > 0 && !(await hasStkPaymentMethod())) {
     return NextResponse.json(
       { error: PAYMENT_UNAVAILABLE_ERROR, code: "PAYMENT_OPTIONS_UNAVAILABLE" },
       { status: 503 },
@@ -260,6 +299,9 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // Clear safe, abandoned checkout holds before assigning this new booking.
+  await expireUnpaidBookingReservations();
+
   const booking = await db.booking.create({
     data: {
       code: generateBookingCode(),
@@ -274,8 +316,8 @@ export async function POST(req: NextRequest) {
       homeAddress: homePickup ? String(homeAddress).slice(0, 200) : null,
       seats: isCharter ? 1 : tripSeats,
       isCharter,
-      // Charter fare is provisional until allocation identifies the vehicle
-      // capacity; no payment can begin before the fare is recalculated.
+      // Charter fare was calculated from the exact selected vehicle before
+      // creating the draft; allocation is pinned to that same trip.
       fareAmount: total,
       platformFeeAmount,
       homeSurcharge,
@@ -322,46 +364,42 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (isCharter) {
-    // Quote and charge from the vehicle that was actually assigned. The KSh 50
-    // fee is accounted for within Mireli's 10% share, not added a second time.
-    try {
-      const assignedTrip = await db.trip.findUnique({
-        where: { id: allocation.tripId },
-        select: { capacity: true },
-      });
-      if (!assignedTrip) throw new Error("Allocated vehicle not found");
-      fare = calculateCharterFare(assignedTrip.capacity, stage.fare);
-      if (calculateCharterPlatformShare(fare, Math.round(cfg.commissionRate * 10000)) < platformFeeAmount) {
-        throw new Error("Charter fare cannot cover the embedded booking fee within the platform share");
-      }
-      total = fare + homeSurcharge;
-      await db.booking.update({
-        where: { id: booking.id },
-        data: { fareAmount: total, cashDue: total, homeSurcharge, platformFeeAmount },
-      });
-    } catch {
-      await db.booking.delete({ where: { id: booking.id } }).catch(() => undefined);
-      return NextResponse.json(
-        { error: "We couldn't confirm the assigned vehicle's fare. No payment was requested; please try again." },
-        { status: 503 },
-      );
-    }
-
-    const charterCashDue = total - Math.min(total, availableCreditBalance);
-    if (charterCashDue > 0 && !(await hasStkPaymentMethod())) {
-      await db.booking.delete({ where: { id: booking.id } }).catch(() => undefined);
-      return NextResponse.json(
-        { error: PAYMENT_UNAVAILABLE_ERROR, code: "PAYMENT_OPTIONS_UNAVAILABLE" },
-        { status: 503 },
-      );
-    }
-  }
-
   // Credit offer — the passenger chooses; partial use supported
   let creditApplied = 0;
   if (applyCredit) {
-    creditApplied = await applyCredits(session.id, booking.id, total);
+    // If the preflight thought credit covered the whole fare, make the final
+    // redemption all-or-nothing. A competing checkout may have spent it after
+    // the balance read. In that case only continue if real M-Pesa is available.
+    const requireFullCredit = estimatedCashDue === 0;
+    creditApplied = await applyCredits(session.id, booking.id, total, {
+      requireFull: requireFullCredit,
+    });
+    if (requireFullCredit && creditApplied < total) {
+      if (!(await hasStkPaymentMethod())) {
+        let released = false;
+        try {
+          released = await releaseUnpaidBookingReservation(booking.id, allocation.tripId);
+        } catch {
+          // Keep the customer from retrying into a potentially stale seat hold.
+        }
+        if (!released) {
+          return NextResponse.json(
+            {
+              error: "We couldn't safely clear this cab reservation. Check your bookings before trying again.",
+              code: "BOOKING_RESERVATION_REVIEW_REQUIRED",
+            },
+            { status: 503 },
+          );
+        }
+        return NextResponse.json(
+          { error: PAYMENT_UNAVAILABLE_ERROR, code: "PAYMENT_OPTIONS_UNAVAILABLE" },
+          { status: 503 },
+        );
+      }
+      // M-Pesa is ready, so redeem whatever remains under the same row-lock
+      // protection and let the passenger pay the residual cash amount.
+      creditApplied = await applyCredits(session.id, booking.id, total);
+    }
   }
   const cashDue = total - creditApplied;
   if (creditApplied > 0) {

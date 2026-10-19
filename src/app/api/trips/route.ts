@@ -5,6 +5,7 @@ import { getConfig } from "@/lib/money";
 import { nairobiDayRange } from "@/lib/nairobi-time";
 import { getEligibleDriverIds } from "@/lib/driver/availability";
 import { DriverError } from "@/lib/driver/errors";
+import { expireUnpaidBookingReservations } from "@/lib/unpaid-booking-expiry";
 
 /** Bookable departures for a date + direction. */
 export async function GET(req: NextRequest) {
@@ -23,6 +24,7 @@ export async function GET(req: NextRequest) {
   try { ({ start: dayStart, end: dayEnd } = nairobiDayRange(date)); }
   catch { return NextResponse.json({ error: "Invalid travel date" }, { status: 400 }); }
   try {
+    await expireUnpaidBookingReservations();
     // Check supply before running the scheduler. With no active, approved
     // drivers there can be no customer-facing trips, and the scheduler would
     // otherwise perform config, route, document, and trip queries on every
@@ -43,7 +45,18 @@ export async function GET(req: NextRequest) {
         driverId: { in: eligibleDriverIds },
         departureAt: { gte: dayStart, lt: dayEnd },
         status: { in: ["scheduled", "locked", "departed"] },
-        route: { is: { active: true } },
+        route: {
+          is: {
+            active: true,
+            stages: {
+              some: {
+                order: { gt: 0 },
+                fare: { gt: 0 },
+                homeSurcharge: { gte: 0 },
+              },
+            },
+          },
+        },
         train: { is: { active: true } },
       },
       orderBy: { departureAt: "asc" },
@@ -60,10 +73,6 @@ export async function GET(req: NextRequest) {
             name: true,
             durationMinutes: true,
             charterPrice: true,
-            stages: {
-              orderBy: { order: "asc" },
-              select: { order: true, fare: true, homeSurcharge: true },
-            },
           },
         },
         driver: { select: { name: true, plate: true, cabType: true, rating: true } },
@@ -79,18 +88,13 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     hasEligibleDrivers: true,
-    // A stale trip row or an active route without any customer-selectable
-    // point cannot be booked. Do not present either as available supply.
+    // The database query requires at least one valid customer stop without
+    // materializing the entire route-stage list for every departure.
     trips: trips
-      .filter((t) => !!t.driver && t.route.stages.some((stage) =>
-        stage.order > 0 && stage.fare > 0 && stage.homeSurcharge >= 0,
-      ))
+      .filter((t) => !!t.driver)
       .map((t) => {
       const relevantBooked = t.bookings.reduce((s, b) => s + b.seats, 0);
       const seatsLeft = Math.max(t.capacity - relevantBooked, 0);
-      const nonTerminusStages = t.route.stages.filter((s) =>
-        s.order > 0 && s.fare > 0 && s.homeSurcharge >= 0,
-      );
       const isFromTerminus = t.direction === "FROM_TERMINUS";
       const train = t.train
         ? {
@@ -139,11 +143,9 @@ export async function GET(req: NextRequest) {
               rating: t.driver.rating,
             }
           : null,
-        // Stage details are loaded once from /api/routes, not repeated for
-        // every cab. The current policy lets every active driver serve every
-        // active route, so filtering by routeId is sufficient.
+        // The customer-selected stop comes from the bounded /api/stages search;
+        // do not repeat route-stop details for each departure card.
         pointsLabel: isFromTerminus ? "drop-off" : "pickup",
-        minFare: nonTerminusStages.length ? Math.min(...nonTerminusStages.map((s) => s.fare)) : 0,
       };
       }),
   });
@@ -154,7 +156,12 @@ export async function GET(req: NextRequest) {
         { status: error.status },
       );
     }
-    console.error("trip availability failed", error);
+    const code = typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+      ? error.code
+      : "UNKNOWN";
+    // ORM/provider exceptions can contain connection details; keep diagnostics
+    // useful without copying those details into persistent application logs.
+    console.error("trip availability failed", { code });
     return NextResponse.json(
       { error: "Cab availability is temporarily unavailable." },
       { status: 503 },

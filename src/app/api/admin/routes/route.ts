@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
+import { getApprovedStageFare } from "@/lib/fare-catalogue";
 import { getAdminSession } from "@/lib/session";
 
 type RouteStageInput = {
@@ -88,7 +89,15 @@ export async function GET() {
         },
       },
     });
-    return NextResponse.json({ routes });
+    return NextResponse.json({
+      routes: routes.map((route) => ({
+        ...route,
+        stages: route.stages.map((stage) => ({
+          ...stage,
+          fare: getApprovedStageFare(stage.name) ?? stage.fare,
+        })),
+      })),
+    });
   } catch (error) {
     logDatabaseError("list", error);
     return NextResponse.json({ error: "Route catalogue is temporarily unavailable." }, { status: 503 });

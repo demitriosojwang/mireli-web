@@ -120,6 +120,19 @@ describe("admin route catalogue", () => {
     expect(mocks.stageCreate).not.toHaveBeenCalled();
   });
 
+  it("requires an explicit door surcharge instead of defaulting an omitted value to zero", async () => {
+    const response = await POST(post({
+      action: "add_stage", routeId: "route-1", name: "Bamburi", lat: -4, lng: 39.7, fare: 400,
+    }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "Enter a stop name, valid coordinates, a positive fare, and a non-negative surcharge.",
+    });
+    expect(mocks.routeFindUnique).not.toHaveBeenCalled();
+    expect(mocks.stageCreate).not.toHaveBeenCalled();
+  });
+
   it("keeps a route unpublished until it has complete, ordered, priced stops", async () => {
     mocks.routeFindUnique.mockResolvedValue({ id: "route-1", active: false, stages: [] });
     const response = await PUT(put({ action: "set_route_active", routeId: "route-1", active: true }));

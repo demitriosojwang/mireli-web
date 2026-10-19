@@ -18,11 +18,12 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { api, useMe } from "@/lib/client";
-import { getBookingCatalogueView, hasPublishedCustomerPoints, shouldLoadTrainTimetable, type CatalogueStatus } from "@/lib/booking-catalogue";
+import { getBookingCatalogueView, getCabAvailabilityCountLabel, hasPublishedCustomerPoints, shouldLoadTrainTimetable, type CatalogueStatus } from "@/lib/booking-catalogue";
 import { fmtTime, ksh } from "@/lib/format";
-import { DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
+import { calculateBookingFeeAmount, calculateSharedFare, DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
 import { addNairobiDays, nairobiWeekday } from "@/lib/nairobi-time";
 import { calculateCharterFare } from "@/lib/charter-pricing";
+import { getBookingPaymentPreflight } from "@/lib/booking-payment-preflight";
 import { MAX_STAGE_SEARCH_LENGTH, MIN_STAGE_SEARCH_LENGTH, isStageSearchReady, shouldSearchStagePoints } from "@/lib/stage-search";
 import { SplashScreen, useSplashOnce } from "@/components/app/splash-screen";
 import {
@@ -38,6 +39,7 @@ import {
 } from "@/components/app/shared";
 import {
   Anchor,
+  AlertTriangle,
   CalendarDays,
   Car,
   Check,
@@ -48,7 +50,6 @@ import {
   Loader2,
   MapPin,
   Navigation,
-  Sparkles,
   Ticket as TicketIcon,
   Train as TrainIcon,
   Users,
@@ -156,6 +157,8 @@ export default function Home() {
   const [draft, setDraft] = useState<BookingDraft | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [payFor, setPayFor] = useState<BookingRow | null>(null);
+  const [checkingPayment, setCheckingPayment] = useState(false);
+  const [bookingStartError, setBookingStartError] = useState<string | null>(null);
 
   const isAuthed = !!me?.session;
 
@@ -175,6 +178,7 @@ export default function Home() {
     setDirection(nextDirection);
     setTrainKey(null);
     setSelectedPoint(null);
+    setHasEligibleDrivers(null);
     setHomePickup(false);
     setJourneyCollapsed(false);
     setPointPickerOpen(false);
@@ -185,6 +189,7 @@ export default function Home() {
     setTrips(null);
     setLoadedQuery(null);
     setTripsStatus("loading");
+    setBookingStartError(null);
   }, [direction]);
 
   const loadMyBookings = useCallback(async () => {
@@ -338,19 +343,58 @@ export default function Home() {
     };
   }, [splashReady, showSplash, direction, date, selectedPoint?.route.id, queryKey, tripRefreshKey]);
 
-  function openBooking(trip: BookableTrip) {
-    if (!selectedPoint || selectedPoint.route.id !== trip.routeId) return;
-    setDraft({
-      trip: { ...trip, stages: [selectedPoint.point] },
-      stageId: selectedPoint.point.id,
-      travelDate: date,
-      seats,
-      charter,
-      homePickup,
-      homeAddress: "",
-      useCredit: false,
-    });
-    setSheetOpen(true);
+  async function openBooking(trip: BookableTrip) {
+    if (!selectedPoint || selectedPoint.route.id !== trip.routeId || checkingPayment) return;
+    setBookingStartError(null);
+    setCheckingPayment(true);
+    try {
+      let stkAvailable = false;
+      let paymentCheckFailed = false;
+      try {
+        const options = await api<{ methods?: string[] }>("/api/pay/options", {
+          timeoutMs: CATALOGUE_TIMEOUT_MS,
+        });
+        stkAvailable = Array.isArray(options.methods) && options.methods.includes("mpesa_stk");
+      } catch {
+        paymentCheckFailed = true;
+      }
+
+      const feeAmount = calculateBookingFeeAmount(trip.platformFeeAmount ?? bookingFeeAmount, seats, charter);
+      const total =
+        (charter
+          ? calculateCharterFare(trip.capacity, selectedPoint.point.fare)
+          : calculateSharedFare(selectedPoint.point.fare, trip.capacity, seats)) +
+        (homePickup
+          ? selectedPoint.point.homeSurcharge * (charter ? 1 : seats)
+          : 0) +
+        (charter ? 0 : feeAmount);
+      const creditBalanceValue = me?.creditBalance ?? 0;
+      const creditBalance = Number.isSafeInteger(creditBalanceValue) ? creditBalanceValue : 0;
+      const preflight = getBookingPaymentPreflight(total, creditBalance, stkAvailable);
+
+      if (!preflight.canProceed) {
+        setBookingStartError(
+          paymentCheckFailed
+            ? "We couldn’t confirm M-Pesa checkout. No booking was created; please try again later."
+            : "M-Pesa checkout isn’t available yet. No booking was created. You can book when checkout is ready.",
+        );
+        return;
+      }
+
+      setDraft({
+        trip: { ...trip, stages: [selectedPoint.point] },
+        stageId: selectedPoint.point.id,
+        travelDate: date,
+        seats,
+        charter,
+        homePickup,
+        homeAddress: "",
+        useCredit: preflight.useCredit,
+      });
+      setSheetOpen(true);
+    } finally {
+      setCheckingPayment(false);
+    }
   }
 
   /* ─── Derived data (all hooks run before any early return) ──────────────── */
@@ -429,18 +473,27 @@ export default function Home() {
           .filter((trip) => trip.routeId === selectedPoint?.route.id)
           .map((trip) => calculateCharterFare(trip.capacity, previewStage.fare))
       : [];
+    const sharedFares = !charter && previewStage
+      ? visibleTrips.map((trip) => calculateSharedFare(previewStage.fare, trip.capacity, seats))
+      : [];
     const base = charter
       ? charterFares.length > 0 ? Math.min(...charterFares) : 0
-      : (previewStage?.fare || 0) * seats;
+      : sharedFares.length > 0
+        ? Math.min(...sharedFares)
+        : (previewStage?.fare || 0) * seats;
     const surcharge = homePickup
       ? (charter ? previewStage?.homeSurcharge || 0 : (previewStage?.homeSurcharge || 0) * seats)
+      : 0;
+    const platformFee = selectedPoint
+      ? calculateBookingFeeAmount(bookingFeeAmount, seats, charter)
       : 0;
     return {
       base,
       surcharge,
-      platformFee: selectedPoint ? bookingFeeAmount : 0,
+      platformFee,
       hasCharterCab: charterFares.length > 0,
-      total: base + surcharge + (selectedPoint && !charter ? bookingFeeAmount : 0),
+      hasVariableSharedFare: new Set(sharedFares).size > 1,
+      total: base + surcharge + (selectedPoint && !charter ? platformFee : 0),
     };
   })();
 
@@ -530,7 +583,7 @@ export default function Home() {
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                   <Button type="button" size="sm" variant="outline" onClick={retryCatalogues}>Refresh availability</Button>
                   {hasEligibleDrivers === false && (
-                    <p className="text-xs text-muted-foreground"><span className="font-semibold text-foreground">0 pooled cabs</span> · no approved drivers yet</p>
+                    <p className="text-xs text-muted-foreground"><span className="font-semibold text-foreground">0 pooled cabs</span> · no eligible drivers are available right now</p>
                   )}
                 </div>
               </section>
@@ -542,7 +595,7 @@ export default function Home() {
                 <CalendarDays className="h-3.5 w-3.5" />
                 {direction === "FROM_TERMINUS" ? "Travelling on which date?" : "Catching the train on which date?"}
               </div>
-              <DatePicker value={date} onChange={(nextDate) => { setDate(nextDate); setTrainKey(null); }} />
+              <DatePicker value={date} onChange={(nextDate) => { setDate(nextDate); setTrainKey(null); setBookingStartError(null); }} />
               <div className="mt-1.5 text-xs text-muted-foreground">
                 Selected: <span className="font-medium text-foreground">{fmtDateShort(date)}</span>
               </div>
@@ -592,6 +645,7 @@ export default function Home() {
                 {selectedPoint && (
                   <button onClick={() => {
                     setSelectedPoint(null);
+                    setHasEligibleDrivers(null);
                     setHomePickup(false);
                     setTrips(null);
                     setLoadedQuery(null);
@@ -687,6 +741,11 @@ export default function Home() {
                                   key={point.id}
                                   value={`${coast} ${route.name} ${point.name}`}
                                   onSelect={() => {
+                                    setBookingStartError(null);
+                                    setHasEligibleDrivers(null);
+                                    setTrips(null);
+                                    setTripsStatus("loading");
+                                    setLoadedQuery(null);
                                     setSelectedPoint({
                                       point: {
                                         id: point.id,
@@ -705,7 +764,7 @@ export default function Home() {
                                 >
                                   <Check className={cn("h-4 w-4", selectedPoint?.point.id === point.id ? "opacity-100" : "opacity-0")} />
                                   <span className="min-w-0 flex-1 truncate">{point.name}</span>
-                                  <span className="text-xs tabular-nums text-muted-foreground">KSh {point.fare}</span>
+                                  <span className="text-xs tabular-nums text-muted-foreground">{ksh(point.fare)} / seat</span>
                                 </CommandItem>
                               ))}
                             </CommandGroup>
@@ -721,7 +780,8 @@ export default function Home() {
                 </Popover>
                 {selectedPoint && (
                   <p className="px-1 text-[11px] text-muted-foreground">
-                    {selectedPoint.coast === "south" ? "South Coast" : "North Coast"} · {ksh(selectedPoint.point.fare)} per seat
+                    {selectedPoint.coast === "south" ? "South Coast" : "North Coast"} · {ksh(selectedPoint.point.fare)} listed fare per seat
+                    {selectedPoint.point.fare > 50 && ` · ${ksh(selectedPoint.point.fare - 50)} in 10/11-seat shared cabs`}
                   </p>
                 )}
                 {!selectedPoint && routesStatus === "ready" && pointCount > 0 && (
@@ -816,8 +876,8 @@ export default function Home() {
                   <span className="block text-[11px] text-muted-foreground">
                     {selectedPoint
                       ? charter
-                        ? `${ksh(bookingFeeAmount)} booking fee included in Mireli's 10% share`
-                        : `Includes ${ksh(bookingFeeAmount)} booking fee`
+                      ? `${ksh(bookingFeeAmount)} fee included in Mireli's 10% share`
+                        : `${ksh(bookingFeeAmount)} × ${seats} seat${seats === 1 ? "" : "s"} = ${ksh(farePreview.platformFee)} Mireli fee`
                       : "Final amount shown before payment"}
                   </span>
                 </span>
@@ -826,7 +886,7 @@ export default function Home() {
                     ? "Choose a point"
                     : charter && !farePreview.hasCharterCab
                       ? "No cabs available"
-                      : charter && visibleTrips.some((trip) => trip.capacity !== visibleTrips[0]?.capacity)
+                    : (charter && visibleTrips.some((trip) => trip.capacity !== visibleTrips[0]?.capacity)) || farePreview.hasVariableSharedFare
                         ? `From ${ksh(farePreview.total)}`
                         : ksh(farePreview.total)}
                 </span>
@@ -860,9 +920,21 @@ export default function Home() {
                   {charter ? "Available for charter" : "Available pooled cabs"}
                 </h3>
                 <span className="text-xs text-muted-foreground">
-                  {loading ? "…" : hasEligibleDrivers === false ? "0 cabs" : selectedPoint ? `${visibleTrips.length} cabs` : "Choose a stop"}
+                  {getCabAvailabilityCountLabel({
+                    loading,
+                    status: tripsStatus,
+                    hasEligibleDrivers,
+                    cabCount: visibleTrips.length,
+                    hasSelectedPoint: !!selectedPoint,
+                  })}
                 </span>
               </div>
+
+              {bookingStartError && (
+                <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-950" role="alert">
+                  {bookingStartError}
+                </p>
+              )}
 
               {loading && (
                 <div role="status" className="flex items-center gap-2 rounded-xl border bg-card px-4 py-3 text-sm text-muted-foreground">
@@ -885,7 +957,7 @@ export default function Home() {
                     {selectedTrainGone
                       ? "This train’s meet-cab has already left for the selected day — pick a later train or another date."
                       : hasEligibleDrivers === false
-                        ? "No bookable cabs are available yet. Drivers will appear here after onboarding and approval."
+                        ? "No eligible drivers are available to serve bookings right now."
                         : !selectedPoint
                         ? `Choose a ${pointLabelCap.toLowerCase()} point to see cabs serving that stop.`
                         : "No available cabs serve this point for that train. Try another point or date."}
@@ -905,6 +977,7 @@ export default function Home() {
                       charter={charter}
                       homePickup={homePickup}
                       hasPoint={!!selectedPoint}
+                      paymentChecking={checkingPayment}
                       onBook={() => openBooking(trip)}
                     />
                   </motion.div>
@@ -914,7 +987,7 @@ export default function Home() {
             {bookingCatalogueView === "booking" && (routesStatus === "ready" || routesStatus === "error") && <details className="rounded-xl border bg-card px-3.5 py-3 text-sm">
               <summary className="cursor-pointer font-medium">Fare and service details</summary>
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                The fare is based on your selected point and ride type. Door-to-door surcharges go to your driver in full. A private cab reserves the whole vehicle. Review the complete amount and cancellation terms before you pay.
+                Shared fares are per passenger seat; 10/11-seat cabs are KSh 50 less per seat. Mireli retains KSh 50 per booked shared seat. Door-to-door surcharges go to your driver in full. A private cab reserves the whole vehicle; Mireli keeps 10% and the driver receives the rest.
               </p>
             </details>}
 
@@ -1006,6 +1079,7 @@ function CabCard({
   charter,
   homePickup,
   hasPoint,
+  paymentChecking,
   onBook,
 }: {
   trip: BookableTrip;
@@ -1016,14 +1090,18 @@ function CabCard({
   charter: boolean;
   homePickup: boolean;
   hasPoint: boolean;
+  paymentChecking: boolean;
   onBook: () => void;
 }) {
   const booked = trip.capacity - trip.seatsLeft;
-  const baseFare = charter
-    ? calculateCharterFare(trip.capacity, pointFare ?? trip.minFare)
-    : (pointFare ?? trip.minFare) * seats;
+  const baseFare = pointFare == null
+    ? 0
+    : charter
+      ? calculateCharterFare(trip.capacity, pointFare)
+      : calculateSharedFare(pointFare, trip.capacity, seats);
   const surcharge = homePickup ? (pointSurcharge ?? 0) * (charter ? 1 : seats) : 0;
-  const fare = baseFare + surcharge + (hasPoint && !charter ? trip.platformFeeAmount : 0);
+  const platformFee = calculateBookingFeeAmount(trip.platformFeeAmount, seats, charter);
+  const fare = baseFare + surcharge + (hasPoint && !charter ? platformFee : 0);
   const insufficientSeats = charter ? trip.seatsLeft !== trip.capacity : trip.seatsLeft < seats;
   const full = insufficientSeats || !trip.bookable;
 
@@ -1036,8 +1114,8 @@ function CabCard({
               <span className="text-sm font-semibold">{pointName ?? trip.routeName}</span>
               <DotBadge status={trip.status} />
               {trip.status === "locked" && (
-                <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-900">
-                  <Sparkles className="h-2.5 w-2.5" /> credits only
+                <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-900" title={trip.lockNote ?? undefined}>
+                  <AlertTriangle className="h-2.5 w-2.5" /> Late cancellation terms
                 </span>
               )}
             </div>
@@ -1055,6 +1133,9 @@ function CabCard({
                 ? `Leaves the stage ${fmtTime(trip.departureAt)} · be there by then`
                 : `Cab departs ${fmtTime(trip.departureAt)}`}
             </div>
+            {trip.status === "locked" && (
+              <p className="mt-0.5 text-[10px] text-amber-800">Late cancellations convert the fare to travel credit.</p>
+            )}
           </div>
           <div className="shrink-0 text-right">
             <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
@@ -1063,11 +1144,13 @@ function CabCard({
             <div className="font-bold tabular-nums text-primary">{ksh(fare)}</div>
             {hasPoint && (
               <div className="text-[10px] text-muted-foreground">
-                {charter ? `${ksh(trip.platformFeeAmount)} fee included` : `includes ${ksh(trip.platformFeeAmount)} fee`}
+                {charter
+                  ? `${ksh(platformFee)} fee in the 10% share`
+                  : `${ksh(trip.platformFeeAmount)} × ${seats} Mireli fee`}
               </div>
             )}
-            {!charter && seats === 1 && pointFare != null && pointFare !== trip.minFare && (
-              <div className="text-[10px] text-muted-foreground">from {ksh(trip.minFare)}</div>
+            {!charter && (trip.capacity === 10 || trip.capacity === 11) && hasPoint && (
+              <div className="text-[10px] text-muted-foreground">KSh 50 off each seat for this cab size</div>
             )}
           </div>
         </div>
@@ -1091,8 +1174,10 @@ function CabCard({
           <SeatMeter booked={booked} capacity={trip.capacity} />
         </div>
 
-        <Button className="h-9 w-full" size="sm" disabled={full || !hasPoint} onClick={onBook}>
-          {!hasPoint
+        <Button className="h-9 w-full" size="sm" disabled={full || !hasPoint || paymentChecking} onClick={onBook}>
+          {paymentChecking
+            ? "Checking checkout…"
+            : !hasPoint
             ? `Choose a ${trip.pointsLabel} point first`
             : full
             ? insufficientSeats

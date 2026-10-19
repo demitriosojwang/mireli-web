@@ -108,6 +108,8 @@ jobs:
             curl --fail --silent http://127.0.0.1:3000/api/trains | python3 -c 'assert isinstance(json.load(sys.stdin).get("trains"), list)' || return 1
             curl --fail --silent 'http://127.0.0.1:3000/api/stages?q=Mtwapa' | python3 -c 'd=json.load(sys.stdin); assert isinstance(d.get("points"), list) and isinstance(d.get("hasMore"), bool)' || return 1
             curl --fail --silent http://127.0.0.1:3000/api/driver-supply | python3 -c 'assert isinstance(json.load(sys.stdin).get("hasEligibleDrivers"), bool)' || return 1
+            curl --fail --silent --show-error http://127.0.0.1:3000/sitemap.xml | python3 -c 'import sys,xml.etree.ElementTree as ET; root=ET.fromstring(sys.stdin.read()); assert root.tag.endswith("urlset") and any(entry.tag.endswith("url") for entry in root)' || return 1
+            curl --silent --show-error http://127.0.0.1:3000/api/pay/options | python3 -c 'import json,sys; d=json.load(sys.stdin); methods=d.get("methods"); assert (isinstance(methods,list) and "mpesa_stk" in methods) or d.get("code") == "PAYMENT_OPTIONS_UNAVAILABLE"' || return 1
           }}
           healthy() {{ for n in $(seq 1 18); do app_ready && return 0; sleep 10; done; return 1; }}
           rollback() {{ echo 'New release failed API readiness checks; restoring previous image.'; set_tag "$old_tag"; systemctl restart "$service" || true; healthy; }}

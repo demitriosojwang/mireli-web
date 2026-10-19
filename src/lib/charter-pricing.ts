@@ -3,8 +3,8 @@ export const CHARTER_PER_SEAT_AMOUNT = 100;
 
 /**
  * A charter reserves every seat in the assigned vehicle. The configured stage
- * fare is per seat; KSh 100 is added per vehicle seat. The flat booking fee is
- * accounted for inside Mireli's 10% share and is not added again here.
+ * fare is per seat; KSh 100 is added per vehicle seat. One KSh 50 Mireli fee
+ * line is accounted for inside the 10% share and is not added again here.
  */
 export function calculateCharterFare(capacity: number, stageFare: number): number {
   if (!Number.isSafeInteger(capacity) || capacity < 1 ||
@@ -19,7 +19,7 @@ export function calculateCharterFare(capacity: number, stageFare: number): numbe
   return total;
 }
 
-/** Mireli's percentage share of charter fare, including its embedded flat fee. */
+/** Mireli's percentage share of charter fare, including its embedded fee line. */
 export function calculateCharterPlatformShare(charterFare: number, rateBps: number): number {
   if (!Number.isSafeInteger(charterFare) || charterFare < 0 ||
       !Number.isInteger(rateBps) || rateBps < 0 || rateBps > 10000 ||

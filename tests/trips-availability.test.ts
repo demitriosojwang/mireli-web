@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   runOperationalTick: vi.fn(),
   getConfig: vi.fn(),
   evaluateDriverApplication: vi.fn(),
+  expireUnpaidBookingReservations: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -22,6 +23,9 @@ vi.mock("@/lib/nairobi-time", () => ({
 }));
 vi.mock("@/lib/driver/eligibility", () => ({ evaluateDriverApplication: mocks.evaluateDriverApplication }));
 vi.mock("@/lib/runtime-mode", () => ({ isLocalDemoEnabled: () => false }));
+vi.mock("@/lib/unpaid-booking-expiry", () => ({
+  expireUnpaidBookingReservations: mocks.expireUnpaidBookingReservations,
+}));
 
 import { GET } from "@/app/api/trips/route";
 import { DriverError } from "@/lib/driver/errors";
@@ -40,6 +44,7 @@ beforeEach(() => {
   mocks.driverFindMany.mockResolvedValue([]);
   mocks.tripFindMany.mockResolvedValue([]);
   mocks.runOperationalTick.mockResolvedValue({});
+  mocks.expireUnpaidBookingReservations.mockResolvedValue({ expired: 0, restoredCredit: 0 });
   mocks.getConfig.mockResolvedValue({ bookingFeeAmount: 50, terminusArrivalBufferMinutes: 60 });
   mocks.evaluateDriverApplication.mockReturnValue({ eligible: true, reasons: [] });
 });
@@ -72,10 +77,6 @@ describe("customer trip availability", () => {
         name: "Mombasa Terminus ↔ North Coast",
         durationMinutes: 90,
         charterPrice: 4000,
-        stages: [
-          { id: "stage-0", name: "Mombasa Terminus", order: 0, fare: 0, homeSurcharge: 0 },
-          { id: "stage-1", name: "Mtwapa", order: 1, fare: 700, homeSurcharge: 200 },
-        ],
       },
       driver: { name: "Approved Driver", plate: "KAA 123A", cabType: "Van", rating: 4.8 },
       train: { name: "Night Train", direction: "NBO_TO_MBA", originTime: "22:00", destTime: "03:55" },
@@ -88,49 +89,37 @@ describe("customer trip availability", () => {
     expect(response.status).toBe(200);
     expect(result.hasEligibleDrivers).toBe(true);
     expect(result.trips).toHaveLength(1);
-    expect(result.trips[0]).toMatchObject({ minFare: 700, seatsLeft: 3, platformFeeAmount: 50 });
+    expect(result.trips[0]).toMatchObject({ seatsLeft: 3, platformFeeAmount: 50 });
     expect(result.trips[0]).not.toHaveProperty("stages");
     expect(result.trips[0]).not.toHaveProperty("points");
     expect(result.trips[0].driver).not.toHaveProperty("phone");
     expect(mocks.tripFindMany.mock.calls[0][0].where.routeId).toBe("route-1");
-    expect(mocks.tripFindMany.mock.calls[0][0].where.route).toEqual({ is: { active: true } });
+    expect(mocks.tripFindMany.mock.calls[0][0].where.route).toEqual({
+      is: {
+        active: true,
+        stages: { some: { order: { gt: 0 }, fare: { gt: 0 }, homeSurcharge: { gte: 0 } } },
+      },
+    });
     expect(mocks.tripFindMany.mock.calls[0][0].where.train).toEqual({ is: { active: true } });
     expect(mocks.tripFindMany.mock.calls[0][0].where.driverId.in).toEqual([eligibleDriver.id]);
     expect(mocks.driverFindMany.mock.calls[0][0].select.application.select.documents.select)
       .toEqual({ type: true, state: true, scanState: true, expiresAt: true });
-    expect(mocks.tripFindMany.mock.calls[0][0].select.route.select.stages.select)
-      .toEqual({ order: true, fare: true, homeSurcharge: true });
+    expect(mocks.tripFindMany.mock.calls[0][0].select.route.select).not.toHaveProperty("stages");
   });
 
-  it("hides active-driver trips that have no customer-bookable fare point", async () => {
+  it("queries only active-driver trips whose route has a customer-bookable fare point", async () => {
     mocks.driverFindMany.mockResolvedValue([eligibleDriver]);
-    mocks.tripFindMany.mockResolvedValue([{
-      id: "trip-invalid-stage",
-      routeId: "route-1",
-      driverId: eligibleDriver.id,
-      direction: "FROM_TERMINUS",
-      departureAt: new Date(Date.now() + 60 * 60 * 1000),
-      status: "scheduled",
-      capacity: 4,
-      route: {
-        id: "route-1",
-        name: "Mombasa Terminus ↔ North Coast",
-        durationMinutes: 90,
-        charterPrice: 4000,
-        stages: [
-          { id: "stage-0", name: "Mombasa Terminus", order: 0, fare: 0, homeSurcharge: 0 },
-          { id: "stage-1", name: "Unpriced stop", order: 1, fare: 0, homeSurcharge: 0 },
-        ],
-      },
-      driver: { name: "Approved Driver", plate: "KAA 123A", cabType: "Van", rating: 4.8 },
-      train: null,
-      bookings: [],
-    }]);
+    mocks.tripFindMany.mockResolvedValue([]);
 
     const response = await GET(request());
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ hasEligibleDrivers: true, trips: [] });
+    expect(mocks.tripFindMany.mock.calls[0][0].where.route.is.stages.some).toEqual({
+      order: { gt: 0 },
+      fare: { gt: 0 },
+      homeSurcharge: { gte: 0 },
+    });
   });
 
   it("returns a clear setup response instead of an unhandled error when booking settings are absent", async () => {
@@ -144,6 +133,18 @@ describe("customer trip availability", () => {
       error: "Ride schedules are not set up yet.",
       code: "PLATFORM_NOT_CONFIGURED",
     });
+  });
+
+  it("returns a retryable error without logging database connection details", async () => {
+    mocks.driverFindMany.mockResolvedValue([eligibleDriver]);
+    mocks.runOperationalTick.mockRejectedValue(new Error("postgres://private:secret@database"));
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = await GET(request());
+
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain("secret");
+    expect(log).toHaveBeenCalledWith("trip availability failed", { code: "UNKNOWN" });
   });
 
   it("rejects a missing date before querying the database", async () => {

@@ -18,11 +18,11 @@ export function calculateSettlement(total:number,surcharge:number,platformFee:nu
     throw new DriverError(409,"INVALID_LEDGER","Settlement requires finance review.");
   const gross=total;
   // The charter's platform share is calculated on the entire charter fare,
-  // including the flat fee already embedded in it. Record that fee separately
-  // and deduct it from commission so the passenger is never charged twice.
+  // including one fee line embedded in it. Record the fee separately and
+  // deduct it from commission so the passenger is never charged twice.
   const platformShare=isCharter ? calculateCharterPlatformShare(total-surcharge,rateBps) : platformFee;
   if(isCharter && platformShare<platformFee)
-    throw new DriverError(409,"INVALID_LEDGER","Charter fare is too low to include the flat booking fee within the platform share.");
+    throw new DriverError(409,"INVALID_LEDGER","Charter fare is too low to include Mireli's fee within the platform share.");
   const commission=isCharter ? Math.max(0,platformShare-platformFee) : 0;
   return {gross,surcharge,platformFee,commission,net:gross-platformFee-commission};
 }

@@ -91,25 +91,49 @@ export async function POST(req: NextRequest, { params }: Params) {
     // row so simultaneous taps cannot each initiate a separate charge.
     const attempt = await db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT "id" FROM "Booking" WHERE "id" = ${booking.id} FOR UPDATE`;
+      const liveBooking = await tx.booking.findUnique({
+        where: { id: booking.id },
+        select: {
+          status: true,
+          cashDue: true,
+          trip: {
+            select: {
+              driverId: true,
+              status: true,
+              departureAt: true,
+              driver: { select: { status: true } },
+            },
+          },
+        },
+      });
+      if (!liveBooking || !isBookingReadyForPayment(liveBooking)) return { blocked: true as const };
+
       const live = await tx.mpesaTransaction.findFirst({
         where: { bookingId: booking.id, status: { in: ["pending", "stk_push_sent", "ambiguous"] } },
         orderBy: { createdAt: "desc" },
       });
-      if (live) return { transaction: live, created: false };
+      if (live) return { blocked: false as const, transaction: live, created: false as const };
 
       const intentReference = `${daraja.PAYMENT_INTENT_PREFIX}${randomUUID()}`;
       const transaction = await tx.mpesaTransaction.create({
         data: {
           bookingId: booking.id,
           phone,
-          amount: booking.cashDue,
+          amount: liveBooking.cashDue,
           checkoutRequestId: intentReference,
           merchantRequestId: `intent-${randomUUID()}`,
           status: "pending",
         },
       });
-      return { transaction, created: true };
+      return { blocked: false as const, transaction, created: true as const };
     });
+
+    if (attempt.blocked) {
+      return NextResponse.json(
+        { error: "This unpaid booking has expired or no longer has an active driver and future departure. Please book an available cab again." },
+        { status: 409 },
+      );
+    }
 
     if (!attempt.created) {
       const existing = attempt.transaction;
@@ -127,7 +151,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
 
     const tx = attempt.transaction;
-    const push = await daraja.stkPush(phone, booking.cashDue, booking.code, tx.id);
+    const push = await daraja.stkPush(phone, tx.amount, booking.code, tx.id);
     if (!push.ok || !push.checkoutRequestId) {
       const uncertain = push.responseCode === daraja.RESULT_CODES.TIMEOUT || push.ok;
       await db.mpesaTransaction.updateMany({
@@ -142,7 +166,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         return NextResponse.json({
           ok: true,
           paymentPending: true,
-          amount: booking.cashDue,
+          amount: tx.amount,
           phone,
           message: "The M-Pesa request may still be processing. Do not pay again; check your phone and use Verify shortly.",
         });
@@ -154,7 +178,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         action: "payment.push_rejected",
         entity: "booking",
         entityId: booking.id,
-        metadata: { code: booking.code, amount: booking.cashDue, phone, responseCode: push.responseCode, desc: push.responseDescription },
+        metadata: { code: booking.code, amount: tx.amount, phone, responseCode: push.responseCode, desc: push.responseDescription },
       });
       return NextResponse.json({ error: push.responseDescription || "M-Pesa rejected the payment request" }, { status: 400 });
     }
@@ -173,9 +197,9 @@ export async function POST(req: NextRequest, { params }: Params) {
       action: "payment.initiate",
       entity: "booking",
       entityId: booking.id,
-      metadata: { code: booking.code, amount: booking.cashDue, phone },
+      metadata: { code: booking.code, amount: tx.amount, phone },
     });
-    return NextResponse.json({ ok: true, amount: booking.cashDue, phone });
+    return NextResponse.json({ ok: true, amount: tx.amount, phone });
   }
 
   // ── Verify: the customer acted on the prompt → poll the result ────────────

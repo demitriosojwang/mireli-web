@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getBookingCatalogueView, hasPublishedCustomerPoints, shouldLoadTrainTimetable } from "@/lib/booking-catalogue";
+import { getBookingCatalogueView, getCabAvailabilityCountLabel, hasPublishedCustomerPoints, shouldLoadTrainTimetable } from "@/lib/booking-catalogue";
 
 describe("customer booking catalogue state", () => {
   it("shows a compact checking state while approved stops load", () => {
@@ -29,5 +29,20 @@ describe("customer booking catalogue state", () => {
   it("keeps search and train recovery available after a catalogue error", () => {
     expect(getBookingCatalogueView("error", 0)).toBe("booking");
     expect(shouldLoadTrainTimetable("error", 0)).toBe(true);
+  });
+
+  it("distinguishes confirmed zero cabs from unavailable availability", () => {
+    expect(getCabAvailabilityCountLabel({
+      loading: false, status: "error", hasEligibleDrivers: false, cabCount: 0, hasSelectedPoint: true,
+    })).toBe("Unavailable");
+    expect(getCabAvailabilityCountLabel({
+      loading: false, status: "empty", hasEligibleDrivers: false, cabCount: 0, hasSelectedPoint: true,
+    })).toBe("0 cabs");
+  });
+
+  it("does not carry a previous cab count after the passenger clears the stop", () => {
+    expect(getCabAvailabilityCountLabel({
+      loading: false, status: "loading", hasEligibleDrivers: null, cabCount: 0, hasSelectedPoint: false,
+    })).toBe("Choose a stop");
   });
 });

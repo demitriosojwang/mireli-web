@@ -106,8 +106,8 @@ function LedgerTab() {
       </div>
       <p className="text-xs text-muted-foreground">
         Read-only by design: the admin inspects the ledger; the engine moves it. Home surcharge is
-        passed to the driver in full. The flat booking fee is retained by Mi-Reli and is excluded
-        from driver payout and charter commission.
+        passed to the driver in full. Mireli retains the configured fee for each shared passenger
+        seat; private charters include one fee line inside the agreed 10% charter share.
       </p>
     </div>
   );

@@ -14,9 +14,12 @@ const mocks = vi.hoisted(() => ({
   bookingDelete: vi.fn(),
   tripFindUnique: vi.fn(),
   getConfig: vi.fn(),
+  applyCredits: vi.fn(),
+  releaseUnpaidBookingReservation: vi.fn(),
   getPublicPayOptions: vi.fn(),
   allocateBooking: vi.fn(),
   audit: vi.fn(),
+  expireUnpaidBookingReservations: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -39,12 +42,18 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/session", () => ({ getPassengerSession: mocks.getPassengerSession }));
 vi.mock("@/lib/audit", () => ({ audit: mocks.audit }));
-vi.mock("@/lib/money", () => ({ getConfig: mocks.getConfig }));
-vi.mock("@/lib/engine", () => ({ allocateBooking: mocks.allocateBooking }));
+vi.mock("@/lib/money", () => ({ getConfig: mocks.getConfig, applyCredits: mocks.applyCredits }));
+vi.mock("@/lib/engine", () => ({
+  allocateBooking: mocks.allocateBooking,
+  releaseUnpaidBookingReservation: mocks.releaseUnpaidBookingReservation,
+}));
 vi.mock("@/lib/daraja", () => ({
   generateBookingCode: () => "MR-ABC123",
   getPublicPayOptions: mocks.getPublicPayOptions,
   toMpesaMsISDN: () => "+254712345678",
+}));
+vi.mock("@/lib/unpaid-booking-expiry", () => ({
+  expireUnpaidBookingReservations: mocks.expireUnpaidBookingReservations,
 }));
 vi.mock("@/lib/nairobi-time", () => ({
   nairobiDate: (date: Date) => date,
@@ -83,6 +92,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.getPassengerSession.mockResolvedValue({ id: "guest-1", name: "Amina Wanjiru" });
   mocks.getConfig.mockResolvedValue({ bookingFeeAmount: 50, commissionRate: 0.1 });
+  mocks.expireUnpaidBookingReservations.mockResolvedValue({ expired: 0, restoredCredit: 0 });
+  mocks.applyCredits.mockResolvedValue(0);
+  mocks.releaseUnpaidBookingReservation.mockResolvedValue(true);
   mocks.routeFindUnique.mockResolvedValue({
     id: "route-1",
     active: true,
@@ -97,7 +109,7 @@ beforeEach(() => {
   mocks.bookingFindUnique.mockResolvedValue(null);
   mocks.bookingUpdate.mockResolvedValue({ id: "booking-1" });
   mocks.bookingDelete.mockResolvedValue({ id: "booking-1" });
-  mocks.tripFindUnique.mockResolvedValue({ capacity: 4 });
+  mocks.tripFindUnique.mockResolvedValue({ capacity: 4, routeId: "route-1", direction: "FROM_TERMINUS" });
   mocks.allocateBooking.mockResolvedValue({ tripId: null, note: "No eligible drivers." });
 });
 
@@ -157,6 +169,21 @@ describe("booking creation with no driver supply", () => {
     expect(mocks.bookingCreate).toHaveBeenCalledOnce();
     expect(mocks.allocateBooking).toHaveBeenCalledOnce();
     expect(mocks.getPublicPayOptions).not.toHaveBeenCalled();
+  });
+
+  it("releases the cab when a concurrent checkout spent credit and M-Pesa is unavailable", async () => {
+    mocks.creditFindMany.mockResolvedValue([{ amount: 550 }]);
+    mocks.allocateBooking.mockResolvedValue({ tripId: "trip-1", note: "Allocated" });
+    mocks.applyCredits.mockResolvedValue(0); // strict redemption sees the smaller, locked balance
+    mocks.getPublicPayOptions.mockRejectedValue(new Error("M-Pesa unavailable"));
+
+    const response = await POST(request(validBookingBody({ applyCredit: true })));
+
+    expect(response.status).toBe(503);
+    expect((await response.json()).code).toBe("PAYMENT_OPTIONS_UNAVAILABLE");
+    expect(mocks.applyCredits).toHaveBeenCalledWith("guest-1", "booking-1", 550, { requireFull: true });
+    expect(mocks.releaseUnpaidBookingReservation).toHaveBeenCalledWith("booking-1", "trip-1");
+    expect(mocks.audit).not.toHaveBeenCalled();
   });
 
   it("rejects an inactive route before creating a booking", async () => {
@@ -305,28 +332,52 @@ describe("booking creation with no driver supply", () => {
     expect(payload.booking.fareAmount).toBe(2000);
     expect(payload.booking.platformFeeAmount).toBe(50);
     expect(payload.booking.cashDue).toBe(2000);
-    expect(mocks.bookingUpdate).toHaveBeenCalledWith({
-      where: { id: "booking-1" },
-      data: { fareAmount: 2000, cashDue: 2000, homeSurcharge: 0, platformFeeAmount: 50 },
-    });
+    expect(mocks.bookingCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ fareAmount: 2000, cashDue: 2000 }),
+    }));
     expect(mocks.tripFindUnique).toHaveBeenCalledWith({
       where: { id: "trip-1" },
-      select: { capacity: true },
+      select: { capacity: true, routeId: true, direction: true },
     });
+    expect(mocks.tripFindUnique.mock.invocationCallOrder[0]).toBeLessThan(mocks.bookingCreate.mock.invocationCallOrder[0]);
+    expect(mocks.bookingCreate.mock.invocationCallOrder[0]).toBeLessThan(mocks.allocateBooking.mock.invocationCallOrder[0]);
   });
 
-  it("removes an allocated charter draft when M-Pesa is unavailable for its capacity-priced fare", async () => {
+  it("applies the approved stage fare, large-cab discount, and KSh 50 fee per shared seat", async () => {
     mocks.passengerFindUnique.mockResolvedValue({ id: "passenger-1", phone: "+254712345678" });
-    mocks.allocateBooking.mockResolvedValue({ tripId: "trip-1", note: "Charter allocated" });
+    mocks.tripFindUnique.mockResolvedValue({ capacity: 10, routeId: "route-1", direction: "FROM_TERMINUS" });
+    mocks.routeFindUnique.mockResolvedValue({
+      id: "route-1",
+      active: true,
+      charterPrice: 4200,
+      stages: [{ id: "stage-1", name: "Mtwapa", order: 1, fare: 900, homeSurcharge: 150 }],
+    });
+
+    const response = await POST(request(validBookingBody({ seats: 2 })));
+
+    expect(response.status).toBe(409); // The fixture has no assignable driver.
+    expect(mocks.bookingCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        fareAmount: 800, // (approved KSh 400 - KSh 50) × 2 + KSh 50 × 2
+        platformFeeAmount: 100,
+        homeSurcharge: 0,
+        seats: 2,
+      }),
+    }));
+  });
+
+  it("refuses a charter before creating or allocating it when M-Pesa is unavailable", async () => {
+    mocks.passengerFindUnique.mockResolvedValue({ id: "passenger-1", phone: "+254712345678" });
     mocks.getPublicPayOptions.mockRejectedValue(new Error("private payment configuration"));
 
     const response = await POST(request(validBookingBody({ isCharter: true })));
 
     expect(response.status).toBe(503);
     expect((await response.json()).code).toBe("PAYMENT_OPTIONS_UNAVAILABLE");
-    expect(mocks.bookingCreate).toHaveBeenCalledOnce();
-    expect(mocks.allocateBooking).toHaveBeenCalledOnce();
-    expect(mocks.bookingDelete).toHaveBeenCalledWith({ where: { id: "booking-1" } });
+    expect(mocks.tripFindUnique).toHaveBeenCalledOnce();
+    expect(mocks.bookingCreate).not.toHaveBeenCalled();
+    expect(mocks.allocateBooking).not.toHaveBeenCalled();
+    expect(mocks.bookingDelete).not.toHaveBeenCalled();
     expect(mocks.audit).not.toHaveBeenCalled();
   });
 
@@ -341,6 +392,7 @@ describe("booking creation with no driver supply", () => {
     }));
 
     mocks.bookingCreate.mockClear();
+    mocks.tripFindUnique.mockResolvedValue({ capacity: 4, routeId: "route-1", direction: "TO_TERMINUS" });
     await POST(request(validBookingBody({
       direction: "TO_TERMINUS",
       homePickup: true,

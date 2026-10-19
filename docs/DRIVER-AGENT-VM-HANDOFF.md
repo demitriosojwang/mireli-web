@@ -1,7 +1,32 @@
 # Mireli Driver agent: shared VM handoff
 
-Updated 18 October 2026, 15:45 EAT. Use this when connecting the Mireli Driver Android
+Updated 19 October 2026, 21:18 EAT. Use this when connecting the Mireli Driver Android
 project to the same backend used by Mireli Web.
+
+## Current local preview check (19 October 2026, 21:18 EAT)
+
+The local one-container image was rebuilt from the current working tree after
+the previous image was found stale (created 18 October). Its production build
+passed compilation and TypeScript checks and generated 55 static pages. The
+`mireli-app-1` container is healthy on `mireli-web:latest`, bound to
+`127.0.0.1:3000`; both named data volumes remain attached. Startup logs confirm
+versioned migrations and operations-settings bootstrap completed.
+
+The local preview returns `/api/health` 200, but `/api/routes` has zero points,
+`/api/trains` is empty, `/api/stages?q=mtwapa` is empty, and
+`/api/driver-supply` reports no eligible drivers. The browser explicitly says
+bookings are not open and shows zero pooled cabs. The stop picker therefore
+cannot be tested against real published catalogue data yet. The local preview
+is marked as simulation; its `/api/pay/options` response must not be treated as
+live M-Pesa readiness. The demo sitemap is empty and robots disallows indexing.
+
+No SSM check was possible at this timestamp because the local `mireli` AWS CLI
+session had expired. A fresh workstation probe at 21:37 EAT resolves the public
+hostname to `105.161.112.67`, not the VM's `13.53.183.149`; TCP 443 is
+unreachable and the HTTPS health request timed out. No VM, AWS, or DNS
+configuration was changed. The production VM details and previous verified
+observations below remain historical until a new read-only SSM check is
+completed.
 
 ## What is running
 
@@ -21,12 +46,85 @@ and inbound SSH is intentionally closed. Use the individually authorized AWS
 Systems Manager (SSM) path below. Do not share a teammate's AWS profile, open
 port 22, or copy a private key to the VM.
 
-## Latest SSM connection and VM check (18 October 2026, 15:43 EAT)
+## Latest live VM check (18 October 2026, 18:18 EAT)
 
-AWS authentication was verified with the `mireli` profile in account
-`036834403673`. SSM reported the VM Online (Amazon Linux 2023, agent
-`3.3.5390.0`, last ping 15:43 EAT). The read-only SSM Run Command at 15:43 EAT
-(command ID `04972fa3-995a-423a-968a-e7d4e13ca038`) completed successfully.
+The `mireli` AWS profile authenticated successfully to project `036834403673`.
+EC2 reports this instance running at `13.53.183.149`; SSM reports Online on
+Amazon Linux 2023 with agent `3.3.5390.0` (last ping 18:13 EAT). Read-only SSM
+Run Command `6384846d-b013-404e-a315-3b1bddfafda0` completed at 18:18 EAT.
+Docker, Caddy, and `mireli-app` are active. One healthy `mireli` container runs
+image `794fb87`, bound to `127.0.0.1:3000`, and has been up two days.
+
+HTTP status checks from the VM:
+
+- `/api/health`, `/api/routes`, `/api/trains`, and `/api/stages?q=Mtwapa`:
+  HTTP 200. The previous detailed catalogue response still reports zero
+  published points and no trains.
+- `/api/driver-supply`: HTTP 404. Driver supply remains unverified on this
+  deployed image.
+- `/api/pay/options`: HTTP 500. Checkout remains unavailable.
+- `/api/v1/driver/status`: HTTP 200. This probe checked status only; the
+  17:55 response body reported strict mode (`simulation: false`) and sign-in,
+  registration, and navigation closed.
+- `/sitemap.xml`: HTTP 404 on the deployed image, although the current local
+  source generates the route.
+
+SSH was checked again without changing access controls. EC2 has `KeyName: null`;
+the security group has no inbound TCP 22 rule, and a workstation connection to
+`13.53.183.149:22` failed. Use individually authorized SSM. No app, VM, DNS,
+security-group, or other AWS resource was changed.
+
+## Public reachability check (18 October 2026, 19:30 EAT)
+
+The VM's Elastic IP is confirmed as `13.53.183.149`, associated with
+`i-097df027e02b0708f`. The DuckDNS A record for `mirelisgr.duckdns.org` still
+resolves to `105.161.112.67` through the workstation resolver, Cloudflare
+`1.1.1.1`, and Google `8.8.8.8`; public resolver TTLs were 16–17 seconds.
+Requests to `https://mirelisgr.duckdns.org/api/health` and
+`/sitemap.xml` timed out without an HTTP response. The hostname is not serving
+this VM. No DNS or VM settings were changed. Rotate the previously exposed
+DuckDNS token before updating the A record; never place it in source or chat.
+
+## Previous live VM check (18 October 2026, 17:55 EAT)
+
+The operator's `mireli` profile authenticated successfully to project
+`036834403673`. EC2 reports this instance running at `13.53.183.149`, with no
+key pair attached. SSM reports Online on Amazon Linux with agent `3.3.5390.0`;
+the latest SSM ping was 17:53 EAT. Read-only SSM Run Command
+`583f36f1-a582-47e3-bd0d-32026ccd1d75` completed successfully at 17:55 EAT.
+Docker, Caddy, and `mireli-app` are active. The single healthy `mireli`
+container still runs image `794fb87`.
+
+Current VM endpoint results:
+
+- `/api/health`: HTTP 200.
+- `/api/routes`: HTTP 200, `pointCount: 0`.
+- `/api/trains`: HTTP 200, no trains published.
+- `/api/stages?q=Mtwapa`: HTTP 200 with JSON content type; `/api/routes` reports
+  zero published points, so there are no bookable stops to offer.
+- `/api/driver-supply`: HTTP 404 (Next.js not-found page); deploys must include
+  this endpoint before availability can be trusted. The eligible-driver count
+  is therefore unverified on this image; do not infer a count from the 404.
+- `/api/pay/options`: HTTP 500; checkout is not ready.
+- `/api/v1/driver/status`: HTTP 200 with `simulation: false` (strict mode);
+  phone sign-in, email sign-in, registration, and navigation are all closed.
+  The response says driver email sign-in is not configured.
+- `/sitemap.xml`: HTTP 404 on the deployed image; the current local source has
+  this route, but the VM must receive a reviewed newer image before it is live.
+
+The EC2 instance has no key pair, and a workstation TCP check to
+`13.53.183.149:22` failed. Direct SSH is unavailable; use SSM rather than
+changing the security group or distributing private keys. No app configuration,
+container, DNS, or AWS resource was changed. The SSM command is recorded in
+CloudTrail.
+
+## Earlier SSM connection and VM check (18 October 2026, 15:48 EAT)
+
+AWS authentication was verified with the `mireli` profile in project account
+`036834403673`. EC2 reports the VM running at `13.53.183.149` with no key pair
+attached. SSM reported the VM Online (Amazon Linux, agent `3.3.5390.0`; its
+latest reported ping was 15:43 EAT). The read-only SSM Run Command at 15:48 EAT
+(command ID `f3145d6e-c336-4b52-8338-89f5628a8420`) completed successfully.
 One healthy container named `mireli` runs image tag `794fb87` (up 2 days).
 Fresh HTTP checks returned:
 
@@ -54,10 +152,8 @@ Fresh HTTP checks returned:
   approved drivers or published stops/trains, so Android sign-in and matching
   must remain closed.
 
-EC2 reports the instance `running`, public IP `13.53.183.149`, type `t4g.small`,
-and no key pair. No application, VM configuration, DNS, or other AWS resources
-were changed by these checks. The SSM Run Command itself is recorded in AWS as
-an audit event.
+No application, VM configuration, DNS, or other AWS resources were changed by
+these checks. The SSM Run Command itself is recorded in AWS as an audit event.
 
 - AWS CLI v2 is installed on the operator workstation at
   `C:\Users\favou\AppData\Local\Programs\Amazon\AWSCLIV2\aws.exe`; it may
@@ -108,6 +204,15 @@ an audit event.
   points, and the 18 October trip-availability query returns
   `hasEligibleDrivers: false` and no trips. No approved driver inventory is
   available; do not display invented vehicles or schedules.
+- Local source branch pricing update (not yet deployed): the owner-approved
+  fare sheet is transcribed in `src/lib/fare-catalogue.ts`; shared 10/11-seat
+  fares are KSh 50 lower per passenger seat, and Mireli retains KSh 50 per
+  booked shared seat. Charters retain the agreed 10% split, including one
+  KSh 50 fee line; the driver receives the remaining charter amount and the
+  full door surcharge. Android must consume server-calculated amounts from
+  `/api/v1/driver/earnings` and must not recalculate fares or payouts. The VM's
+  active stage table remains empty, and verified coordinates and surcharge
+  amounts are still needed before the listed stages can be published.
 - `/api/v1/driver/status` reports strict mode (`simulation: false`), but phone
   and email sign-in, registration, and navigation are closed. The response says
   driver email sign-in is not configured. Keep driver sign-in closed until real
@@ -182,7 +287,7 @@ role and must never be copied into Android.
 
 ## Verified VM state
 
-The read-only state above is current as of 18 October 2026, 15:43 EAT. The VM is
+The read-only state above is current as of 18 October 2026, 18:18 EAT. The VM is
 healthy internally, but it cannot support a customer or driver pilot until its
 route and train catalogue, approved drivers, driver authentication, public
 DNS/TLS, payment callbacks, and passenger/driver email delivery are configured
@@ -202,8 +307,10 @@ owner verifies DNS, HTTPS, and strict-mode status from outside AWS.
    isolated demo backend uses `true`; pilot/production against strict mode uses
    `false`. A mode mismatch must fail closed.
 4. The app may display only trips returned for the authenticated driver. Do not
-   synthesize vehicles or assignments: no production driver is approved yet,
-   and the API currently returns no available inventory.
+   synthesize vehicles or assignments. The current VM image returns 404 for
+   `/api/driver-supply`, so driver supply is unverified until a reviewed image
+   with the endpoint is deployed. The route and train catalogues are also empty,
+   so no customer trip can currently be matched.
 5. Coordinate additive API/schema changes with Mireli Web. Do not add a second
    driver or payment database. Keep boarding credentials and passenger identity
    data out of manifests and logs.

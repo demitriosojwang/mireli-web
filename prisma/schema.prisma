@@ -138,7 +138,7 @@ model Booking {
   seats         Int       @default(1)
   isCharter     Boolean   @default(false)
   fareAmount    Int // total charged: shared fare + surcharge + fee; charter fare + surcharge with fee embedded in platform share
-  platformFeeAmount Int @default(0) // pooled: added fee; charter: included within the platform's 10% share
+  platformFeeAmount Int @default(0) // shared: KSh fee per booked passenger seat; charter: one fee recorded within Mireli's 10% share
   homeSurcharge Int // total home surcharge for this booking
   creditApplied Int // portion covered by travel credit (never cash)
   cashDue       Int // portion to collect via M-Pesa STK
@@ -166,6 +166,7 @@ model Booking {
   refunds       RefundRecord[]
   mpesaTransactions MpesaTransaction[]
   createdAt     DateTime  @default(now())
+  @@index([status, createdAt])
 }
 
 // Durable delivery state for the customer ticket. A unique row per booking
@@ -197,7 +198,7 @@ model LedgerEntry {
   cashAmount          Int // actually collected via STK push
   creditApplied       Int // portion paid with travel credit
   homeSurchargeAmount Int // tracked separately — passes to driver in full
-  platformFeeAmount   Int      @default(0) // pooled: added fee; charter: included within the platform's 10% share
+  platformFeeAmount   Int      @default(0) // shared: per-seat Mireli fee total; charter: one fee included within the 10% share
   mpesaReceipt        String?
   collectedAt         DateTime?
   status              String   @default("held") // held | driver_payable | commission_taken | refunded | partially_refunded | converted_to_credit | forfeited
@@ -454,7 +455,7 @@ model MpesaTransaction {
 model PlatformConfig {
   id                         String    @id @default("main")
   commissionRate             Float     @default(0.10) // charter commission; must stay under NTSA 18% cap
-  bookingFeeAmount           Int       @default(50) // flat KSh fee per booking, retained by Mi-Reli
+  bookingFeeAmount           Int       @default(50) // KSh Mireli fee per shared passenger seat; one fee is included in a charter's 10% share
   fullRefundCutoffMinutes    Int       @default(60) // lock cutoff before departure
   seatFillThresholdPercent   Int       @default(70) // trip locks early when this full
   creditValidityDays         Int       @default(30) // late-cancellation credit validity
@@ -463,6 +464,7 @@ model PlatformConfig {
   stuckRefundHours           Int       @default(4) // pending refund alert threshold
   stuckPayoutHours           Int       @default(24) // queued payout alert threshold
   sweepPendingMinutes        Int       @default(5) // STK ambiguity → Transaction Status sweep
+  unpaidBookingHoldMinutes   Int       @default(15) // unpaid reservation expiry after checkout is abandoned
   tripHorizonDays            Int       @default(2)
   bookingWindowMinutes       Int       @default(15) // min minutes before departure to book
   terminusArrivalBufferMinutes Int     @default(60) // TO_TERMINUS cabs reach MTM this early before train departure

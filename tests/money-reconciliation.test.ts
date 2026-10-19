@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   creditUpdateMany: vi.fn(),
   audit: vi.fn(),
   attemptTicketEmail: vi.fn(),
+  dbTransaction: vi.fn(),
+  transactionQuery: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -34,6 +36,7 @@ vi.mock("@/lib/db", () => ({
       update: mocks.ledgerEntryUpdate,
     },
     credit: { updateMany: mocks.creditUpdateMany },
+    $transaction: mocks.dbTransaction,
   },
 }));
 vi.mock("@/lib/audit", () => ({ audit: mocks.audit }));
@@ -60,6 +63,12 @@ beforeEach(() => {
     stuckRefundHours: 4,
     creditValidityDays: 30,
   });
+  mocks.transactionQuery.mockResolvedValue([]);
+  mocks.dbTransaction.mockImplementation((callback: (tx: unknown) => unknown) => callback({
+    $queryRaw: mocks.transactionQuery,
+    booking: { findUnique: mocks.bookingFindUnique, update: mocks.bookingUpdate },
+    ledgerEntry: { create: mocks.ledgerEntryCreate },
+  }));
   mocks.mpesaTransactionFindMany.mockResolvedValue([]);
   mocks.bookingFindUnique.mockResolvedValue({
     id: "booking-1",

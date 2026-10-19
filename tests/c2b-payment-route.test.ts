@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
   bookingFindUnique: vi.fn(),
   mpesaTransactionFindUnique: vi.fn(),
   mpesaTransactionCreate: vi.fn(),
+  dbTransaction: vi.fn(),
+  transactionQuery: vi.fn(),
   confirmBookingPayment: vi.fn(),
   audit: vi.fn(),
   resolveDaraja: vi.fn(),
@@ -16,8 +18,8 @@ vi.mock("@/lib/db", () => ({
     booking: { findUnique: mocks.bookingFindUnique },
     mpesaTransaction: {
       findUnique: mocks.mpesaTransactionFindUnique,
-      create: mocks.mpesaTransactionCreate,
     },
+    $transaction: mocks.dbTransaction,
   },
 }));
 vi.mock("@/lib/money", () => ({ confirmBookingPayment: mocks.confirmBookingPayment }));
@@ -59,6 +61,15 @@ beforeEach(() => {
   mocks.bookingFindUnique.mockResolvedValue(booking);
   mocks.mpesaTransactionFindUnique.mockResolvedValue(null);
   mocks.mpesaTransactionCreate.mockResolvedValue({});
+  mocks.transactionQuery.mockResolvedValue([]);
+  mocks.dbTransaction.mockImplementation((callback: (tx: unknown) => unknown) => callback({
+    $queryRaw: mocks.transactionQuery,
+    booking: { findUnique: mocks.bookingFindUnique },
+    mpesaTransaction: {
+      findUnique: mocks.mpesaTransactionFindUnique,
+      create: mocks.mpesaTransactionCreate,
+    },
+  }));
   mocks.confirmBookingPayment.mockResolvedValue(true);
   mocks.audit.mockResolvedValue(undefined);
   mocks.resolveDaraja.mockResolvedValue({ shortcode: "123456" });
@@ -92,6 +103,22 @@ describe("C2B Paybill amount matching", () => {
 
     expect(mocks.mpesaTransactionCreate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ amount: 400, status: "failed" }),
+    }));
+    expect(mocks.confirmBookingPayment).not.toHaveBeenCalled();
+  });
+
+  it("keeps a successful receipt as a review exception if checkout expired before callback", async () => {
+    mocks.bookingFindUnique
+      .mockResolvedValueOnce({ id: booking.id })
+      .mockResolvedValueOnce({ ...booking, status: "cancelled" });
+
+    await POST(request("500"));
+
+    expect(mocks.mpesaTransactionCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: "failed",
+        resultDesc: "C2B payment received but booking is cancelled",
+      }),
     }));
     expect(mocks.confirmBookingPayment).not.toHaveBeenCalled();
   });

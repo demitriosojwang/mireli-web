@@ -47,8 +47,8 @@ export async function POST(req: NextRequest) {
       return accepted;
     }
 
-    const booking = await db.booking.findUnique({ where: { code: billRef }, include: { ledgerEntry: true } });
-    if (!booking) {
+    const bookingRef = await db.booking.findUnique({ where: { code: billRef }, select: { id: true } });
+    if (!bookingRef) {
       // Unknown account — accept so Daraja stops retrying; flagged for recon.
       await audit({
         actorId: "system",
@@ -62,36 +62,48 @@ export async function POST(req: NextRequest) {
       return accepted;
     }
 
-    // Idempotent per M-Pesa receipt
-    const existing = await db.mpesaTransaction.findUnique({ where: { checkoutRequestId: transId } }).catch(() => null);
-    if (existing) return accepted;
-
     const receivedAmount = Number(body.TransAmount);
     const validAmount = Number.isSafeInteger(receivedAmount) && receivedAmount > 0;
     const amount = validAmount ? receivedAmount : 0;
-    const enough = validAmount && amount === booking.cashDue && booking.status === "awaiting_payment" && !booking.ledgerEntry;
     const receipt = transId; // C2B confirmations carry the real M-Pesa receipt
+    const payment = await db.$transaction(async (tx) => {
+      // Serialize Paybill receipts against automatic checkout expiry. A
+      // callback arriving after cancellation is retained as a finance exception.
+      await tx.$queryRaw`SELECT "id" FROM "Booking" WHERE "id" = ${bookingRef.id} FOR UPDATE`;
+      const booking = await tx.booking.findUnique({
+        where: { id: bookingRef.id },
+        include: { ledgerEntry: true },
+      });
+      if (!booking) return null;
 
-    await db.mpesaTransaction.create({
-      data: {
-        bookingId: booking.id,
-        phone: body.MSISDN || "paybill",
-        amount: amount || booking.cashDue,
-        checkoutRequestId: transId,
-        merchantRequestId: `c2b-${body.TransTime || Date.now()}`,
-        status: enough ? "confirmed" : "failed",
-        resultCode: enough ? RESULT_CODES.SUCCESS : "4001",
-        resultDesc: enough
-          ? "C2B confirmation — paybill payment matched to booking"
-          : !validAmount
-            ? "C2B payment has an invalid amount and needs finance review"
-            : amount !== booking.cashDue
-              ? `C2B amount mismatch: received KSh ${amount}; booking requires exactly KSh ${booking.cashDue}`
-              : `C2B payment received but booking is ${booking.status}`,
-        mpesaReceipt: receipt,
-        confirmedAt: enough ? new Date() : null,
-      },
+      const existing = await tx.mpesaTransaction.findUnique({ where: { checkoutRequestId: transId } });
+      if (existing) return { duplicate: true as const };
+
+      const enough = validAmount && amount === booking.cashDue && booking.status === "awaiting_payment" && !booking.ledgerEntry;
+      await tx.mpesaTransaction.create({
+        data: {
+          bookingId: booking.id,
+          phone: body.MSISDN || "paybill",
+          amount,
+          checkoutRequestId: transId,
+          merchantRequestId: `c2b-${body.TransTime || Date.now()}`,
+          status: enough ? "confirmed" : "failed",
+          resultCode: enough ? RESULT_CODES.SUCCESS : "4001",
+          resultDesc: enough
+            ? "C2B confirmation — paybill payment matched to booking"
+            : !validAmount
+              ? "C2B payment has an invalid amount and needs finance review"
+              : amount !== booking.cashDue
+                ? `C2B amount mismatch: received KSh ${amount}; booking requires exactly KSh ${booking.cashDue}`
+                : `C2B payment received but booking is ${booking.status}`,
+          mpesaReceipt: receipt,
+          confirmedAt: enough ? new Date() : null,
+        },
+      });
+      return { duplicate: false as const, booking, enough };
     });
+    if (!payment || payment.duplicate) return accepted;
+    const { booking, enough } = payment;
 
     if (enough) {
       await confirmBookingPayment(booking.id, {

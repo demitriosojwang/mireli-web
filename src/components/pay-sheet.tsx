@@ -344,8 +344,8 @@ function PaySheetContent({ open, onClose, booking, onPaid }: PaySheetProps) {
                 <ShieldCheck className="h-5 w-5" /> Payment received
               </SheetTitle>
               <SheetDescription id="pay-desc">
-                Your seat is confirmed. The money sits in the Mi-Reli ledger until your ride is
-                delivered — never with the driver directly.
+                Your seat is confirmed. Mireli settles the driver after the trip; you do not pay
+                them directly.
               </SheetDescription>
             </SheetHeader>
             <div className="px-4 pb-6">

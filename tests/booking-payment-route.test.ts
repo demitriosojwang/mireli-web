@@ -75,7 +75,7 @@ beforeEach(() => {
   mocks.bookingFindUnique.mockResolvedValue(bookingWithAssignment);
   mocks.mpesaTransactionFindFirst.mockResolvedValue(null);
   mocks.mpesaTransactionFindUnique.mockResolvedValue(null);
-  mocks.mpesaTransactionCreate.mockResolvedValue({ id: "tx-1", checkoutRequestId: "mireli-intent:pending" });
+  mocks.mpesaTransactionCreate.mockResolvedValue({ id: "tx-1", checkoutRequestId: "mireli-intent:pending", amount: 500 });
   mocks.mpesaTransactionUpdateMany.mockResolvedValue({ count: 1 });
   mocks.transactionQuery.mockResolvedValue([]);
   mocks.dbTransaction.mockImplementation((callback: (tx: unknown) => unknown) => callback({
@@ -84,6 +84,7 @@ beforeEach(() => {
       findFirst: mocks.mpesaTransactionFindFirst,
       create: mocks.mpesaTransactionCreate,
     },
+    booking: { findUnique: mocks.bookingFindUnique },
   }));
   mocks.stkPush.mockResolvedValue({ ok: true, checkoutRequestId: "checkout-1", merchantRequestId: "merchant-1" });
   mocks.resolveDaraja.mockResolvedValue({ mode: "live" });
@@ -126,6 +127,18 @@ describe("booking payment route assignment guard", () => {
     expect(mocks.mpesaTransactionCreate.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.stkPush.mock.invocationCallOrder[0],
     );
+  });
+
+  it("rechecks booking status under the row lock before creating an STK intent", async () => {
+    mocks.bookingFindUnique
+      .mockResolvedValueOnce(bookingWithAssignment)
+      .mockResolvedValueOnce({ ...bookingWithAssignment, status: "cancelled" });
+
+    const response = await callPost({ action: "pay", phone: "0712345678" });
+
+    expect(response.status).toBe(409);
+    expect(mocks.mpesaTransactionCreate).not.toHaveBeenCalled();
+    expect(mocks.stkPush).not.toHaveBeenCalled();
   });
 
   it("persists a timed-out request as ambiguous and prevents a duplicate STK push", async () => {

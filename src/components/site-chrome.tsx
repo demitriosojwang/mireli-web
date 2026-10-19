@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { AlarmClock, Anchor, Info, MapPin, Train as TrainIcon, User, Wallet, X } from "lucide-react";
+import { Anchor, Info, User, Wallet, X } from "lucide-react";
 import { useMe } from "@/lib/client";
 import { cn } from "@/lib/utils";
 
@@ -100,7 +100,7 @@ export function SiteFooter() {
   return (
     <footer className="mt-auto border-t bg-background/95 backdrop-blur">
       <div className="mx-auto max-w-md px-4 py-2 text-center text-[10px] text-muted-foreground">
-        Mi-Reli · Mombasa Terminus · every shilling tracked in the platform ledger
+        Mi-Reli · Mombasa Terminus · availability is confirmed before checkout
         <div className="mt-1"><a href="mailto:mirelisgr001@gmail.com" className="underline underline-offset-2">mirelisgr001@gmail.com</a></div>
       </div>
     </footer>
@@ -114,84 +114,37 @@ function AboutSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: b
         <SheetHeader>
           <SheetTitle className="text-xl">Mi-Reli — about</SheetTitle>
           <SheetDescription>
-            Reliable shared-ride shuttles connecting Mombasa Terminus (MTM) with the North &amp;
-            South Coast — every cab timed to a Madaraka Express departure or arrival.
+            Plan a ground ride from Mombasa Terminus. Approved stops, published train times, and
+            current cab availability appear in the booking flow when service is open.
           </SheetDescription>
         </SheetHeader>
 
         <div className="space-y-4 px-4 pb-6 text-sm">
           <section className="space-y-1.5">
-            <h3 className="flex items-center gap-1.5 text-base font-semibold">
-              <TrainIcon className="h-4 w-4" /> Trains we meet
-            </h3>
-            <p className="text-muted-foreground">
-              <span className="font-medium text-foreground">Departures</span> (MTM → Nairobi): 08:00
-              Inter-County, 15:00 Express, 22:00 Night Train
-              <br />
-              <span className="font-medium text-foreground">Arrivals</span> (Nairobi → MTM): 04:00
-              (+1d Night Train), 14:00 Inter-County, 20:30 Express
-            </p>
-          </section>
-
-          <section className="space-y-1.5">
-            <h3 className="flex items-center gap-1.5 text-base font-semibold">
-              <AlarmClock className="h-4 w-4" /> Pickup rules
-            </h3>
+            <h3 className="text-base font-semibold">How booking works</h3>
             <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground">
-              <li>
-                Every cab leaves its stage exactly <span className="font-medium text-foreground">2 hours before the train departs</span>{" "}
-                (e.g. cabs for the 08:00 train pull out at 06:00) — be at your stage by then.
-              </li>
-              <li>
-                The driver waits at most <span className="font-medium text-foreground">15 minutes</span> past
-                departure if you haven&apos;t arrived and haven&apos;t notified them — after that the cab
-                leaves and the no-show policy applies.
-              </li>
+              <li>Choose a direction and date, then select an approved stop. Current train times and bookable cabs are shown for that route.</li>
+              <li>Select a shared ride or private cab, then review the full fare and pickup or drop-off option.</li>
+              <li>We show a cab only when an approved driver and bookable departure are available.</li>
             </ul>
           </section>
 
           <section className="space-y-1.5">
-            <h3 className="flex items-center gap-1.5 text-base font-semibold">
-              <MapPin className="h-4 w-4" /> Points &amp; fares
-            </h3>
+            <h3 className="text-base font-semibold">How fares and driver pay work</h3>
+            <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground">
+              <li>Shared rides include a KSh 50 Mireli fee for each booked seat; 10/11-seat shared cabs are KSh 50 cheaper per seat. Private charters use Mireli&apos;s 10% share.</li>
+              <li>Charter total is vehicle seat capacity × (the approved per-seat fare + KSh 100 per seat). The KSh 50 fee is included, not added again.</li>
+              <li>Mireli keeps 10% of the charter total; the remaining 90% goes to the driver. Door-to-door surcharge goes to the driver in full.</li>
+            </ul>
+          </section>
+
+          <section className="space-y-1.5">
+            <h3 className="text-base font-semibold">Payment and cancellations</h3>
             <p className="text-xs text-muted-foreground">
-              <span className="font-medium text-foreground">North Coast (KSh 400):</span> Kiembeni
-              Mwisho · Kiembeni Police · Ananda Marga · San Sera · Green Estate · Kona Kiembeni ·
-              Bamburi Mwisho · Naivas Bamburi · Total Bamburi · Fisheries · Mwembeni · JCC Junction ·
-              Nyali Center · VOK · Bombolulu · Lights · Mtwapa —{" "}
-              <span className="font-medium text-foreground">Malindi KSh 700</span>
-              <br />
-              <span className="font-medium text-foreground">South Coast:</span> Likoni Ferry
-              Container · Kona Mpya (Fayaz) · ShikaAdabu Checkpoint (KSh 400) —{" "}
-              <span className="font-medium text-foreground">Diani Naivas KSh 500</span>
+              The available payment method, total, and cancellation terms are shown before you confirm.
+              A booking is confirmed only after the payment provider confirms it. Never send payment
+              directly to a driver outside checkout.
             </p>
-          </section>
-
-          <section className="space-y-1.5">
-            <h3 className="text-base font-semibold">How fares work</h3>
-            <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground">
-              <li>
-                Per-seat fare by point — KSh 400 flat upcountry, Malindi 700, Diani Naivas 500.
-              </li>
-              <li>
-                Door-to-door pickup adds the point&apos;s surcharge, which passes to your driver in
-                full.
-              </li>
-              <li>Private charter: the whole cab to your group at a fixed route price.</li>
-              <li>
-                Cancel before lock for a full refund; cancel after lock and your fare becomes travel
-                credit, valid 30 days.
-              </li>
-            </ul>
-          </section>
-
-          <section className="space-y-1.5">
-            <h3 className="text-base font-semibold">Your money is safe</h3>
-            <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground">
-              <li>Fares are collected by Mi-Reli via M-Pesa — never paid to a driver directly.</li>
-              <li>Every shilling sits in the platform ledger until your ride is delivered.</li>
-              <li>Refunds go back to your M-Pesa; credits stay spendable on any future ride.</li>
-            </ul>
           </section>
 
           <Button className="w-full" onClick={() => onOpenChange(false)}>

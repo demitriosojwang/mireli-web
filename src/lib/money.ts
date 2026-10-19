@@ -57,35 +57,54 @@ export async function issueCredit(params: {
 export async function applyCredits(
   passengerId: string,
   bookingId: string,
-  needed: number
+  needed: number,
+  options: { requireFull?: boolean } = {},
 ): Promise<number> {
-  const credits = await db.credit.findMany({
-    where: {
-      passengerId,
-      status: "active",
-      amount: { gt: 0 },
-      expiresAt: { gt: new Date() },
-    },
-    orderBy: { expiresAt: "asc" }, // use soonest-expiring first
-  });
-  let applied = 0;
-  for (const c of credits) {
-    if (applied >= needed) break;
-    const take = Math.min(c.amount, needed - applied);
-    if (take <= 0) continue;
-    const remaining = c.amount - take;
-    await db.credit.update({
-      where: { id: c.id },
-      data: {
-        amount: remaining,
-        status: remaining <= 0 ? "redeemed" : "active",
-        redeemedAt: remaining <= 0 ? new Date() : null,
-        redeemedBookingId: bookingId,
+  return db.$transaction(async (tx) => {
+    // A balance read followed by independent updates can double-spend when a
+    // passenger checks out in two tabs. Lock every existing active credit for
+    // this passenger first; concurrent redemptions then re-read the balance
+    // only after the previous transaction commits.
+    await tx.$queryRaw`
+      SELECT "id" FROM "Credit"
+      WHERE "passengerId" = ${passengerId}
+        AND "status" = 'active'
+        AND "amount" > 0
+      ORDER BY "expiresAt" ASC, "id" ASC
+      FOR UPDATE
+    `;
+    const now = new Date();
+    const credits = await tx.credit.findMany({
+      where: {
+        passengerId,
+        status: "active",
+        amount: { gt: 0 },
+        expiresAt: { gt: now },
       },
+      orderBy: [{ expiresAt: "asc" }, { id: "asc" }], // FIFO, stable tie-break
     });
-    applied += take;
-  }
-  return applied;
+    const available = credits.reduce((sum, credit) => sum + credit.amount, 0);
+    if (options.requireFull && available < needed) return 0;
+
+    let applied = 0;
+    for (const credit of credits) {
+      if (applied >= needed) break;
+      const take = Math.min(credit.amount, needed - applied);
+      if (take <= 0) continue;
+      const remaining = credit.amount - take;
+      await tx.credit.update({
+        where: { id: credit.id },
+        data: {
+          amount: remaining,
+          status: remaining <= 0 ? "redeemed" : "active",
+          redeemedAt: remaining <= 0 ? now : null,
+          redeemedBookingId: bookingId,
+        },
+      });
+      applied += take;
+    }
+    return applied;
+  });
 }
 
 /** Restore a credit portion when a booking that used credit is cancelled
@@ -646,28 +665,43 @@ export async function confirmBookingPayment(
   bookingId: string,
   tx: { receipt: string; checkoutRequestId: string }
 ): Promise<boolean> {
-  const booking = await db.booking.findUnique({
-    where: { id: bookingId },
-    include: { ledgerEntry: true },
-  });
-  if (!booking) return false;
-  const wasAwaitingPayment = booking.status === "awaiting_payment";
-  if (wasAwaitingPayment) {
-    await db.booking.update({
+  const confirmed = await db.$transaction(async (dbTx) => {
+    // Serialize payment confirmation against unpaid-reservation expiry and
+    // concurrent callbacks. A late capture on a cancelled booking is recorded
+    // in the ledger but never reopens that booking.
+    await dbTx.$queryRaw`SELECT "id" FROM "Booking" WHERE "id" = ${bookingId} FOR UPDATE`;
+    const booking = await dbTx.booking.findUnique({
       where: { id: bookingId },
-      data: { status: "confirmed" },
+      include: { ledgerEntry: true },
     });
-  }
-  const ledgerEntry = await recordCollection({
-    bookingId: booking.id,
-    tripId: booking.tripId,
-    totalAmount: booking.fareAmount,
-    cashAmount: booking.cashDue,
-    creditApplied: booking.creditApplied,
-    homeSurchargeAmount: booking.homeSurcharge,
-    platformFeeAmount: booking.platformFeeAmount,
-    mpesaReceipt: tx.receipt,
+    if (!booking) return null;
+
+    const wasAwaitingPayment = booking.status === "awaiting_payment";
+    if (wasAwaitingPayment) {
+      await dbTx.booking.update({
+        where: { id: bookingId },
+        data: { status: "confirmed" },
+      });
+    }
+
+    const ledgerEntry = booking.ledgerEntry ?? await dbTx.ledgerEntry.create({
+      data: {
+        bookingId: booking.id,
+        tripId: booking.tripId,
+        totalAmount: booking.fareAmount,
+        cashAmount: booking.cashDue,
+        creditApplied: booking.creditApplied,
+        homeSurchargeAmount: booking.homeSurcharge,
+        platformFeeAmount: booking.platformFeeAmount,
+        mpesaReceipt: tx.receipt,
+        collectedAt: booking.cashDue > 0 ? new Date() : null,
+        status: "held",
+      },
+    });
+    return { booking, ledgerEntry };
   });
+  if (!confirmed) return false;
+  const { booking, ledgerEntry } = confirmed;
   const arrivedAfterClosure = ["cancelled", "no_show"].includes(booking.status);
   await audit({
     actorId: booking.passengerId,

@@ -220,6 +220,37 @@ export async function ensureTrips(): Promise<number> {
   return created;
 }
 
+/** Remove a draft booking and restore the trip's cached seat count after a
+ *  checkout preflight fails after allocation. The trip lock matches the
+ *  allocation lock so a concurrent reservation cannot be lost in the recount.
+ */
+export async function releaseUnpaidBookingReservation(
+  bookingId: string,
+  tripId: string,
+): Promise<boolean> {
+  return db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "Trip" WHERE "id" = ${tripId} FOR UPDATE`;
+    const removed = await tx.booking.deleteMany({
+      where: { id: bookingId, tripId, status: "awaiting_payment" },
+    });
+    const trip = await tx.trip.findUnique({
+      where: { id: tripId },
+      select: { capacity: true },
+    });
+    if (trip) {
+      const activeBookings = await tx.booking.findMany({
+        where: { tripId, status: { in: ["awaiting_payment", "confirmed", "boarded"] } },
+        select: { seats: true, isCharter: true },
+      });
+      const bookedSeats = activeBookings.some((booking) => booking.isCharter)
+        ? trip.capacity
+        : activeBookings.reduce((sum, booking) => sum + booking.seats, 0);
+      await tx.trip.update({ where: { id: tripId }, data: { bookedSeats } });
+    }
+    return removed.count === 1;
+  });
+}
+
 /** Allocate to a feasible trip on the requested route + direction and
  *  calendar day. Customer bookings can pin the selected trip so a stale or
  *  full cab never silently becomes a different departure. Only unpinned
