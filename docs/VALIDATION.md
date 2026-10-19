@@ -1,5 +1,37 @@
 # Alignment validation — 6 October 2026
 
+## Current booking-flow verification — 18 October 2026
+
+- The focused booking checks passed: 30 existing tests across stage search,
+  stage API responses, zero-driver supply, trip availability, and booking
+  allocation. Source commit `10a3d26` passed GitHub Actions run
+  [#39117363934](https://github.com/demitriosojwang/mireli-web/actions/runs/39117363934)
+  with the full test, typecheck, lint, production build, CloudFormation,
+  Compose, AMD64, and ARM64 checks. Documentation checkpoint `f7652e3`
+  also passed [run #39118544935](https://github.com/demitriosojwang/mireli-web/actions/runs/39118544935).
+- Read-only AWS SSM checks at 13:21 EAT found one healthy app container on
+  image `794fb87`, `GET /api/health` healthy, zero published route stops, and
+  no active train schedule. Driver status remains strict with sign-in closed.
+  `/api/driver-supply` returns 404 on the running image, but exists in current
+  source; the branch is not deployed to the VM. The SSM command returned a
+  nonzero status because of this 404; its preceding service/health/catalogue
+  probes succeeded.
+- The page currently served at this workstation's `localhost:3000` is a stale
+  local preview, not a rendering of the current source: its visible controls
+  differ from `src/app/page.tsx`, and `/api/driver-supply` returns 404 there.
+  Do not use that process to verify current-branch UI behavior.
+- The isolated preview now converts PostgreSQL's train `Int[]` field into a
+  SQLite JSON array. Prisma schema validation and client generation succeed,
+  but `db push` returns a blank `Schema engine error` on this Windows host even
+  with a minimal SQLite schema. No sample records were inserted. A current-source
+  Next dev render at `localhost:3100` returned HTTP 200 with a deliberately
+  unreachable local PostgreSQL URL. Its browser accessibility snapshot showed
+  the compact booking steps, date/train controls, labelled drop-off picker, and
+  retry states. Local API calls returned 503/500 because the isolated database
+  was not running, so this verifies rendering only; it does not verify
+  database-backed booking or the production empty-catalogue state. No sample
+  drivers or routes were inserted.
+
 ## Driver services increment
 
 - 23 unit tests, TypeScript and ESLint pass. Local HTTP checks cover verified OTP

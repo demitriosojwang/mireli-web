@@ -26,7 +26,8 @@ import { AuthSheet } from "@/components/auth-sheet";
 import { api, useMe, detailsComplete, type PassengerDetails } from "@/lib/client";
 import { ksh, fmtTime } from "@/lib/format";
 import { NATIONALITIES, DEFAULT_NATIONALITY } from "@/lib/nationalities";
-import { DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
+import { calculateBookingFeeAmount, calculateSharedFare, calculateSharedSeatFare, DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
+import { calculateCharterFare } from "@/lib/charter-pricing";
 import { Crown, Home, Loader2, MapPin, Ticket as TicketIcon, TrainFront, UserRound, AlarmClock, LogIn } from "lucide-react";
 import { DotBadge, Stars } from "@/components/app/shared";
 
@@ -60,8 +61,8 @@ export interface BookableTrip {
   capacity: number;
   seatsLeft: number;
   bookable: boolean;
+  lockNote?: string | null;
   pointsLabel: "drop-off" | "pickup";
-  minFare: number;
   driver: { name: string; plate: string; cabType: string; rating: number } | null;
 }
 
@@ -73,6 +74,7 @@ export interface BookableTripWithStages extends BookableTrip {
 export interface BookingDraft {
   trip: BookableTripWithStages;
   stageId: string;
+  travelDate: string;
   seats: number;
   charter: boolean;
   homePickup: boolean;
@@ -86,6 +88,7 @@ interface CreateResponse {
     code: string;
     status: string;
     fareAmount: number;
+    isCharter: boolean;
     platformFeeAmount: number;
     creditApplied: number;
     cashDue: number;
@@ -181,10 +184,15 @@ function BookingSheetContent({
   const isGuest = me?.passenger?.isGuest ?? true;
   const guestUsed = me?.passenger?.guestUsed ?? false;
 
-  const fare = trip ? (draft?.charter ? trip.charterPrice : (stage?.fare || 0) * (draft?.seats || 1)) : 0;
+  const fare = trip && stage
+    ? (draft?.charter
+      ? calculateCharterFare(trip.capacity, stage.fare)
+      : calculateSharedFare(stage.fare, trip.capacity, draft?.seats || 1))
+    : 0;
   const surcharge = draft?.homePickup ? (draft?.charter ? stage?.homeSurcharge || 0 : (stage?.homeSurcharge || 0) * (draft?.seats || 1)) : 0;
-  const platformFeeAmount = trip?.platformFeeAmount ?? DEFAULT_BOOKING_FEE_AMOUNT;
-  const total = fare + surcharge + platformFeeAmount;
+  const bookingFeePerSeat = trip?.platformFeeAmount ?? DEFAULT_BOOKING_FEE_AMOUNT;
+  const platformFeeAmount = calculateBookingFeeAmount(bookingFeePerSeat, draft?.seats || 1, !!draft?.charter);
+  const total = fare + surcharge + (draft?.charter ? 0 : platformFeeAmount);
   const creditApplied = useCredit ? Math.min(creditBalance, total) : 0;
   const cashDue = total - creditApplied;
   const detailsOk = detailsComplete(details);
@@ -204,6 +212,7 @@ function BookingSheetContent({
       const res = await api<CreateResponse>("/api/bookings", {
         body: {
           routeId: trip.routeId,
+          tripId: trip.id,
           direction: trip.direction,
           stageId: draft.stageId,
           homePickup: draft.homePickup,
@@ -211,7 +220,7 @@ function BookingSheetContent({
           seats: draft.charter ? 1 : draft.seats,
           isCharter: draft.charter,
           applyCredit: useCredit && creditBalance > 0,
-          travelDate: trip.departureAt.slice(0, 10),
+          travelDate: draft.travelDate,
           passengerName: details.fullName.trim(),
           passengerPhone: details.phone,
           passengerEmail: details.email.trim(),
@@ -275,11 +284,20 @@ function BookingSheetContent({
                   {isCharter ? "Total fare" : draft.seats > 1 ? `${draft.seats} seats` : "Fare"}
                 </div>
                 <div className="text-2xl font-bold tabular-nums text-primary">{ksh(total)}</div>
-                <div className="text-[10px] text-muted-foreground">Includes {ksh(platformFeeAmount)} booking fee</div>
+                <div className="text-[10px] text-muted-foreground">
+                  {isCharter
+                    ? `${ksh(platformFeeAmount)} fee included in Mireli's 10% share`
+                    : `${ksh(bookingFeePerSeat)} × ${draft.seats} seat${draft.seats === 1 ? "" : "s"} Mireli fee`}
+                </div>
                 {surcharge > 0 && <div className="text-[10px] text-muted-foreground">Includes {ksh(surcharge)} door-to-door surcharge</div>}
+                {isCharter && (
+                  <div className="text-[10px] text-muted-foreground">
+                    {trip.capacity} seats × ({ksh(stage?.fare || 0)} stage fare + KSh 100 per seat)
+                  </div>
+                )}
                 {!isCharter && draft.seats > 1 && (
                   <div className="text-[10px] text-muted-foreground">
-                    {draft.seats} × {ksh(stage?.fare || 0)}
+                    {draft.seats} × {ksh(stage ? calculateSharedSeatFare(stage.fare, trip.capacity) : 0)}
                   </div>
                 )}
               </div>
@@ -301,11 +319,11 @@ function BookingSheetContent({
               </div>
               <div className="rounded-lg border bg-muted/40 p-3 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Total (includes booking fee)</span>
+                  <span className="text-muted-foreground">Total fare</span>
                   <span className="font-medium">{ksh(created.fareAmount)}</span>
                 </div>
                 <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>Booking fee</span>
+                  <span>{created.isCharter ? "Mireli fee (inside 10%)" : "Mireli fee"}</span>
                   <span>{ksh(created.platformFeeAmount)}</span>
                 </div>
                 {created.creditApplied > 0 && (
@@ -328,7 +346,7 @@ function BookingSheetContent({
                 </Button>
               ) : (
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-emerald-900">
-                  No cash moves until your ride is delivered — it all sits in the Mi-Reli ledger.
+                  Mireli handles driver settlement after the trip; you do not pay the driver directly.
                 </div>
               )}
               <Button variant="outline" className="w-full" onClick={onClose}>

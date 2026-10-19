@@ -16,6 +16,7 @@ node_modules
 
 # next.js
 /.next/
+/.next-verify/
 /out/
 
 # production
@@ -33,6 +34,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+
+# container configuration: the example is committed, the real file is not
+!.env.docker.example
 
 # vercel
 .vercel
@@ -55,6 +59,7 @@ server.log
 /skills/
 !.env.example
 .local/
+.docker-build/
 .tools/
 artifacts/
 *.db

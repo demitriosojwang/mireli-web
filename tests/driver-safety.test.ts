@@ -43,11 +43,13 @@ describe("driver identity and evidence",()=>{
   });
 });
 describe("settlement proof",()=>{
-  it("keeps the booking fee and passes the full pooled fare and home surcharge to the driver",()=>{
-    expect(calculateSettlement(1100,100,50,1000,false)).toEqual({gross:1050,surcharge:100,platformFee:50,commission:0,net:1050});
+  it("keeps the per-seat booking fee and passes the full pooled fare and home surcharge to the driver",()=>{
+    expect(calculateSettlement(1200,100,100,1000,false)).toEqual({gross:1200,surcharge:100,platformFee:100,commission:0,net:1100});
   });
-  it("takes ten percent only from charter fare, excluding booking fee and home surcharge",()=>{
-    expect(calculateSettlement(1100,100,50,1000,true)).toEqual({gross:1050,surcharge:100,platformFee:50,commission:95,net:955});
+  it("includes the booking fee within the charter's 10% platform share and sends the remainder to the driver",()=>{
+    expect(calculateSettlement(1100,100,50,1000,true)).toEqual({gross:1100,surcharge:100,platformFee:50,commission:50,net:1000});
+    expect(calculateSettlement(2000,0,50,1000,true)).toEqual({gross:2000,surcharge:0,platformFee:50,commission:150,net:1800});
+    expect(()=>calculateSettlement(400,0,50,1000,true)).toThrow();
   });
   it("rejects corrupt values and overflow",()=>{
     expect(()=>calculateSettlement(100,200,0,1500,true)).toThrow();

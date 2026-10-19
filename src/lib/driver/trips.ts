@@ -2,7 +2,7 @@ import {createHash} from "node:crypto";
 import {Prisma} from "@prisma/client";
 import {db} from "@/lib/db";
 import {DriverError,integer,text} from "./errors";
-import {evaluateDriverApplication} from "./onboarding";
+import {evaluateDriverApplication} from "./eligibility";
 import {settleCompletedTrip} from "@/lib/money";
 
 const visibleStatuses=["confirmed","boarded","completed","no_show"];

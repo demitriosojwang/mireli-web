@@ -13,8 +13,10 @@ import {
   Car,
   ClipboardList,
   Coins,
+  MapPin,
   Radar,
   Receipt,
+  Train,
   Users,
   Wallet,
 } from "lucide-react";
@@ -23,6 +25,8 @@ import { cn } from "@/lib/utils";
 const NAV = [
   { href: "/admin", label: "Overview", icon: BarChart3 },
   { href: "/admin/bookings", label: "Bookings", icon: ClipboardList },
+  { href: "/admin/routes", label: "Routes", icon: MapPin },
+  { href: "/admin/timetable", label: "Timetable", icon: Train },
   { href: "/admin/trips", label: "Trips", icon: Car },
   { href: "/admin/drivers", label: "Drivers", icon: Users },
   { href: "/admin/driver-onboarding", label: "Compliance", icon: ClipboardList },

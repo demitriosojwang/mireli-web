@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getAdminSession } from "@/lib/session";
 import { audit } from "@/lib/audit";
-import * as daraja from "@/lib/daraja";
+import { submitRefund } from "@/lib/refund-settlement";
 
-/** Refund records — every refund needs a terminal state and a timestamp. */
+/** Refund records — pending stays visible until a provider result is confirmed. */
 export async function GET() {
   const session = await getAdminSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -15,6 +15,7 @@ export async function GET() {
     include: {
       booking: { include: { passenger: true } },
       ledgerEntry: true,
+      attempts: { orderBy: { createdAt: "desc" }, take: 1 },
     },
   });
 
@@ -36,11 +37,14 @@ export async function GET() {
       initiatedAt: r.initiatedAt,
       completedAt: r.completedAt,
       ledgerStatus: r.ledgerEntry.status,
+      attemptState: r.attempts[0]?.state || null,
     })),
   });
 }
 
-/** Retry a failed refund — one deliberate attempt, never a silent loop. */
+/** Start an unsubmitted refund or retry a confirmed provider failure.
+ * Pending/ambiguous attempts cannot be resent until reconciliation proves the
+ * original transfer did not reach the passenger. */
 export async function POST(req: NextRequest) {
   const session = await getAdminSession();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -51,28 +55,17 @@ export async function POST(req: NextRequest) {
   });
   if (!refund) return NextResponse.json({ error: "Refund not found" }, { status: 404 });
   if (refund.status === "completed") return NextResponse.json({ error: "Refund already completed" }, { status: 400 });
-
-  const result =
-    refund.method === "reversal"
-      ? await daraja.reversal({ transactionId: refund.ledgerEntry.mpesaReceipt || refund.booking.code, amount: refund.amount })
-      : await daraja.b2c({ receiverPhone: refund.booking.passenger.phone, amount: refund.amount, remarks: `Refund ${refund.booking.code}` });
-  const ok = result.resultCode === daraja.RESULT_CODES.SUCCESS;
-  await db.refundRecord.update({
-    where: { id: refund.id },
-    data: {
-      status: ok ? "completed" : "failed",
-      mpesaResultCode: result.resultCode,
-      failureReason: ok ? null : result.resultDesc,
-      stuckFlaggedAt: null,
-      completedAt: ok ? new Date() : null,
-    },
-  });
-  if (ok) {
-    await db.ledgerEntry.update({
-      where: { id: refund.ledgerEntryId },
-      data: { status: "refunded", statusChangedAt: new Date() },
+  if (refund.status === "pending") {
+    const activeAttempt = await db.refundAttempt.findFirst({
+      where: { refundId: refund.id, state: { in: ["submitting", "processing", "ambiguous"] } },
+      select: { id: true },
     });
+    if (activeAttempt) {
+      return NextResponse.json({ error: "Refund outcome is still pending. Reconcile the existing attempt before retrying." }, { status: 409 });
+    }
   }
+  const state = await submitRefund(refund.id, { retryFailed: refund.status === "failed" });
+  const result = state === "completed" ? "Refund confirmed by the provider." : state === "failed" ? "Provider rejected the refund. Review details before another retry." : "Refund request is pending provider confirmation.";
   await audit({
     actorId: session.id,
     actorName: session.name,
@@ -80,7 +73,7 @@ export async function POST(req: NextRequest) {
     action: "money.refund_retry",
     entity: "refund",
     entityId: refund.id,
-    metadata: { ok, result: result.resultDesc },
+    metadata: { state, method: refund.method },
   });
-  return NextResponse.json({ ok, result: result.resultDesc });
+  return NextResponse.json({ ok: state === "completed", state, result });
 }
