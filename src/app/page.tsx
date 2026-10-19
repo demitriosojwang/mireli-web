@@ -125,6 +125,9 @@ export default function Home() {
   const [routesStatus, setRoutesStatus] = useState<CatalogueStatus>("loading");
   const [trips, setTrips] = useState<BookableTrip[] | null>(null);
   const [tripsStatus, setTripsStatus] = useState<CatalogueStatus>("loading");
+  // Driver eligibility is platform-wide, not tied to the selected direction
+  // or stop. Keep the last known result while the passenger changes filters;
+  // availability refreshes it when the selected route is queried.
   const [hasEligibleDrivers, setHasEligibleDrivers] = useState<boolean | null>(null);
   const [timetable, setTimetable] = useState<TrainRow[]>([]);
   const [timetableStatus, setTimetableStatus] = useState<CatalogueStatus>("loading");
@@ -178,7 +181,6 @@ export default function Home() {
     setDirection(nextDirection);
     setTrainKey(null);
     setSelectedPoint(null);
-    setHasEligibleDrivers(null);
     setHomePickup(false);
     setJourneyCollapsed(false);
     setPointPickerOpen(false);
@@ -645,7 +647,6 @@ export default function Home() {
                 {selectedPoint && (
                   <button onClick={() => {
                     setSelectedPoint(null);
-                    setHasEligibleDrivers(null);
                     setHomePickup(false);
                     setTrips(null);
                     setLoadedQuery(null);
@@ -742,7 +743,6 @@ export default function Home() {
                                   value={`${coast} ${route.name} ${point.name}`}
                                   onSelect={() => {
                                     setBookingStartError(null);
-                                    setHasEligibleDrivers(null);
                                     setTrips(null);
                                     setTripsStatus("loading");
                                     setLoadedQuery(null);
