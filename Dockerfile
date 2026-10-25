@@ -96,6 +96,12 @@ RUN apt-get update \
 COPY --from=build --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=build --chown=nextjs:nodejs /app/public ./public
+# One-off maintenance job for encrypting legacy passenger ID/passport fields.
+COPY --from=build --chown=nextjs:nodejs /app/scripts/encrypt-passenger-pii.mjs /app/scripts/encrypt-passenger-pii.mjs
+COPY --from=build --chown=nextjs:nodejs /app/src/lib/passenger-pii-crypto.mjs /app/src/lib/passenger-pii-crypto.mjs
+RUN node --check /app/scripts/encrypt-passenger-pii.mjs \
+ && node --check /app/src/lib/passenger-pii-crypto.mjs \
+ && node -e "require.resolve('@prisma/client')"
 
 # Self-contained Prisma CLI + versioned migrations, kept outside the traced
 # app so the runtime migrator can never collide with the application's client.

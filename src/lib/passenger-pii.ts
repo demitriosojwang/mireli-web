@@ -1,9 +1,10 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { isLocalDemoEnabled } from "./runtime-mode";
-
-const ENVELOPE_PREFIX = "mireli-pii:v1:";
-const IV_BYTES = 12;
-const AUTH_TAG_BYTES = 16;
+import {
+  decryptPassengerIdNumberWithKey,
+  encryptPassengerIdNumberWithKey,
+  isEncryptedPassengerIdNumber as isEncryptedEnvelope,
+} from "./passenger-pii-crypto.mjs";
 
 export class PassengerPiiConfigurationError extends Error {
   constructor(message = "Passenger identity encryption is not configured.") {
@@ -47,7 +48,7 @@ export function assertPassengerPiiEncryptionReady(): void {
 }
 
 export function isEncryptedPassengerIdNumber(value: string | null | undefined): boolean {
-  return typeof value === "string" && value.startsWith(ENVELOPE_PREFIX);
+  return isEncryptedEnvelope(value);
 }
 
 /** Encrypt an ID/passport number before it is written to the database. */
@@ -57,11 +58,7 @@ export function encryptPassengerIdNumber(value: string | null | undefined): stri
     throw new Error("Passenger identity value is already encrypted.");
   }
 
-  const iv = randomBytes(IV_BYTES);
-  const cipher = createCipheriv("aes-256-gcm", encryptionKey(), iv, { authTagLength: AUTH_TAG_BYTES });
-  const ciphertext = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return `${ENVELOPE_PREFIX}${iv.toString("base64url")}.${tag.toString("base64url")}.${ciphertext.toString("base64url")}`;
+  return encryptPassengerIdNumberWithKey(value, encryptionKey());
 }
 
 /**
@@ -73,17 +70,7 @@ export function decryptPassengerIdNumber(value: string | null | undefined): stri
   if (!isEncryptedPassengerIdNumber(value)) return value;
 
   try {
-    const [ivPart, tagPart, ciphertextPart, ...extra] = value.slice(ENVELOPE_PREFIX.length).split(".");
-    if (!ivPart || !tagPart || !ciphertextPart || extra.length > 0) throw new Error("Invalid envelope");
-    const iv = Buffer.from(ivPart, "base64url");
-    const tag = Buffer.from(tagPart, "base64url");
-    const ciphertext = Buffer.from(ciphertextPart, "base64url");
-    if (iv.length !== IV_BYTES || tag.length !== AUTH_TAG_BYTES || ciphertext.length === 0) {
-      throw new Error("Invalid envelope");
-    }
-    const decipher = createDecipheriv("aes-256-gcm", encryptionKey(), iv, { authTagLength: AUTH_TAG_BYTES });
-    decipher.setAuthTag(tag);
-    return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
+    return decryptPassengerIdNumberWithKey(value, encryptionKey());
   } catch (error) {
     if (error instanceof PassengerPiiConfigurationError) throw error;
     throw new Error("Passenger identity data could not be decrypted.");

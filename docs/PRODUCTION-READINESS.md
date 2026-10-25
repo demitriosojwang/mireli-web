@@ -745,8 +745,11 @@ AWS EC2 is the intended web/API host; the local Docker stack is for testing only
   store. Never reuse `SESSION_SECRET`, commit the key, or print it in logs.
   Deploy it before enabling booking/account-claim writes; strict mode fails
   closed if this key is absent or invalid.
-- [ ] Back up the database, then run `npm run db:encrypt-passenger-pii` against
-  the production database. The idempotent, compare-and-set backfill encrypts
+- [ ] Back up the database, then run
+  `docker compose exec -T app node /app/scripts/encrypt-passenger-pii.mjs`
+  inside the production app container (or `npm run db:encrypt-passenger-pii`
+  from a trusted source checkout with the production DB URL). The
+  idempotent, compare-and-set backfill encrypts
   legacy passenger profile and booking snapshot IDs and prints counts only.
   Verify the counts and test the authenticated `/api/me` prefill before
   opening bookings. Keep the legacy plaintext-read path until the backfill is
