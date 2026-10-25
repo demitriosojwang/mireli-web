@@ -103,6 +103,7 @@ export function TrainPill({ time, label, name, active, gone, onClick }: {
       onClick={gone ? undefined : onClick}
       disabled={gone}
       aria-disabled={gone || undefined}
+      aria-pressed={active}
       className={cn(
         "min-w-[110px] flex-1 rounded-2xl border px-3.5 py-2.5 text-left transition-all duration-200",
         gone

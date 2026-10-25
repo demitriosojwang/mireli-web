@@ -87,13 +87,13 @@ export default function AdminTimetable() {
       <div>
         <h1 className="text-lg font-semibold tracking-tight">SGR timetable</h1>
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-          Add only times confirmed against the current Kenya Railways timetable. New entries stay unpublished until you activate them.
+          Review times against the current Kenya Railways timetable. New entries stay unpublished until you activate them.
         </p>
       </div>
 
       <div role="note" className="flex gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs leading-relaxed text-amber-950">
         <CalendarClock className="mt-0.5 h-4 w-4 shrink-0" />
-        The scheduler uses the selected origin-departure weekdays in Kenya time. For a train arriving after midnight, select the day it leaves its origin terminus. No PDF schedule has been copied into the live catalogue.
+        The timetable baseline follows the Kenya Railways 2026 schedule: 08:00, 15:00 and 22:00 departures in both directions. The night train arrives the following day. The scheduler uses origin-departure weekdays in Kenya time; verify the current times and publication state before launch.
       </div>
 
       <Card>

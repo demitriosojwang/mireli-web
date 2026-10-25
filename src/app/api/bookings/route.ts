@@ -67,13 +67,14 @@ export async function GET() {
       cashDue: b.cashDue,
       status: b.status,
       cancelTier: b.cancelTier,
+      cancellationRequestedAt: b.cancellationRequestedAt?.toISOString() || null,
       createdAt: b.createdAt,
       departureAt: b.trip?.departureAt || null,
       tripStatus: b.trip?.status || null,
-      // Driver phone unlocks once the fare is settled (paid or credit-covered);
-      // identity (name + plate) is visible from the start.
+      // Keep driver identity and vehicle registration private until payment is
+      // settled (paid or fully covered by travel credit).
       driver:
-        b.trip?.driver
+        ["confirmed", "boarded", "completed"].includes(b.status) && b.trip?.driver
           ? {
               name: b.trip.driver.name,
               plate: b.trip.driver.plate,
@@ -81,14 +82,12 @@ export async function GET() {
               phone: ["confirmed", "boarded", "completed"].includes(b.status) ? b.trip.driver.phone : null,
             }
           : null,
-      allocationNote: b.allocationNote,
+      allocationNote: ["confirmed", "boarded", "completed"].includes(b.status)
+        ? b.allocationNote
+        : b.status === "awaiting_payment" ? "Your cab is held while payment is pending." : b.allocationNote,
       passengerName: b.passengerName,
       passengerPhone: b.passengerPhone,
       checkedInAt: b.checkedInAt,
-      lockNote:
-        b.trip?.status === "locked"
-          ? "Trip locked — cancelling now converts your fare to credit"
-          : null,
       ledger: b.ledgerEntry
         ? { status: b.ledgerEntry.status, cash: b.ledgerEntry.cashAmount, credit: b.ledgerEntry.creditApplied, receipt: b.ledgerEntry.mpesaReceipt }
         : null,
@@ -190,6 +189,12 @@ export async function POST(req: NextRequest) {
       !Number.isSafeInteger(stage.homeSurcharge) || stage.homeSurcharge < 0) {
     return NextResponse.json({ error: "This stop's fare is not configured for booking yet." }, { status: 503 });
   }
+  if (homePickup && !isCharter) {
+    return NextResponse.json(
+      { error: "Off-stage shared rides are not available until distance pricing is configured. Choose the designated SGR stage." },
+      { status: 409 },
+    );
+  }
   if (homePickup && (!homeAddress || String(homeAddress).trim().length < 5)) {
     return NextResponse.json({ error: "Door-to-door service needs a pickup or drop-off address" }, { status: 400 });
   }
@@ -223,7 +228,10 @@ export async function POST(req: NextRequest) {
       { status: 503 },
     );
   }
-  const homeSurcharge = homePickup ? (isCharter ? stage.homeSurcharge : stage.homeSurcharge * tripSeats) : 0;
+  // Private charters may use the passenger's desired address without an extra
+  // mileage charge. Shared off-stage pricing fails closed above until it can
+  // quote verified driving distance from the nearest designated stage.
+  const homeSurcharge = 0;
   let total = fare + homeSurcharge + (isCharter ? 0 : platformFeeAmount);
 
   if (isCharter) {
@@ -471,7 +479,7 @@ export async function POST(req: NextRequest) {
             departureAt: fresh!.trip.departureAt,
             status: fresh!.trip.status,
             routeName: fresh!.trip.route.name,
-            driver: fresh!.trip.driver
+            driver: ["confirmed", "boarded", "completed"].includes(fresh!.status) && fresh!.trip.driver
               ? {
                   name: fresh!.trip.driver.name,
                   plate: fresh!.trip.driver.plate,
@@ -483,7 +491,9 @@ export async function POST(req: NextRequest) {
               : null,
           }
         : null,
-      allocationNote: fresh!.allocationNote,
+      allocationNote: ["confirmed", "boarded", "completed"].includes(fresh!.status)
+        ? fresh!.allocationNote
+        : fresh!.status === "awaiting_payment" ? "Your cab is held while payment is pending." : fresh!.allocationNote,
     },
     bookingWindowMinutes: cfg.bookingWindowMinutes,
   });

@@ -114,7 +114,7 @@ export default function AdminConfig() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label htmlFor="c-cutoff">Full-refund cutoff (min before departure)</Label>
+                <Label htmlFor="c-cutoff">Full-refund cutoff (minutes before scheduled pickup)</Label>
                 <Input id="c-cutoff" inputMode="numeric" value={form.fullRefundCutoffMinutes} onChange={(e) => setForm({ ...form, fullRefundCutoffMinutes: num(e.target.value) })} />
               </div>
               <div className="space-y-1.5">
@@ -131,7 +131,7 @@ export default function AdminConfig() {
                 onChange={(e) => setForm({ ...form, creditValidityDays: num(e.target.value) })}
               />
               <p className="text-xs text-muted-foreground">
-                Late-cancellation credits stay redeemable this long (currently {form.creditValidityDays} days).
+                Late-cancellation credits are fixed at 30 days. This setting applies to other travel credits.
               </p>
             </div>
           </CardContent>

@@ -1,13 +1,23 @@
 # Mireli VM and shared driver API handoff
 
-Updated 19 October 2026, 22:53 EAT. This guide is for the developer or agent building Mireli Driver and working on the shared API. The Android app stays in its own repository; this repository contains the shared backend and web application.
+Updated 25 October 2026. This guide is for the developer or agent building Mireli Driver and working on the shared API. The Android app stays in its own repository; this repository contains the shared backend and web application.
 
-For a current AWS browser inspection, the EC2 instance is running with 3/3
-status checks, but AWS currently reports `Managed: false`; Session Manager's
-Connect action is disabled and EC2 Instance Connect reports SSH port 22 is not
-authorized. The older 18 October SSM Online result is historical. Read the
+The last AWS console inspection (19 October, 22:53 EAT) found the EC2 instance
+running with 3/3 status checks, but reported `Managed: false`; Session
+Manager's Connect action was disabled and EC2 Instance Connect reported SSH
+port 22 is not authorized. The older 18 October SSM Online result is
+historical. Read the
 [driver VM handoff](DRIVER-AGENT-VM-HANDOFF.md) for the verified state and do
 not assume a live VM shell is available.
+
+The 25 October recovery attempt still could not query AWS: after the owner
+confirmed the Chrome authorization, `aws sts get-caller-identity --profile
+mireli --region eu-north-1` failed because the CLI could not connect to
+`https://eu-north-1.signin.aws.amazon.com/v1/token`. This is a connection failure,
+not evidence of an IAM denial; the live SSM registration and instance profile
+remain unverified. The CloudFormation template declares
+`AmazonSSMManagedInstanceCore` for the app instance role. No AWS changes were
+made; keep port 22 closed while restoring the SSM access path.
 
 For Android API setup and flavor rules, read
 [DRIVER-SHARED-BACKEND-SETUP.md](DRIVER-SHARED-BACKEND-SETUP.md) and the focused
@@ -31,14 +41,16 @@ The first cloud-init run failed because Amazon Linux `curl-minimal` conflicts wi
 
 ## Restore a keyless shell on the VM
 
-SSM is not currently verified as available: the EC2 console shows `Managed:
-false`, its SSM connection details remain loading, and Connect is disabled. The
-instance profile role is visible, but the instance must be registered as a
-managed node and the profile must allow Systems Manager. The owner should verify
-the attached role includes `AmazonSSMManagedInstanceCore` (or an equivalent
-least-privilege policy), that the SSM agent is running, and that the instance
-can reach the regional SSM endpoints. Do not change IAM or security-group
-settings without the owner approving the specific change.
+SSM is not currently verified as available: the 22:53 EAT EC2 console check
+showed `Managed: false`, its SSM connection details remained loading, and
+Connect was disabled. The latest AWS CLI sign-in expired before authorization,
+so the live state could not be rechecked. The instance profile role is visible,
+but the instance must be registered as a managed node and the profile must
+allow Systems Manager. The owner should verify the attached role
+includes `AmazonSSMManagedInstanceCore` (or an equivalent least-privilege
+policy), that the SSM agent is running, and that the instance can reach the
+regional SSM endpoints. Do not change IAM or security-group settings without
+the owner approving the specific change.
 
 When the managed node reports Online, use an individual AWS identity and SSM
 rather than sharing SSH keys. The owner must invite each developer as a team
@@ -83,7 +95,10 @@ Never run `env`, print `/etc/mireli/runtime.env`, dump the full `docker inspect`
 
 `.github/workflows/verify.yml` checks the web repository and validates the AWS template. `.github/workflows/deploy-aws-vm.yml` is prepared but remains disabled until AWS/GitHub deployment configuration is complete. The deployment workflow is designed to:
 
-1. Wait for successful verification on `main` and the owner approval gate.
+1. Wait for successful verification on `main` and the owner approval gate. The
+   deploy workflow serializes VM releases and skips a verified commit if it is
+   no longer the current `main` head, preventing an older `workflow_run` from
+   overwriting a newer release.
 2. Build and push an immutable ARM64 image to the ECR URI above using GitHub OIDC.
 3. Use SSM Run Command to change only `IMAGE_TAG` in `/etc/mireli/bootstrap.env` and restart `mireli-app`.
 4. Check the local `/api/health` endpoint and restore the prior image tag if the new image fails its health check. Database migrations are not rolled back; review migrations and confirm backups before release.
@@ -103,7 +118,7 @@ Create a protected `production` environment with required owner reviewers and br
 
 The AWS VM is not a substitute for operational data. Keep bookings honest and pooled inventory empty until all applicable gates are met:
 
-- Owner-approved stages, coordinates, fares/surcharges, and Madaraka Express timetable have not been loaded; no approved catalogue has been supplied yet.
+- The approved fare-sheet names and per-seat fares are integrated in `src/lib/fare-catalogue.ts`. Exact passenger-stage coordinates, route order, door-to-door surcharges, and the final Madaraka Express timetable remain unapproved and unloaded; keep production booking inventory closed until reviewed values are published.
 - At least one driver must be onboarded, vetted, and approved by the shared driver platform. Until then available pooled cabs remain zero and driver assignment is not a successful end-to-end flow.
 - Production authentication, staff review/roles, M-Pesa collection, post-trip driver payout, SMS/email, callback reconciliation, and monitoring must be configured and verified.
 - The customer booking-to-trip flow must pass in strict mode, including payment callback, driver match/acceptance, pickup PIN, trip completion, payout, and ledger reconciliation.

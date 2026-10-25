@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 const mocks = vi.hoisted(() => ({
   getPassengerSession: vi.fn(),
   bookingFindUnique: vi.fn(),
+  bookingUpdate: vi.fn(),
   mpesaTransactionFindFirst: vi.fn(),
   mpesaTransactionFindUnique: vi.fn(),
   mpesaTransactionCreate: vi.fn(),
@@ -17,7 +18,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/db", () => ({
   db: {
-    booking: { findUnique: mocks.bookingFindUnique },
+    booking: { findUnique: mocks.bookingFindUnique, update: mocks.bookingUpdate },
     mpesaTransaction: {
       findFirst: mocks.mpesaTransactionFindFirst,
       findUnique: mocks.mpesaTransactionFindUnique,
@@ -73,6 +74,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.getPassengerSession.mockResolvedValue({ id: "passenger-1", name: "Amina Wanjiru" });
   mocks.bookingFindUnique.mockResolvedValue(bookingWithAssignment);
+  mocks.bookingUpdate.mockResolvedValue({ ...bookingWithAssignment, cancellationRequestedAt: new Date() });
   mocks.mpesaTransactionFindFirst.mockResolvedValue(null);
   mocks.mpesaTransactionFindUnique.mockResolvedValue(null);
   mocks.mpesaTransactionCreate.mockResolvedValue({ id: "tx-1", checkoutRequestId: "mireli-intent:pending", amount: 500 });
@@ -93,6 +95,42 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("booking payment route assignment guard", () => {
+  it("records a passenger cancellation request before support follow-up", async () => {
+    const response = await callPost({ action: "request_cancellation" });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(mocks.bookingUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "booking-1" },
+      data: expect.objectContaining({ cancellationRequestedAt: expect.any(Date) }),
+    }));
+    expect(mocks.audit).toHaveBeenCalledWith(expect.objectContaining({
+      action: "booking.cancellation_requested",
+      entityId: "booking-1",
+    }));
+  });
+
+  it("keeps a previously recorded cancellation timestamp on repeat contact", async () => {
+    const requestedAt = new Date("2026-10-20T08:00:00.000Z");
+    mocks.bookingFindUnique.mockResolvedValue({ ...bookingWithAssignment, cancellationRequestedAt: requestedAt });
+
+    const response = await callPost({ action: "request_cancellation" });
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).requestedAt).toBe(requestedAt.toISOString());
+    expect(mocks.bookingUpdate).not.toHaveBeenCalled();
+    expect(mocks.audit).not.toHaveBeenCalled();
+  });
+
+  it("does not cancel directly through the passenger endpoint", async () => {
+    const response = await callPost({ action: "cancel" });
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toContain("+254797118292");
+    expect(mocks.bookingUpdate).not.toHaveBeenCalled();
+  });
+
   it("does not send an STK prompt or create a transaction for an unassigned booking", async () => {
     mocks.bookingFindUnique.mockResolvedValue({ ...bookingWithAssignment, trip: null });
 

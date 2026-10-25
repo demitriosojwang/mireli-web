@@ -15,8 +15,10 @@ export function getBookingCatalogueView(
   return "booking";
 }
 
-export function shouldLoadTrainTimetable(status: CatalogueStatus, pointCount: number): boolean {
-  return status === "error" || (status === "ready" && hasPublishedCustomerPoints(pointCount));
+export function shouldLoadTrainTimetable(status: CatalogueStatus): boolean {
+  // Train times are useful even while route stops are being configured. Keep
+  // timetable loading independent from the customer-stage catalogue.
+  return status !== "loading";
 }
 
 export function getCabAvailabilityCountLabel(params: {

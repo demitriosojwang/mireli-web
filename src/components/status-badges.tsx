@@ -18,6 +18,7 @@ const LEDGER_STYLES: Record<string, string> = {
   refunded: "bg-sky-100 text-sky-900 border-sky-200",
   partially_refunded: "bg-orange-100 text-orange-900 border-orange-200",
   converted_to_credit: "bg-violet-100 text-violet-900 border-violet-200",
+  partially_converted_to_credit: "bg-violet-100 text-violet-900 border-violet-200",
   forfeited: "bg-red-100 text-red-900 border-red-200",
 };
 

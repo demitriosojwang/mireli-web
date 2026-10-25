@@ -18,7 +18,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/client";
 import { fmtDate, fmtDateTime, ksh, TIER_LABELS } from "@/lib/format";
-import { Ban, Mail, Search, Undo2 } from "lucide-react";
+import { Ban, ClipboardCheck, Mail, Search, Undo2 } from "lucide-react";
 
 interface AdminBooking {
   id: string;
@@ -37,6 +37,7 @@ interface AdminBooking {
   cashDue: number;
   status: string;
   cancelTier: string | null;
+  cancellationRequestedAt: string | null;
   createdAt: string;
   departureAt: string | null;
   tripStatus: string | null;
@@ -76,6 +77,28 @@ export default function AdminBookings() {
       refresh();
     } catch (e) {
       toast({ title: "Failed", description: e instanceof Error ? e.message : "Try again", variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function processPassengerCancellation(b: AdminBooking) {
+    setBusy(true);
+    try {
+      const result = await api<{ outcome: string; tier: string | null }>("/api/admin/bookings", {
+        body: { bookingId: b.id, action: "process_passenger_cancel" },
+      });
+      const outcomeLabel = result.outcome === "refunded"
+        ? "Full refund requested. Check the refund status for completion."
+        : result.outcome === "partially_converted_to_credit"
+          ? "75% credit issued for 30 days; 25% forfeited."
+          : result.outcome === "voided_unpaid"
+            ? "Unpaid booking voided."
+            : result.outcome.replaceAll("_", " ");
+      toast({ title: `Cancellation processed · ${b.code}`, description: outcomeLabel });
+      refresh();
+    } catch (e) {
+      toast({ title: "Could not process cancellation", description: e instanceof Error ? e.message : "Try again", variant: "destructive" });
     } finally {
       setBusy(false);
     }
@@ -176,6 +199,11 @@ export default function AdminBookings() {
                     Departure {fmtDateTime(b.departureAt)} · trip {b.tripStatus || "unallocated"}
                     {b.driver ? ` · ${b.driver.name} (${b.driver.plate})` : ""}
                   </p>
+                  {b.cancellationRequestedAt && (
+                    <p className="text-xs font-medium text-amber-800">
+                      Passenger cancellation requested {fmtDateTime(b.cancellationRequestedAt)}
+                    </p>
+                  )}
                   {b.allocationNote && <p className="text-xs text-muted-foreground">{b.allocationNote}</p>}
                 </div>
                 <div className="text-right text-sm">
@@ -192,8 +220,13 @@ export default function AdminBookings() {
                 </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
+                {b.cancellationRequestedAt && !["cancelled", "completed", "no_show"].includes(b.status) && (
+                  <Button size="sm" onClick={() => void processPassengerCancellation(b)} disabled={busy}>
+                    <ClipboardCheck className="h-4 w-4" /> Process passenger request
+                  </Button>
+                )}
                 <Button size="sm" variant="outline" onClick={() => platformCancel(b)} disabled={busy || ["cancelled", "completed", "no_show"].includes(b.status)}>
-                  <Ban className="h-4 w-4" /> Cancel for passenger (full refund)
+                  <Ban className="h-4 w-4" /> Platform cancel (full refund)
                 </Button>
                 <Button
                   size="sm"

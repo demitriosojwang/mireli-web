@@ -229,6 +229,25 @@ describe("booking creation with no driver supply", () => {
     expect(mocks.allocateBooking).not.toHaveBeenCalled();
   });
 
+  it("rejects shared off-stage service until distance pricing is configured", async () => {
+    mocks.routeFindUnique.mockResolvedValue({
+      id: "route-1",
+      active: true,
+      // Legacy fixed surcharges must not be mistaken for a distance quote.
+      stages: [{ id: "stage-1", name: "Nyali", order: 1, fare: 500, homeSurcharge: 150 }],
+    });
+
+    const response = await POST(request(validBookingBody({
+      homePickup: true,
+      homeAddress: "12 Green Street, Nyali",
+    })));
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toContain("distance pricing is configured");
+    expect(mocks.bookingCreate).not.toHaveBeenCalled();
+    expect(mocks.allocateBooking).not.toHaveBeenCalled();
+  });
+
   it("rejects the terminus row because it is not a customer-selectable stop", async () => {
     mocks.routeFindUnique.mockResolvedValue({
       id: "route-1",
@@ -307,7 +326,7 @@ describe("booking creation with no driver supply", () => {
       passengerName: "Amina Wanjiru",
       passengerPhone: "+254712345678",
       allocationNote: "Charter allocated",
-      trip: { id: "trip-1", departureAt: new Date("2026-10-16T09:00:00.000Z"), status: "scheduled", route: { name: "Route 1" }, driver: null },
+      trip: { id: "trip-1", departureAt: new Date("2026-10-16T09:00:00.000Z"), status: "scheduled", route: { name: "Route 1" }, driver: { name: "Hidden Driver", plate: "KAA 123A", phone: "+254712345678" } },
     });
 
     const response = await POST(request({
@@ -332,6 +351,7 @@ describe("booking creation with no driver supply", () => {
     expect(payload.booking.fareAmount).toBe(2000);
     expect(payload.booking.platformFeeAmount).toBe(50);
     expect(payload.booking.cashDue).toBe(2000);
+    expect(payload.booking.trip.driver).toBeNull();
     expect(mocks.bookingCreate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ fareAmount: 2000, cashDue: 2000 }),
     }));
@@ -381,26 +401,29 @@ describe("booking creation with no driver supply", () => {
     expect(mocks.audit).not.toHaveBeenCalled();
   });
 
-  it("labels door service according to the journey direction", async () => {
+  it("allows private charter addresses without a distance surcharge", async () => {
+    mocks.passengerFindUnique.mockResolvedValue({ id: "passenger-1", phone: "+254712345678" });
     await POST(request(validBookingBody({
+      isCharter: true,
       homePickup: true,
       homeAddress: "12 Green Street, Nyali",
     })));
 
     expect(mocks.bookingCreate).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ stageName: "Home drop-off · Nyali area" }),
+      data: expect.objectContaining({ stageName: "Home drop-off · Nyali area", homeSurcharge: 0 }),
     }));
 
     mocks.bookingCreate.mockClear();
     mocks.tripFindUnique.mockResolvedValue({ capacity: 4, routeId: "route-1", direction: "TO_TERMINUS" });
     await POST(request(validBookingBody({
       direction: "TO_TERMINUS",
+      isCharter: true,
       homePickup: true,
       homeAddress: "12 Green Street, Nyali",
     })));
 
     expect(mocks.bookingCreate).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ stageName: "Home pickup · Nyali area" }),
+      data: expect.objectContaining({ stageName: "Home pickup · Nyali area", homeSurcharge: 0 }),
     }));
   });
 

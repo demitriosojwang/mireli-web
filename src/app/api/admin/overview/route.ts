@@ -11,6 +11,7 @@ const LEDGER_BUCKETS = [
   "refunded",
   "partially_refunded",
   "converted_to_credit",
+  "partially_converted_to_credit",
   "forfeited",
 ] as const;
 

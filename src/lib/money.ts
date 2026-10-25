@@ -7,6 +7,12 @@ import {DriverError} from "@/lib/driver/errors";
 import { attemptBookingTicketEmail } from "@/lib/booking-ticket-email";
 import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 import { submitRefund } from "@/lib/refund-settlement";
+import {
+  calculateLateCancellationCredit,
+  describeCancellationCutoff,
+  getPassengerCancellationTier,
+  LATE_CANCELLATION_CREDIT_VALIDITY_DAYS,
+} from "@/lib/cancellation-policy";
 
 /**
  * The money engine.
@@ -15,7 +21,7 @@ import { submitRefund } from "@/lib/refund-settlement";
  * — it never goes directly to a driver. Every shilling is tracked in the
  * ledger as exactly one of:
  *   held | driver_payable | commission_taken | refunded | partially_refunded
- *   | converted_to_credit | forfeited
+ *   | converted_to_credit | partially_converted_to_credit | forfeited
  *
  * The admin never touches these flows — they are config-driven and automatic.
  */
@@ -173,12 +179,12 @@ export async function recordCollection(params: {
 // ─── Refund tiers ────────────────────────────────────────────────────────────
 
 export type RefundTier =
-  | "early" // before trip lock → full cash refund
-  | "late" // after lock, before departure → full fare converts to credit
+  | "early" // notice at least 24 hours before scheduled pickup → full cash refund
+  | "late" // notice inside 24 hours → 75% credit, valid 30 days; 25% forfeited
   | "no_show" // never cancelled, never showed → forfeited
   | "platform_cancelled"; // platform/driver cancelled → full cash refund always
 
-/** Resolves the tier from the booking/trip state + config (never hardcoded). */
+/** Resolves the passenger tier from the timestamped request and pickup schedule. */
 export async function resolveRefundTier(bookingId: string): Promise<{
   tier: RefundTier | null;
   detail: string;
@@ -203,10 +209,13 @@ export async function resolveRefundTier(bookingId: string): Promise<{
   if (trip.status === "departed" || trip.status === "completed")
     return { tier: null, detail: "Trip already departed — cancellation window closed." };
 
-  // Trip still pre-departure: lock state decides early vs late
-  const locked = trip.status === "locked" || trip.lockedAt !== null;
-  if (locked) return { tier: "late", detail: "Trip locked — late cancellation converts fare to credit." };
-  return { tier: "early", detail: "Before lock — full cash refund." };
+  const cfg = await getConfig();
+  const requestedAt = booking.cancellationRequestedAt ?? new Date();
+  const tier = getPassengerCancellationTier(requestedAt, trip.departureAt, cfg.fullRefundCutoffMinutes);
+  const cutoff = describeCancellationCutoff(cfg.fullRefundCutoffMinutes);
+  return tier === "early"
+    ? { tier, detail: `Request received at least ${cutoff} before scheduled pickup — full refund.` }
+    : { tier, detail: `Request received within ${cutoff} of scheduled pickup — 75% travel credit for 30 days; 25% is forfeited.` };
 }
 
 const REFUND_METHOD_WINDOW_MS = 24 * 60 * 60 * 1000; // Reversal works in a short window
@@ -380,19 +389,25 @@ export async function executeCancellation(params: {
       return { outcome: refundStatus === "completed" ? "admin_refund" : refundStatus === "pending" ? "refund_pending" : "refund_failed", tier: "late" };
     }
 
-    // Passenger late cancellation: NO cash moves — full fare converts to a
-    // travel credit. The money stays on the platform as a liability, not a
-    // payout, and the passenger never loses it.
-    await issueCredit({
-      passengerId: booking.passengerId,
-      sourceBookingId: booking.id,
-      amount: entry.totalAmount, // full fare: cash + credit portions
-      note: `Late cancellation of ${booking.code} — fare saved as credit`,
-      validityDays: cfg.creditValidityDays,
-    });
+    // Passenger late cancellation: issue 75% of the paid fare as travel
+    // credit for 30 days and explicitly record the remaining 25% as forfeited.
+    const creditAmount = calculateLateCancellationCredit(entry.totalAmount);
+    const forfeitedAmount = entry.totalAmount - creditAmount;
+    if (creditAmount > 0) {
+      await issueCredit({
+        passengerId: booking.passengerId,
+        sourceBookingId: booking.id,
+        amount: creditAmount,
+        note: `Late cancellation of ${booking.code} — 75% travel credit`,
+        validityDays: LATE_CANCELLATION_CREDIT_VALIDITY_DAYS,
+      });
+    }
     await db.ledgerEntry.update({
       where: { id: entry.id },
-      data: { status: "converted_to_credit", statusChangedAt: new Date() },
+      data: {
+        status: creditAmount > 0 ? "partially_converted_to_credit" : "forfeited",
+        statusChangedAt: new Date(),
+      },
     });
     await db.booking.update({
       where: { id: booking.id },
@@ -407,11 +422,12 @@ export async function executeCancellation(params: {
       entityId: booking.id,
       metadata: {
         code: booking.code,
-        creditIssued: entry.totalAmount,
-        validDays: cfg.creditValidityDays,
+        creditIssued: creditAmount,
+        forfeitedAmount,
+        validDays: LATE_CANCELLATION_CREDIT_VALIDITY_DAYS,
       },
     });
-    return { outcome: "converted_to_credit", tier: "late" };
+    return { outcome: "partially_converted_to_credit", tier: "late" };
   }
 
   // no_show — reached only via the completion engine

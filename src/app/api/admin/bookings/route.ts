@@ -54,6 +54,7 @@ export async function GET(req: NextRequest) {
       cashDue: b.cashDue,
       status: b.status,
       cancelTier: b.cancelTier,
+      cancellationRequestedAt: b.cancellationRequestedAt?.toISOString() || null,
       createdAt: b.createdAt,
       departureAt: b.trip?.departureAt || null,
       tripStatus: b.trip?.status || null,
@@ -125,6 +126,32 @@ export async function POST(req: NextRequest) {
       bookingId,
       actor,
       trigger: "platform_cancel",
+    });
+    return NextResponse.json({ ok: true, ...result });
+  }
+
+  if (action === "process_passenger_cancel") {
+    const booking = await db.booking.findUnique({ where: { id: bookingId } });
+    if (!booking) return NextResponse.json({ error: "Booking not found" }, { status: 404 });
+    if (!booking.cancellationRequestedAt) {
+      return NextResponse.json({ error: "The passenger has not submitted a cancellation request" }, { status: 409 });
+    }
+    if (["cancelled", "completed", "no_show"].includes(booking.status)) {
+      return NextResponse.json({ error: `Booking already ${booking.status}` }, { status: 409 });
+    }
+    const result = await executeCancellation({
+      bookingId,
+      actor,
+      trigger: "passenger_cancel",
+    });
+    await audit({
+      actorId: actor.id,
+      actorName: actor.name,
+      actorRole: actor.role,
+      action: "booking.passenger_cancellation_processed",
+      entity: "booking",
+      entityId: booking.id,
+      metadata: { code: booking.code, outcome: result.outcome, tier: result.tier },
     });
     return NextResponse.json({ ok: true, ...result });
   }

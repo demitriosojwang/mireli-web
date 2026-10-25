@@ -4,31 +4,31 @@ import { getBookingCatalogueView, getCabAvailabilityCountLabel, hasPublishedCust
 describe("customer booking catalogue state", () => {
   it("shows a compact checking state while approved stops load", () => {
     expect(getBookingCatalogueView("loading", 0)).toBe("checking");
-    expect(shouldLoadTrainTimetable("loading", 0)).toBe(false);
+    expect(shouldLoadTrainTimetable("loading")).toBe(false);
   });
 
-  it("closes the booking form and skips timetable traffic when the catalogue is empty", () => {
+  it("closes booking when stops are empty but still loads the timetable", () => {
     expect(getBookingCatalogueView("empty", 0)).toBe("closed");
     expect(getBookingCatalogueView("ready", 0)).toBe("closed");
-    expect(shouldLoadTrainTimetable("empty", 0)).toBe(false);
-    expect(shouldLoadTrainTimetable("ready", 0)).toBe(false);
+    expect(shouldLoadTrainTimetable("empty")).toBe(true);
+    expect(shouldLoadTrainTimetable("ready")).toBe(true);
   });
 
   it("fails closed for invalid stop counts", () => {
     expect(hasPublishedCustomerPoints(-1)).toBe(false);
     expect(hasPublishedCustomerPoints(Number.NaN)).toBe(false);
     expect(getBookingCatalogueView("ready", -1)).toBe("closed");
-    expect(shouldLoadTrainTimetable("ready", Number.NaN)).toBe(false);
+    expect(shouldLoadTrainTimetable("ready")).toBe(true);
   });
 
-  it("shows booking controls and loads trains only when stops are published", () => {
+  it("shows booking controls when stops are published and still loads trains", () => {
     expect(getBookingCatalogueView("ready", 3)).toBe("booking");
-    expect(shouldLoadTrainTimetable("ready", 3)).toBe(true);
+    expect(shouldLoadTrainTimetable("ready")).toBe(true);
   });
 
   it("keeps search and train recovery available after a catalogue error", () => {
     expect(getBookingCatalogueView("error", 0)).toBe("booking");
-    expect(shouldLoadTrainTimetable("error", 0)).toBe(true);
+    expect(shouldLoadTrainTimetable("error")).toBe(true);
   });
 
   it("distinguishes confirmed zero cabs from unavailable availability", () => {

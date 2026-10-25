@@ -17,6 +17,9 @@ node_modules
 # next.js
 /.next/
 /.next-verify/
+/.next-codex-validation/
+/.next-codex-verify-*/
+/.next-build/
 /out/
 
 # production

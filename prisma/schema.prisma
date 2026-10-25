@@ -144,6 +144,7 @@ model Booking {
   cashDue       Int // portion to collect via M-Pesa STK
   status        String    @default("awaiting_payment") // awaiting_payment | confirmed | boarded | cancelled | completed | no_show
   cancelTier    String? // early | late | platform_cancelled | no_show
+  cancellationRequestedAt DateTime? // first passenger request time; support processes the cancellation
   cancelledAt   DateTime?
   checkedInAt   DateTime?
   boardedSeats  Int       @default(0)
@@ -201,7 +202,7 @@ model LedgerEntry {
   platformFeeAmount   Int      @default(0) // shared: per-seat Mireli fee total; charter: one fee included within the 10% share
   mpesaReceipt        String?
   collectedAt         DateTime?
-  status              String   @default("held") // held | driver_payable | commission_taken | refunded | partially_refunded | converted_to_credit | forfeited
+  status              String   @default("held") // held | driver_payable | commission_taken | refunded | partially_refunded | converted_to_credit | partially_converted_to_credit | forfeited
   statusChangedAt     DateTime @default(now())
   createdAt           DateTime @default(now())
   refunds             RefundRecord[]
@@ -456,7 +457,7 @@ model PlatformConfig {
   id                         String    @id @default("main")
   commissionRate             Float     @default(0.10) // charter commission; must stay under NTSA 18% cap
   bookingFeeAmount           Int       @default(50) // KSh Mireli fee per shared passenger seat; one fee is included in a charter's 10% share
-  fullRefundCutoffMinutes    Int       @default(60) // lock cutoff before departure
+  fullRefundCutoffMinutes    Int       @default(1440) // 24 hours before scheduled pickup
   seatFillThresholdPercent   Int       @default(70) // trip locks early when this full
   creditValidityDays         Int       @default(30) // late-cancellation credit validity
   payoutMode                 String    @default("instant_per_trip") // after each completed trip

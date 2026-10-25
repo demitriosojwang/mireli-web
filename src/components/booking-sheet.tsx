@@ -25,11 +25,13 @@ import { PaySheet } from "@/components/pay-sheet";
 import { AuthSheet } from "@/components/auth-sheet";
 import { api, useMe, detailsComplete, type PassengerDetails } from "@/lib/client";
 import { ksh, fmtTime } from "@/lib/format";
+import { MIRELI_SUPPORT_PHONE_LOCAL } from "@/lib/support";
+import { DEFAULT_FULL_REFUND_CUTOFF_MINUTES, describeCancellationCutoff } from "@/lib/cancellation-policy";
 import { NATIONALITIES, DEFAULT_NATIONALITY } from "@/lib/nationalities";
 import { calculateBookingFeeAmount, calculateSharedFare, calculateSharedSeatFare, DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
 import { calculateCharterFare } from "@/lib/charter-pricing";
 import { Crown, Home, Loader2, MapPin, Ticket as TicketIcon, TrainFront, UserRound, AlarmClock, LogIn } from "lucide-react";
-import { DotBadge, Stars } from "@/components/app/shared";
+import { DotBadge } from "@/components/app/shared";
 
 export interface Stage {
   id: string;
@@ -40,6 +42,7 @@ export interface Stage {
 }
 
 export interface TrainInfo {
+  id: string;
   name: string;
   mtmTime: string;
   ntmTime: string;
@@ -53,6 +56,7 @@ export interface BookableTrip {
   durationMinutes: number;
   charterPrice: number;
   platformFeeAmount: number;
+  cancellationCutoffMinutes?: number;
   direction: string;
   departureAt: string;
   terminusAt: string;
@@ -63,7 +67,6 @@ export interface BookableTrip {
   bookable: boolean;
   lockNote?: string | null;
   pointsLabel: "drop-off" | "pickup";
-  driver: { name: string; plate: string; cabType: string; rating: number } | null;
 }
 
 export interface BookableTripWithStages extends BookableTrip {
@@ -125,7 +128,16 @@ function loadGuestDetails(): PassengerDetails {
   if (typeof window === "undefined") return { ...EMPTY_DETAILS };
   try {
     const raw = window.localStorage.getItem(GUEST_KEY);
-    if (raw) return { ...EMPTY_DETAILS, ...JSON.parse(raw) };
+    if (raw) {
+      const saved = JSON.parse(raw) as Partial<PassengerDetails>;
+      // Older builds cached national ID/passport numbers in local storage.
+      // Remove that sensitive field and require it again for this booking.
+      if (Object.prototype.hasOwnProperty.call(saved, "idNumber")) {
+        delete saved.idNumber;
+        window.localStorage.setItem(GUEST_KEY, JSON.stringify(saved));
+      }
+      return { ...EMPTY_DETAILS, ...saved, idNumber: "" };
+    }
   } catch {}
   return { ...EMPTY_DETAILS };
 }
@@ -189,7 +201,7 @@ function BookingSheetContent({
       ? calculateCharterFare(trip.capacity, stage.fare)
       : calculateSharedFare(stage.fare, trip.capacity, draft?.seats || 1))
     : 0;
-  const surcharge = draft?.homePickup ? (draft?.charter ? stage?.homeSurcharge || 0 : (stage?.homeSurcharge || 0) * (draft?.seats || 1)) : 0;
+  const surcharge = draft?.homePickup && !draft?.charter ? (stage?.homeSurcharge || 0) * (draft?.seats || 1) : 0;
   const bookingFeePerSeat = trip?.platformFeeAmount ?? DEFAULT_BOOKING_FEE_AMOUNT;
   const platformFeeAmount = calculateBookingFeeAmount(bookingFeePerSeat, draft?.seats || 1, !!draft?.charter);
   const total = fare + surcharge + (draft?.charter ? 0 : platformFeeAmount);
@@ -231,7 +243,15 @@ function BookingSheetContent({
         },
       });
       try {
-        window.localStorage.setItem(GUEST_KEY, JSON.stringify({ ...details, fullName: details.fullName.trim(), email: details.email.trim() }));
+        const savedDetails: Omit<PassengerDetails, "idNumber"> = {
+          fullName: details.fullName.trim(),
+          idType: details.idType,
+          nationality: details.nationality,
+          gender: details.gender,
+          email: details.email.trim(),
+          phone: details.phone,
+        };
+        window.localStorage.setItem(GUEST_KEY, JSON.stringify(savedDetails));
       } catch {}
       setCreated(res.booking);
       await refresh();
@@ -264,7 +284,7 @@ function BookingSheetContent({
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <SheetTitle className="flex flex-wrap items-center gap-2 text-xl">
-                  {trip.driver ? `${trip.driver.name}'s ${trip.driver.cabType}` : trip.routeName}
+                  {trip.routeName}
                   {isCharter && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] text-violet-900">
                       <Crown className="h-3 w-3" /> Private charter
@@ -272,10 +292,6 @@ function BookingSheetContent({
                   )}
                 </SheetTitle>
                 <SheetDescription className="mt-1 flex flex-wrap items-center gap-2">
-                  {trip.driver && <Stars rating={trip.driver.rating} />}
-                  {trip.driver && <span className="text-muted-foreground/50">•</span>}
-                  {trip.driver && <span className="font-mono text-xs">{trip.driver.plate}</span>}
-                  {trip.driver && <span className="text-muted-foreground/50">•</span>}
                   <DotBadge status={trip.status} />
                 </SheetDescription>
               </div>
@@ -307,13 +323,15 @@ function BookingSheetContent({
           {created ? (
             <div className="space-y-4 px-4 pb-2">
               <div className="flex flex-col items-center gap-2 py-4 text-center">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100">
-                  <TicketIcon className="h-7 w-7 text-emerald-600" />
+                <div className={`flex h-12 w-12 items-center justify-center rounded-full ${created.cashDue > 0 ? "bg-amber-100" : "bg-emerald-100"}`}>
+                  <TicketIcon className={`h-7 w-7 ${created.cashDue > 0 ? "text-amber-700" : "text-emerald-600"}`} />
                 </div>
-                <h3 className="text-lg font-semibold">Booking {created.code} placed!</h3>
+                <h3 className="text-lg font-semibold">
+                  {created.cashDue > 0 ? `Cab held · ${created.code}` : `Booking ${created.code} confirmed`}
+                </h3>
                 <p className="max-w-xs text-sm text-muted-foreground">
                   {created.cashDue > 0
-                    ? `Karibu ${created.passengerName?.split(" ")[0] || ""} — complete the M-Pesa payment to confirm your seat.`
+                    ? `Karibu ${created.passengerName?.split(" ")[0] || ""} — complete the M-Pesa payment to confirm. Your ticket and driver details follow after payment.`
                     : `Karibu ${created.passengerName?.split(" ")[0] || ""} — fully covered by your travel credit, your seat is confirmed.`}
                 </p>
               </div>
@@ -342,7 +360,7 @@ function BookingSheetContent({
               </div>
               {created.cashDue > 0 ? (
                 <Button className="w-full" onClick={() => setPayOpen(true)}>
-                  Pay {ksh(created.cashDue)} with M-Pesa
+                  Complete booking · {ksh(created.cashDue)} with M-Pesa
                 </Button>
               ) : (
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-emerald-900">
@@ -410,7 +428,7 @@ function BookingSheetContent({
               {draft.homePickup && (
                 <div className="space-y-1.5">
                   <Label htmlFor="draft-address" className="flex items-center gap-1 text-xs">
-                    <Home className="h-3 w-3" /> Door-to-door address
+                    <Home className="h-3 w-3" /> Desired {trip.direction === "FROM_TERMINUS" ? "drop-off" : "pickup"} address
                   </Label>
                   <Input
                     id="draft-address"
@@ -567,6 +585,10 @@ function BookingSheetContent({
                   </span>
                 </div>
               </div>
+
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                To cancel, call or WhatsApp Mireli at {MIRELI_SUPPORT_PHONE_LOCAL}. Notice at least {describeCancellationCutoff(trip.cancellationCutoffMinutes ?? DEFAULT_FULL_REFUND_CUTOFF_MINUTES)} before pickup gets a full refund; later notice gets 75% travel credit for 30 days and 25% is forfeited.
+              </p>
 
               {error && <p className="text-sm text-destructive">{error}</p>}
             </div>

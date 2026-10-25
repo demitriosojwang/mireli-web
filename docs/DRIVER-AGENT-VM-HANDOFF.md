@@ -1,7 +1,24 @@
 # Mireli Driver agent: shared VM handoff
 
-Updated 19 October 2026, 22:53 EAT. Use this when connecting the Mireli Driver Android
+Updated 25 October 2026. Use this when connecting the Mireli Driver Android
 project to the same backend used by Mireli Web.
+
+## Latest SSM recovery attempt (25 October 2026)
+
+Port 22 remains closed. After the owner confirmed the Chrome authorization, the
+read-only `aws sts get-caller-identity --profile mireli --region eu-north-1`
+check still failed because the CLI could not connect to
+`https://eu-north-1.signin.aws.amazon.com/v1/token`. This is a connection
+failure, not evidence of an IAM denial, and does not identify the VM-side SSM
+failure. No AWS API state could be rechecked and no AWS resources were changed.
+
+The checked-in `infra/aws/mireli-vm.yaml` declares
+`AmazonSSMManagedInstanceCore` on `AppInstanceRole`. This is evidence about the
+template only; the live instance-profile association and policy attachment
+remain unverified. When AWS access works again, first inspect the live profile
+and attached policies, SSM managed-node status, and the instance's agent and
+outbound path to the regional SSM endpoints. Apply only the least change that
+the evidence supports. Keep SSH closed.
 
 ## Latest AWS browser access check (19 October 2026, 22:53 EAT)
 

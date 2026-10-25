@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
         route: { is: { active: true } },
         name: { contains: query, mode: "insensitive" },
       },
-      orderBy: [{ name: "asc" }, { routeId: "asc" }, { order: "asc" }],
+      orderBy: [{ route: { name: "asc" } }, { order: "asc" }, { name: "asc" }],
       take: SEARCH_LIMIT + 1,
       select,
     });
@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
         ...usableStop,
         route: { is: { active: true, name: { contains: query, mode: "insensitive" } } },
       },
-      orderBy: [{ name: "asc" }, { routeId: "asc" }, { order: "asc" }],
+      orderBy: [{ route: { name: "asc" } }, { order: "asc" }, { name: "asc" }],
       take: SEARCH_LIMIT + 1,
       select,
     });

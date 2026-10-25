@@ -31,7 +31,6 @@ import {
   DotBadge,
   SeatMeter,
   SeatStepper,
-  Stars,
   TrainPill,
   CharterBadge,
   fmtDateShort,
@@ -39,7 +38,6 @@ import {
 } from "@/components/app/shared";
 import {
   Anchor,
-  AlertTriangle,
   CalendarDays,
   Car,
   Check,
@@ -154,7 +152,9 @@ export default function Home() {
   // Availability is route-specific and is fetched only after a passenger
   // chooses a stop. This keeps the initial booking form free of broad trip
   // queries and lets the stop choice drive the next compact step.
-  const queryKey = selectedPoint ? `${direction}|${date}|${selectedPoint.route.id}` : null;
+  const queryKey = selectedPoint && trainKey
+    ? `${direction}|${date}|${selectedPoint.route.id}|${trainKey}`
+    : null;
   const loading = Boolean(queryKey) && (isRefreshing || loadedQuery !== queryKey);
 
   const [draft, setDraft] = useState<BookingDraft | null>(null);
@@ -214,9 +214,6 @@ export default function Home() {
         setPointCount(nextPointCount);
         setRoutesStatus(nextPointCount ? "ready" : "empty");
         if (!nextPointCount) {
-          setTimetable([]);
-          setTimetableStatus("empty");
-          setTrainKey(null);
           setSelectedPoint(null);
           setHomePickup(false);
           setJourneyCollapsed(false);
@@ -249,7 +246,7 @@ export default function Home() {
   }, [catalogueRetry]);
 
   useEffect(() => {
-    if (!shouldLoadTrainTimetable(routesStatus, pointCount)) return;
+    if (!shouldLoadTrainTimetable(routesStatus)) return;
 
     const controller = new AbortController();
     api<{ trains: TrainRow[] }>("/api/trains", {
@@ -267,13 +264,14 @@ export default function Home() {
         setTimetableStatus("error");
       });
     return () => controller.abort();
-  }, [routesStatus, pointCount]);
+  }, [routesStatus]);
 
   useEffect(() => {
     const query = pointSearch.trim();
     // The public search endpoint deliberately requires at least two
     // characters and caps its response. Never request the full catalogue when
     // the picker opens with an empty query.
+    if (routesStatus === "ready" && pointCount === 0) return;
     if (!shouldSearchStagePoints(query, pointPickerOpen)) return;
 
     const controller = new AbortController();
@@ -303,7 +301,7 @@ export default function Home() {
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [pointPickerOpen, pointSearch, pointSearchRetry]);
+  }, [pointPickerOpen, pointSearch, pointSearchRetry, routesStatus, pointCount]);
 
   useEffect(() => {
     if (!isAuthed) return;
@@ -315,12 +313,12 @@ export default function Home() {
   }, [isAuthed]);
 
   useEffect(() => {
-    if (!splashReady || showSplash || !selectedPoint || !queryKey) return;
+    if (!splashReady || showSplash || !selectedPoint || !trainKey || !queryKey) return;
     const requestedQueryKey = queryKey;
     const controller = new AbortController();
     let active = true;
     api<{ trips: BookableTrip[]; hasEligibleDrivers: boolean }>(
-      `/api/trips?date=${date}&direction=${direction}&routeId=${encodeURIComponent(selectedPoint.route.id)}`,
+      `/api/trips?date=${date}&direction=${direction}&routeId=${encodeURIComponent(selectedPoint.route.id)}&trainId=${encodeURIComponent(trainKey)}`,
       { signal: controller.signal, timeoutMs: TRIP_AVAILABILITY_TIMEOUT_MS },
     )
       .then((res) => {
@@ -343,10 +341,10 @@ export default function Home() {
       active = false;
       controller.abort();
     };
-  }, [splashReady, showSplash, direction, date, selectedPoint?.route.id, queryKey, tripRefreshKey]);
+  }, [splashReady, showSplash, direction, date, selectedPoint?.route.id, trainKey, queryKey, tripRefreshKey]);
 
   async function openBooking(trip: BookableTrip) {
-    if (!selectedPoint || selectedPoint.route.id !== trip.routeId || checkingPayment) return;
+    if (!selectedPoint || !trainKey || trip.train?.id !== trainKey || selectedPoint.route.id !== trip.routeId || checkingPayment) return;
     setBookingStartError(null);
     setCheckingPayment(true);
     try {
@@ -366,8 +364,8 @@ export default function Home() {
         (charter
           ? calculateCharterFare(trip.capacity, selectedPoint.point.fare)
           : calculateSharedFare(selectedPoint.point.fare, trip.capacity, seats)) +
-        (homePickup
-          ? selectedPoint.point.homeSurcharge * (charter ? 1 : seats)
+        (homePickup && !charter
+          ? selectedPoint.point.homeSurcharge * seats
           : 0) +
         (charter ? 0 : feeAmount);
       const creditBalanceValue = me?.creditBalance ?? 0;
@@ -413,17 +411,18 @@ export default function Home() {
       })
       .map((t) => {
         const mtmTime = t.direction === "MBA_TO_NBO" ? t.originTime : t.destTime;
-        const key = `${t.name}-${mtmTime}`;
+        const key = t.id;
         return {
+          id: t.id,
           key,
           time: mtmTime,
           name: t.name,
           label: direction === "FROM_TERMINUS" ? "Arrives MTM" : "Departs MTM",
-          gone: !!selectedPoint && loadedQuery === queryKey && trips !== null && hasEligibleDrivers === true && !(trips || []).some((x) => x.train && `${x.train.name}-${x.train.mtmTime}` === key),
+          gone: !!selectedPoint && !!trainKey && loadedQuery === queryKey && trips !== null && hasEligibleDrivers === true && !(trips || []).some((x) => x.train?.id === key),
         };
       })
       .sort((a, b) => a.time.localeCompare(b.time));
-  }, [timetable, direction, date, trips, hasEligibleDrivers, selectedPoint, loadedQuery, queryKey]);
+  }, [timetable, direction, date, trips, hasEligibleDrivers, selectedPoint, loadedQuery, queryKey, trainKey]);
 
   const selectedTrainGone = trainKey ? (trainOptions.find((o) => o.key === trainKey)?.gone ?? false) : false;
   const selectedTrain = trainKey ? trainOptions.find((option) => option.key === trainKey) ?? null : null;
@@ -448,11 +447,11 @@ export default function Home() {
 
   // Trips after train + point filters
   const visibleTrips = useMemo(() => {
-    if (!selectedPoint) return [];
+    if (!selectedPoint || !trainKey) return [];
     let list = (trips || []).filter((trip) =>
       trip.bookable && (charter ? trip.seatsLeft === trip.capacity : trip.seatsLeft > 0),
     );
-    if (trainKey) list = list.filter((t) => t.train && `${t.train.name}-${t.train.mtmTime}` === trainKey);
+    list = list.filter((t) => t.train?.id === trainKey);
     if (selectedPoint) list = list.filter((t) => t.routeId === selectedPoint.route.id);
     return list;
   }, [trips, trainKey, selectedPoint, charter]);
@@ -483,8 +482,8 @@ export default function Home() {
       : sharedFares.length > 0
         ? Math.min(...sharedFares)
         : (previewStage?.fare || 0) * seats;
-    const surcharge = homePickup
-      ? (charter ? previewStage?.homeSurcharge || 0 : (previewStage?.homeSurcharge || 0) * seats)
+    const surcharge = homePickup && !charter
+      ? (previewStage?.homeSurcharge || 0) * seats
       : 0;
     const platformFee = selectedPoint
       ? calculateBookingFeeAmount(bookingFeeAmount, seats, charter)
@@ -588,6 +587,31 @@ export default function Home() {
                     <p className="text-xs text-muted-foreground"><span className="font-semibold text-foreground">0 pooled cabs</span> · no eligible drivers are available right now</p>
                   )}
                 </div>
+                <div className="mt-4 border-t pt-3" aria-label="Madaraka Express timetable">
+                  <h3 className="text-sm font-semibold">Madaraka Express times</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {direction === "FROM_TERMINUS" ? "Arrival at Mombasa Terminus" : "Departure from Mombasa Terminus"} · Kenya time
+                  </p>
+                  {timetableStatus === "loading" && <p role="status" className="mt-2 text-xs text-muted-foreground">Loading train times…</p>}
+                  {timetableStatus === "error" && (
+                    <p role="alert" className="mt-2 text-xs text-muted-foreground">
+                      Train times could not load. <button type="button" className="font-medium text-primary underline underline-offset-2" onClick={retryCatalogues}>Try again</button>
+                    </p>
+                  )}
+                  {timetableStatus === "empty" && <p className="mt-2 text-xs text-muted-foreground">The timetable is being configured.</p>}
+                  {timetableStatus === "ready" && trainOptions.length === 0 && <p className="mt-2 text-xs text-muted-foreground">No trains are listed for this date.</p>}
+                  {trainOptions.length > 0 && (
+                    <ul className="mt-2 grid grid-cols-3 gap-2">
+                      {trainOptions.map((train) => (
+                        <li key={train.id} className="rounded-lg border bg-background px-2 py-2">
+                          <p className="text-[10px] font-medium text-muted-foreground">{train.name}</p>
+                          <p className="text-sm font-semibold tabular-nums">{train.time}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <p className="mt-2 text-[10px] text-muted-foreground">Booking opens when approved stops and eligible cabs are available.</p>
+                </div>
               </section>
             ) : (
             <div className="space-y-4" hidden={journeyStepDone}>
@@ -632,7 +656,10 @@ export default function Home() {
                     name={t.name}
                     gone={t.gone}
                     active={trainKey === t.key}
-                    onClick={() => setTrainKey(trainKey === t.key ? null : t.key)}
+                    onClick={() => {
+                      setTrainKey(t.key);
+                      if (selectedPoint) setJourneyCollapsed(true);
+                    }}
                   />
                 ))}
               </div>
@@ -700,34 +727,46 @@ export default function Home() {
                         <CommandInput
                           value={pointSearch}
                           maxLength={MAX_STAGE_SEARCH_LENGTH}
+                          disabled={routesStatus === "ready" && pointCount === 0}
                           onValueChange={(value) => {
                             setPointSearch(value);
                             setPointMatches([]);
-                            setPointSearchStatus(isStageSearchReady(value) ? "loading" : "idle");
+                            setPointSearchStatus(
+                              routesStatus === "ready" && pointCount === 0
+                                ? "empty"
+                                : isStageSearchReady(value) ? "loading" : "idle",
+                            );
                             setPointSearchHasMore(false);
                           }}
-                          placeholder={`Search ${pointLabelCap.toLowerCase()} stops by name or area`}
+                          placeholder={routesStatus === "ready" && pointCount === 0
+                            ? "No designated stages published yet"
+                            : `Search ${pointLabelCap.toLowerCase()} stops by name or area`}
                         />
                         <CommandList className="max-h-60">
-                          {pointSearch.trim().length === 0 && (
+                          {routesStatus === "ready" && pointCount === 0 && (
+                            <p className="px-3 py-5 text-center text-sm text-muted-foreground" role="status">
+                              No designated pickup or drop-off stages are published yet. Booking will open when the approved route locations are ready.
+                            </p>
+                          )}
+                          {!(routesStatus === "ready" && pointCount === 0) && pointSearch.trim().length === 0 && (
                             <p className="px-3 py-5 text-center text-sm text-muted-foreground" role="status">
                               Type at least two letters to find a stop.
                             </p>
                           )}
-                          {pointSearch.trim().length > 0 && pointSearch.trim().length < MIN_STAGE_SEARCH_LENGTH && (
+                          {!(routesStatus === "ready" && pointCount === 0) && pointSearch.trim().length > 0 && pointSearch.trim().length < MIN_STAGE_SEARCH_LENGTH && (
                             <p className="px-3 py-5 text-center text-sm text-muted-foreground" role="status">
                               Type one more letter to search.
                             </p>
                           )}
-                          {pointSearchStatus === "loading" && pointSearch.trim().length >= MIN_STAGE_SEARCH_LENGTH && (
+                          {!(routesStatus === "ready" && pointCount === 0) && pointSearchStatus === "loading" && pointSearch.trim().length >= MIN_STAGE_SEARCH_LENGTH && (
                             <p className="px-3 py-5 text-center text-sm text-muted-foreground">Searching points…</p>
                           )}
-                          {pointSearchStatus === "error" && (
+                          {!(routesStatus === "ready" && pointCount === 0) && pointSearchStatus === "error" && (
                             <p className="px-3 py-5 text-center text-sm text-muted-foreground" role="alert">
                               Points could not load. <button type="button" className="font-medium text-primary underline" onClick={() => { setPointSearchStatus("loading"); setPointSearchRetry((attempt) => attempt + 1); }}>Try again</button>
                             </p>
                           )}
-                          {pointSearchStatus === "empty" && (
+                          {!(routesStatus === "ready" && pointCount === 0) && pointSearchStatus === "empty" && (
                             <p className="px-3 py-5 text-center text-sm text-muted-foreground">
                               No matching stop. Try another area or stop name.
                             </p>
@@ -743,6 +782,7 @@ export default function Home() {
                                   value={`${coast} ${route.name} ${point.name}`}
                                   onSelect={() => {
                                     setBookingStartError(null);
+                                    setHomePickup(false);
                                     setTrips(null);
                                     setTripsStatus("loading");
                                     setLoadedQuery(null);
@@ -757,14 +797,13 @@ export default function Home() {
                                       route,
                                       coast,
                                     });
-                                    setJourneyCollapsed(true);
+                                    setJourneyCollapsed(Boolean(trainKey));
                                     setPointPickerOpen(false);
                                   }}
                                   className="min-h-11"
                                 >
                                   <Check className={cn("h-4 w-4", selectedPoint?.point.id === point.id ? "opacity-100" : "opacity-0")} />
                                   <span className="min-w-0 flex-1 truncate">{point.name}</span>
-                                  <span className="text-xs tabular-nums text-muted-foreground">{ksh(point.fare)} / seat</span>
                                 </CommandItem>
                               ))}
                             </CommandGroup>
@@ -780,8 +819,7 @@ export default function Home() {
                 </Popover>
                 {selectedPoint && (
                   <p className="px-1 text-[11px] text-muted-foreground">
-                    {selectedPoint.coast === "south" ? "South Coast" : "North Coast"} · {ksh(selectedPoint.point.fare)} listed fare per seat
-                    {selectedPoint.point.fare > 50 && ` · ${ksh(selectedPoint.point.fare - 50)} in 10/11-seat shared cabs`}
+                    {selectedPoint.coast === "south" ? "South Coast" : "North Coast"} · fare shown with your ride options
                   </p>
                 )}
                 {!selectedPoint && routesStatus === "ready" && pointCount > 0 && (
@@ -804,14 +842,14 @@ export default function Home() {
                 <button
                   type="button"
                   aria-pressed={!charter}
-                  onClick={() => setCharter(false)}
+                  onClick={() => { setCharter(false); setHomePickup(false); }}
                   className={cn("rounded-xl border bg-card p-3 text-left transition-colors", !charter ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
                 >
                   <span className="flex items-center gap-2">
                     <Users className="h-4 w-4 shrink-0 text-primary" />
                     <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium">Shared ride</span>
-                      <span className="block text-[11px] text-muted-foreground">Pay per seat</span>
+                      <span className="block truncate text-sm font-medium">Hail a seat</span>
+                      <span className="block text-[11px] text-muted-foreground">Share with other passengers</span>
                     </span>
                   </span>
                 </button>
@@ -824,8 +862,8 @@ export default function Home() {
                   <span className="flex items-center gap-2">
                     <Crown className="h-4 w-4 shrink-0 text-violet-600" />
                     <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium">Private cab</span>
-                      <span className="block text-[11px] text-muted-foreground">Reserve the vehicle</span>
+                      <span className="block truncate text-sm font-medium">Charter the whole cab</span>
+                      <span className="block text-[11px] text-muted-foreground">Your group · no distance fee</span>
                     </span>
                   </span>
                 </button>
@@ -843,7 +881,7 @@ export default function Home() {
                     className={cn("min-h-[76px] rounded-xl border bg-card p-3 text-left transition-colors", !homePickup ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
                   >
                     <span className="flex items-center gap-1.5 text-sm font-medium">
-                      <MapPin className="h-3.5 w-3.5 shrink-0 text-primary" /> At the stage
+                      <MapPin className="h-3.5 w-3.5 shrink-0 text-primary" /> Designated SGR stage
                     </span>
                     <span className="mt-1 block truncate text-[11px] text-muted-foreground">
                       {selectedPoint?.point.name ?? "Choose a stop first"}
@@ -852,7 +890,7 @@ export default function Home() {
                   <button
                     type="button"
                     aria-pressed={homePickup}
-                    disabled={!selectedPoint}
+                    disabled={!selectedPoint || !charter}
                     onClick={() => setHomePickup(true)}
                     className={cn("min-h-[76px] rounded-xl border bg-card p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-55", homePickup ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
                   >
@@ -860,11 +898,11 @@ export default function Home() {
                       <HomeIcon className="h-3.5 w-3.5 shrink-0 text-primary" /> Door-to-door
                     </span>
                     <span className="mt-1 block text-[11px] text-muted-foreground">
-                      {selectedPoint
-                        ? (selectedPoint.point.homeSurcharge > 0
-                          ? `+${ksh(selectedPoint.point.homeSurcharge * (charter ? 1 : seats))} · paid to driver`
-                          : "No extra charge")
-                        : "Choose a stop first"}
+                      {!selectedPoint
+                        ? "Choose a designated stage first"
+                        : charter
+                          ? "Choose your address · no distance fee"
+                          : "KSh 50 per extra km goes to the driver · not available yet"}
                     </span>
                   </button>
                 </div>
@@ -954,8 +992,10 @@ export default function Home() {
               {!loading && tripsStatus !== "error" && visibleTrips.length === 0 && (
                 <Card>
                   <CardContent className="py-5 text-center text-sm text-muted-foreground">
-                    {selectedTrainGone
-                      ? "This train’s meet-cab has already left for the selected day — pick a later train or another date."
+                    {!trainKey
+                      ? "Choose a train to see cabs for your journey."
+                      : selectedTrainGone
+                      ? "No cab is available for this train on the selected day. Choose another train or date."
                       : hasEligibleDrivers === false
                         ? "No eligible drivers are available to serve bookings right now."
                         : !selectedPoint
@@ -987,7 +1027,7 @@ export default function Home() {
             {bookingCatalogueView === "booking" && (routesStatus === "ready" || routesStatus === "error") && <details className="rounded-xl border bg-card px-3.5 py-3 text-sm">
               <summary className="cursor-pointer font-medium">Fare and service details</summary>
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                Shared fares are per passenger seat; 10/11-seat cabs are KSh 50 less per seat. Mireli retains KSh 50 per booked shared seat. Door-to-door surcharges go to your driver in full. A private cab reserves the whole vehicle; Mireli keeps 10% and the driver receives the rest.
+                Hailed rides use a designated SGR stage and add KSh 50 to each booked seat for Mireli. Shared door-to-door adds KSh 50 per extra kilometre from the nearest stage, paid in full to the driver; it is not available until verified stage locations and trusted road-distance pricing are configured. Charters reserve the whole cab with no extra-distance fee; Mireli keeps 10% of the charter fare and the driver receives the rest.
               </p>
             </details>}
 
@@ -1099,7 +1139,7 @@ function CabCard({
     : charter
       ? calculateCharterFare(trip.capacity, pointFare)
       : calculateSharedFare(pointFare, trip.capacity, seats);
-  const surcharge = homePickup ? (pointSurcharge ?? 0) * (charter ? 1 : seats) : 0;
+  const surcharge = homePickup && !charter ? (pointSurcharge ?? 0) * seats : 0;
   const platformFee = calculateBookingFeeAmount(trip.platformFeeAmount, seats, charter);
   const fare = baseFare + surcharge + (hasPoint && !charter ? platformFee : 0);
   const insufficientSeats = charter ? trip.seatsLeft !== trip.capacity : trip.seatsLeft < seats;
@@ -1113,29 +1153,13 @@ function CabCard({
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold">{pointName ?? trip.routeName}</span>
               <DotBadge status={trip.status} />
-              {trip.status === "locked" && (
-                <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-900" title={trip.lockNote ?? undefined}>
-                  <AlertTriangle className="h-2.5 w-2.5" /> Late cancellation terms
-                </span>
-              )}
             </div>
-            {trip.driver && (
-              <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <span>{trip.driver.name}</span>
-                <Stars rating={trip.driver.rating} />
-                <span className="text-muted-foreground/50">•</span>
-                <span className="font-mono">{trip.driver.plate}</span>
-              </div>
-            )}
             <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
               <Clock className="h-3 w-3" />
               {trip.direction === "TO_TERMINUS"
                 ? `Leaves the stage ${fmtTime(trip.departureAt)} · be there by then`
                 : `Cab departs ${fmtTime(trip.departureAt)}`}
             </div>
-            {trip.status === "locked" && (
-              <p className="mt-0.5 text-[10px] text-amber-800">Late cancellations convert the fare to travel credit.</p>
-            )}
           </div>
           <div className="shrink-0 text-right">
             <div className="text-[10px] uppercase tracking-wide text-muted-foreground">

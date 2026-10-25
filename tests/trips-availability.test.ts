@@ -30,7 +30,7 @@ vi.mock("@/lib/unpaid-booking-expiry", () => ({
 import { GET } from "@/app/api/trips/route";
 import { DriverError } from "@/lib/driver/errors";
 
-const request = (query = "date=2026-10-11") =>
+const request = (query = "date=2026-10-11&trainId=train-1") =>
   new NextRequest(`https://mireli.test/api/trips?${query}`);
 
 const eligibleDriver = {
@@ -62,7 +62,7 @@ describe("customer trip availability", () => {
     expect(mocks.tripFindMany).not.toHaveBeenCalled();
   });
 
-  it("limits driver and trip reads to the fields and eligible supply the booking UI needs", async () => {
+  it("limits trip reads to booking fields and never exposes driver identity before payment", async () => {
     mocks.driverFindMany.mockResolvedValue([eligibleDriver]);
     mocks.tripFindMany.mockResolvedValue([{
       id: "trip-1",
@@ -79,21 +79,23 @@ describe("customer trip availability", () => {
         charterPrice: 4000,
       },
       driver: { name: "Approved Driver", plate: "KAA 123A", cabType: "Van", rating: 4.8 },
-      train: { name: "Night Train", direction: "NBO_TO_MBA", originTime: "22:00", destTime: "03:55" },
+      train: { id: "train-1", name: "Night Train", direction: "NBO_TO_MBA", originTime: "22:00", destTime: "03:55" },
       bookings: [{ seats: 1 }],
     }]);
 
-    const response = await GET(request("date=2026-10-11&routeId=route-1"));
+    const response = await GET(request("date=2026-10-11&routeId=route-1&trainId=train-1"));
     const result = await response.json();
 
     expect(response.status).toBe(200);
     expect(result.hasEligibleDrivers).toBe(true);
     expect(result.trips).toHaveLength(1);
     expect(result.trips[0]).toMatchObject({ seatsLeft: 3, platformFeeAmount: 50 });
+    expect(result.trips[0].train).toMatchObject({ id: "train-1", name: "Night Train", mtmTime: "03:55" });
     expect(result.trips[0]).not.toHaveProperty("stages");
     expect(result.trips[0]).not.toHaveProperty("points");
-    expect(result.trips[0].driver).not.toHaveProperty("phone");
+    expect(result.trips[0]).not.toHaveProperty("driver");
     expect(mocks.tripFindMany.mock.calls[0][0].where.routeId).toBe("route-1");
+    expect(mocks.tripFindMany.mock.calls[0][0].where.trainId).toBe("train-1");
     expect(mocks.tripFindMany.mock.calls[0][0].where.route).toEqual({
       is: {
         active: true,
@@ -102,6 +104,7 @@ describe("customer trip availability", () => {
     });
     expect(mocks.tripFindMany.mock.calls[0][0].where.train).toEqual({ is: { active: true } });
     expect(mocks.tripFindMany.mock.calls[0][0].where.driverId.in).toEqual([eligibleDriver.id]);
+    expect(mocks.tripFindMany.mock.calls[0][0].select).not.toHaveProperty("driver");
     expect(mocks.driverFindMany.mock.calls[0][0].select.application.select.documents.select)
       .toEqual({ type: true, state: true, scanState: true, expiresAt: true });
     expect(mocks.tripFindMany.mock.calls[0][0].select.route.select).not.toHaveProperty("stages");
@@ -155,9 +158,17 @@ describe("customer trip availability", () => {
   });
 
   it("rejects an empty route filter before querying the database", async () => {
-    const response = await GET(request("date=2026-10-11&routeId="));
+    const response = await GET(request("date=2026-10-11&routeId=&trainId=train-1"));
 
     expect(response.status).toBe(400);
+    expect(mocks.driverFindMany).not.toHaveBeenCalled();
+  });
+
+  it("requires a selected train before querying availability", async () => {
+    const response = await GET(request("date=2026-10-11"));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Choose a train" });
     expect(mocks.driverFindMany).not.toHaveBeenCalled();
   });
 });

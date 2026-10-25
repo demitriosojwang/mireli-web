@@ -46,7 +46,7 @@ The existing driver app is configured to use the intended HTTPS hostname for non
 
 Hosting does not create routes, train services, drivers, or provider credentials. Do not fake inventory or accept incomplete bookings.
 
-- The owner has not supplied the approved stage names, coordinates, fares/surcharges, and final SGR timetable. Production stage and train data must remain empty until the approved catalogue is loaded.
+- The owner-approved fare sheet supplies stage names and per-seat fares and is integrated in `src/lib/fare-catalogue.ts`. Exact passenger-stage coordinates, driving order, door-to-door surcharges, and final SGR timetable remain unapproved. Keep production stage/train data empty until the missing operational values are reviewed and loaded.
 - No driver is onboarded or approved. Available pooled cabs must remain zero until the shared driver platform supplies an approved driver who can serve the active route.
 - Configure and verify live passenger/driver authentication, M-Pesa collection and post-trip driver payout credentials, callbacks, email/SMS delivery, and reconciliation. Secrets belong in AWS Secrets Manager; never put them in GitHub variables, an image, or a document.
 - Booking tickets now have a branded Brevo email path and durable per-booking delivery state. It is not active on the VM until a verified sender and `BREVO_API_KEY` are added to `MireliRuntimeSecret` and the corresponding host runtime loader is deployed. The previous Vercel sender configuration is not an AWS runtime configuration.

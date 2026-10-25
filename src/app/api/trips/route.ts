@@ -6,6 +6,7 @@ import { nairobiDayRange } from "@/lib/nairobi-time";
 import { getEligibleDriverIds } from "@/lib/driver/availability";
 import { DriverError } from "@/lib/driver/errors";
 import { expireUnpaidBookingReservations } from "@/lib/unpaid-booking-expiry";
+import { describeCancellationCutoff } from "@/lib/cancellation-policy";
 
 /** Bookable departures for a date + direction. */
 export async function GET(req: NextRequest) {
@@ -13,9 +14,11 @@ export async function GET(req: NextRequest) {
   const date = searchParams.get("date"); // YYYY-MM-DD
   const direction = searchParams.get("direction") || "FROM_TERMINUS";
   const routeId = searchParams.get("routeId");
+  const trainId = searchParams.get("trainId");
   if (!date) return NextResponse.json({ error: "date required" }, { status: 400 });
 
   if (!["FROM_TERMINUS", "TO_TERMINUS"].includes(direction)) return NextResponse.json({ error: "Invalid direction" }, { status: 400 });
+  if (!trainId || trainId.length > 64) return NextResponse.json({ error: "Choose a train" }, { status: 400 });
   if (routeId !== null && (routeId.length === 0 || routeId.length > 64)) {
     return NextResponse.json({ error: "Invalid route" }, { status: 400 });
   }
@@ -41,6 +44,7 @@ export async function GET(req: NextRequest) {
     const trips = await db.trip.findMany({
       where: {
         ...(routeId ? { routeId } : {}),
+        trainId,
         direction,
         driverId: { in: eligibleDriverIds },
         departureAt: { gte: dayStart, lt: dayEnd },
@@ -75,9 +79,8 @@ export async function GET(req: NextRequest) {
             charterPrice: true,
           },
         },
-        driver: { select: { name: true, plate: true, cabType: true, rating: true } },
         train: {
-          select: { name: true, direction: true, originTime: true, destTime: true },
+          select: { id: true, name: true, direction: true, originTime: true, destTime: true },
         },
         bookings: {
           where: { status: { in: ["awaiting_payment", "confirmed", "boarded", "completed"] } },
@@ -90,14 +93,13 @@ export async function GET(req: NextRequest) {
     hasEligibleDrivers: true,
     // The database query requires at least one valid customer stop without
     // materializing the entire route-stage list for every departure.
-    trips: trips
-      .filter((t) => !!t.driver)
-      .map((t) => {
+    trips: trips.map((t) => {
       const relevantBooked = t.bookings.reduce((s, b) => s + b.seats, 0);
       const seatsLeft = Math.max(t.capacity - relevantBooked, 0);
       const isFromTerminus = t.direction === "FROM_TERMINUS";
       const train = t.train
         ? {
+            id: t.train.id,
             name: t.train.name,
             // MTM event time: the departure we race for, or the arrival we meet
             mtmTime: t.train.direction === "MBA_TO_NBO" ? t.train.originTime : t.train.destTime,
@@ -112,6 +114,7 @@ export async function GET(req: NextRequest) {
         durationMinutes: t.route.durationMinutes,
         charterPrice: t.route.charterPrice,
         platformFeeAmount: cfg.bookingFeeAmount,
+        cancellationCutoffMinutes: cfg.fullRefundCutoffMinutes,
         direction: t.direction,
         departureAt: t.departureAt,
         // TO_TERMINUS: when the cab is scheduled to reach the terminus —
@@ -132,16 +135,8 @@ export async function GET(req: NextRequest) {
         capacity: t.capacity,
         seatsLeft,
         bookable: ["scheduled", "locked"].includes(t.status) && seatsLeft > 0 && t.departureAt > now,
-        lockNote: t.status === "locked" ? "Bookings locked — late cancellation converts fare to credit" : null,
-        // Driver identity is public; the phone number is only revealed after
-        // payment (see /api/bookings) to protect drivers from spam calls.
-        driver: t.driver
-          ? {
-              name: t.driver.name,
-              plate: t.driver.plate,
-              cabType: t.driver.cabType,
-              rating: t.driver.rating,
-            }
+        lockNote: t.status === "locked"
+          ? `Cancellation notice at least ${describeCancellationCutoff(cfg.fullRefundCutoffMinutes)} before pickup gets a full refund. Later notice gets 75% travel credit for 30 days; 25% is forfeited.`
           : null,
         // The customer-selected stop comes from the bounded /api/stages search;
         // do not repeat route-stop details for each departure card.

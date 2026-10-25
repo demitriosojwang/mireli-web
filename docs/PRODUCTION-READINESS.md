@@ -1,15 +1,89 @@
 # Mireli booking launch checklist
 
-**Status: not ready to accept customer bookings.** The 19 October 2026, 22:53
-EAT browser check confirmed EC2 `i-097df027e02b0708f` is running and passes
-3/3 status checks, but the console now reports `Managed: false`; SSM Connect is
-disabled and EC2 Instance Connect says SSH port 22 is not authorized. The last
-successful VM shell/API check is historical (18 October). The latest workstation
-DNS/TLS check at 21:37 EAT resolved `mirelisgr.duckdns.org` to
-`105.161.112.67` rather than the VM EIP `13.53.183.149` and timed out. The
-production catalogue was empty at the last successful API check, while live
-payment/email credentials remain unverified. Keep pooled cabs at zero and do
-not accept payment until the end-to-end gates below pass.
+**Status: not ready to accept customer bookings.** Current source checks passed
+on 25 October 2026, but the AWS VM and public hostname were not reachable for a
+fresh runtime check. The last confirmed EC2 state (19 October, 22:53 EAT) was
+Running with 3/3 status checks and `Managed: false`; SSM Connect was disabled
+and port 22 was closed. The last successful VM shell/API check is historical
+(18 October). The last recorded public DNS/TLS check (19 October, 21:37 EAT)
+resolved `mirelisgr.duckdns.org` to `105.161.112.67`, not the VM EIP
+`13.53.183.149`, and timed out. At the last successful API check, the production
+catalogue had no published stops or trains, driver supply was empty, and live
+payment/email credentials were unverified. Keep pooled cabs at zero and do not
+accept payment until the end-to-end gates below pass.
+
+## Current source validation (25 October 2026)
+
+- [x] Full Vitest suite: 245 tests passed across 46 files. TypeScript
+  (`tsc --noEmit`) and ESLint also passed.
+- [x] Fresh focused runs: 68 tests passed across 10 files covering stage
+  search/API, catalogue state, trip availability, driver supply, booking
+  creation, payment options/preflight, and ticket email. The stop endpoint
+  requires a two-character query, caps responses at 12, and returns explicit
+  retry/empty states; the page debounces requests and cancels stale searches.
+- [x] Unpriced door-to-door service is disabled in the customer UI and rejected
+  by the booking API when a stop has no configured driver surcharge. Changing
+  stops resets the prior door-service selection, so a previously selected
+  surcharge cannot silently carry to another stop.
+- [x] Customer trip availability no longer queries or serializes driver
+  identity, and the pre-payment trip card and checkout sheet cannot render a
+  driver name or plate. Paid booking responses remain the source of driver
+  details; the availability API test asserts this boundary.
+- [ ] Enable shared off-stage pickup/drop-off only after the exact passenger
+  location can be matched to an approved stage and a server-side routing
+  provider can calculate road distance. The agreed surcharge is KSh 50 per
+  extra kilometre and passes to the driver in full. The API must calculate or
+  validate the quote itself; never accept a customer-supplied amount. Confirm
+  the kilometre rounding rule before launch and show the calculated surcharge
+  before payment. Private charters continue to have no extra-distance fee.
+  Current blockers: stage pins in `docs/STAGE-MAP-MATCHES-DRAFT.md` are
+  unapproved, the customer flow has no location/geocoding step, and the
+  configured `VALHALLA_URL`/token are empty. The shared door-to-door choice
+  remains disabled and booking API rejects it until all three are resolved.
+- [x] A prior `MIRELI_NEXT_DIST_DIR=.docker-build node scripts/deployment-build.mjs`
+  completed successfully using an isolated Next.js output directory. It
+  compiled with Next.js 16.3.4, passed
+  the build TypeScript phase, generated all 55 static pages, and included the
+  stage, trip, booking, driver-supply, sitemap, and robots routes in the
+  production route table. This verifies bundle generation and route inclusion;
+  it does not verify live database contents, payment credentials, driver
+  matching, public DNS/TLS, or customer booking completion.
+- [ ] That earlier build does not include the latest timetable, train-choice,
+  or pre-payment driver-identity changes. Fresh runs of
+  `scripts/deployment-build.mjs` failed with Windows `EPERM` while Next created
+  generated route types/assets in new build folders inside this OneDrive
+  workspace (`.next-codex-verify-20261025/types/...` and
+  `.next-build/static/...`). No TypeScript or application compile diagnostic
+  was reported before the filesystem failure. Re-run the build in CI or a
+  non-synced checkout.
+- [ ] The local HTTP preview could not be queried from this environment: GETs
+  to the running local server timed out, and browser automation is unavailable
+  in Work settings. No live page interaction or API result is claimed here.
+- [ ] On 25 October, `docker compose ps` was denied access to Docker Desktop's
+  Linux engine named pipe (`npipe:////./pipe/dockerDesktopLinuxEngine`), so the
+  local container stack could not be checked. The ignored local `.env.docker`
+  is configured for unsafe demo mode and mock M-Pesa; keep it local-only and do
+  not use it for real passenger bookings. This environment also could not
+  access `127.0.0.1:3000`. Direct checks of the public AWS health, route, stage-search,
+  and sitemap URLs were also inaccessible through the available web tool. No
+  local or production HTTP response was verified in this attempt.
+- [ ] The local production build did not apply database migrations, seed
+  routes/drivers, or deploy to AWS. No approved stage or driver data was
+  invented. Production launch remains blocked by the live catalogue, driver
+  onboarding, payment/email, DNS/TLS, and end-to-end booking gates below.
+
+## Current AWS access attempt (25 October 2026)
+
+- [ ] AWS CLI 2.38.1 is installed, but the read-only caller identity check for
+  profile `mireli` could not connect to the `eu-north-1.signin.aws.amazon.com`
+  token endpoint. The same-device `aws login` flow was then launched in Chrome,
+  but its authorization expired before the CLI callback completed. Local
+  browser automation still reports disabled in Work settings, so this session
+  could not inspect the AWS console or verify SSM.
+- [ ] The SSM managed-node state remains unverified since the 19 October console
+  check reported `Managed: false`. No AWS resource or security-group changes
+  were made; keep inbound SSH closed and resume via the AWS console or once
+  browser access/CLI credentials are available.
 
 ## Latest AWS browser access check (19 October 2026, 22:53 EAT)
 
@@ -17,7 +91,7 @@ not accept payment until the end-to-end gates below pass.
   `eu-north-1`; it confirms the Mireli EC2 instance is Running with 3/3 status
   checks. Instance type is `t4g.small`, OS is Amazon Linux 2023 ARM64, and the
   Elastic IP is `13.53.183.149`.
-- [ ] EC2 currently reports `Managed: false`. The SSM Session Manager connect
+- [ ] EC2 reported `Managed: false` at 22:53 EAT. The SSM Session Manager connect
   pane remains on “Loading SSM Session Manager details” with Connect disabled.
   Treat the 18 October `Online` observation as historical, not current.
 - [ ] No EC2 key pair is assigned. EC2 Instance Connect reports inbound TCP 22
@@ -54,11 +128,16 @@ not accept payment until the end-to-end gates below pass.
   checks, not a successful customer-to-driver production booking.
 - [ ] A live stop-picker interaction with actual approved stage data is still
   unverified: the empty route catalogue correctly keeps the picker closed.
+- [ ] On 19 October at 23:04 EAT, AWS CLI could not reach
+  `eu-north-1.signin.aws.amazon.com/v1/token`; Chrome's AWS console tab rendered
+  blank after redirecting to AWS sign-in. No AWS API state or resources were
+  changed. The `infra/aws/mireli-vm.yaml` template declares
+  `AmazonSSMManagedInstanceCore`, but its live role attachment is unverified.
 - [ ] A workstation DNS/TLS probe at 21:37 EAT resolves
   `mirelisgr.duckdns.org` to `105.161.112.67`, not the VM's
   `13.53.183.149`; TCP 443 is unreachable and the HTTPS health request timed
-  out. The `mireli` AWS CLI session is expired, so SSM was not rechecked. No
-  AWS, VM, or DNS configuration was changed.
+  out. SSM could not be rechecked because AWS authentication could not reach its
+  token endpoint. No AWS, VM, or DNS configuration was changed.
 
 ## AWS deployment state (read-only SSM verification: 18 October 2026, 18:18 EAT)
 
@@ -325,9 +404,10 @@ not accept payment until the end-to-end gates below pass.
 - [x] The booking page now checks payment readiness before opening the
   passenger-details sheet. It permits the sheet when STK is available or when
   existing travel credit covers the full total; the server still validates
-  payment and allocation independently. Locked-trip cards explain that late
-  cancellations convert the fare to credit instead of labeling the trip
-  “credits only.”
+  payment and allocation independently. Passenger cancellation requests are
+  timestamped and handed to Mireli support; at least 24 hours' notice gets a
+  full refund, while later notice gets 75% travel credit for 30 days and 25%
+  is forfeited.
 - [x] Booking confirmation copy now describes credit-covered bookings and
   post-trip driver settlement without claiming that a customer's payment sits
   in Mireli's ledger.
@@ -375,10 +455,10 @@ AWS EC2 is the intended web/API host; the local Docker stack is for testing only
   do not leave a blank loading bar when the database has no stages.
 - [x] While approved stops load, show only a compact progress state. When the
   stop count is zero, replace journey and ride controls with one booking-closed
-  card and a refresh action. Show “0 pooled cabs” only when the shared
-  driver-supply check confirms no eligible drivers, skip timetable requests
-  until customer stops exist, and clear stale stop selections when a refresh
-  confirms an empty catalogue.
+  card and a refresh action, while still showing configured train times. Show
+  “0 pooled cabs” only when the shared driver-supply check confirms no eligible
+  drivers, and clear stale stop selections when a refresh confirms an empty
+  catalogue.
 - [x] Start a passenger guest session without creating default operator
   settings; issue the welcome credit only when configured credit validity is
   present, and retry guest creation only for a unique-phone collision.
@@ -395,9 +475,9 @@ AWS EC2 is the intended web/API host; the local Docker stack is for testing only
 - [x] Keep route/date trip inventory deferred until a passenger chooses a
   stop, while showing a small, truthful zero-cab state on the homepage when
   the shared approved-driver check confirms there is no eligible supply.
-- [x] Defer trip-availability requests until a stop is chosen, and filter the
-  availability query to that stop's active route instead of loading every route
-  for the selected date and direction on the initial page view.
+- [x] Require a selected train and stop before loading cab availability; filter
+  the request to that train ID and the stop's active route instead of loading
+  every train and route for the selected date and direction.
 - [x] Revalidate the route is active and the selected stage is a published
   non-terminus stop in the booking API; reject malformed ride-option booleans
   and invalid fare data before writing a booking.
@@ -505,10 +585,12 @@ AWS EC2 is the intended web/API host; the local Docker stack is for testing only
   sitemap branch points to the public homepage, but public production metadata,
   email delivery, payment callbacks, and driver matching have not been verified
   against the AWS deployment.
-- [ ] Live AWS readiness remains unverified: this workstation could not resolve
-  `mirelisgr.duckdns.org`; the AWS CLI could not reach its sign-in token endpoint,
-  and GitHub CLI reports its stored token invalid. No VM, AWS setting, DNS
-  record, or GitHub state was changed in this verification.
+- [ ] Live AWS readiness remains unverified: on 25 October, after the owner
+  confirmed Chrome authorization, `aws sts get-caller-identity --profile mireli`
+  still could not connect to `https://eu-north-1.signin.aws.amazon.com/v1/token`.
+  Local browser control is disabled in Work settings, so SSM could not be
+  checked in the console. This is a connection failure, not evidence of an IAM
+  denial. No AWS or VM settings were changed; port 22 remains closed.
 - [x] Follow-up local and public-path checks on 19 October 2026: the single
   Compose service is still healthy; health, homepage, robots, sitemap, route,
   timetable, stop search, driver supply, and trip availability endpoints
@@ -519,7 +601,7 @@ AWS EC2 is the intended web/API host; the local Docker stack is for testing only
   returns at most 12 results. No production catalogue or driver was added.
 - [x] Admin route entry requires an explicit non-negative door surcharge;
   omission is rejected by the API instead of silently becoming zero. The
-  route-admin regression test covers this case, and the full 236-test suite
+  route-admin regression test covers this case, and the full 237-test suite
   passes.
 - [ ] Public VM is still not verified healthy: DuckDNS does not resolve from
   this workstation. Port 80 at `13.53.183.149` returns the expected redirect
@@ -544,12 +626,18 @@ AWS EC2 is the intended web/API host; the local Docker stack is for testing only
 
 ### Madaraka Express timetable
 
-- [x] Add a protected timetable data-entry screen; do not auto-import a
-  schedule whose effective date and operating days are unconfirmed.
+- [x] Add a protected timetable data-entry screen and an additive baseline for
+  the current Kenya Railways 2026 Mombasa passenger timetable. The migration
+  adds missing train/direction/departure entries without overwriting operator
+  edits or existing timetable rows.
 - [x] Filter customer availability and generated feeder trips by each train's
   declared origin service weekdays, including next-day arrivals.
-- [ ] Confirm that the attached schedule is still current; the PDF has no
-  effective date. Enter the confirmed trains in the production timetable.
+- [x] Verify the six Mombasa services against the Kenya Railways 2026 schedule:
+  daily 08:00, 15:00 and 22:00 departures in both directions; the night train
+  arrives the following day. Customer train selection is now required before
+  cab availability is queried, and the query is scoped to the selected train.
+- [ ] Recheck the Kenya Railways timetable immediately before launch and review
+  the production timetable after applying the baseline migration.
 - [x] Apply each train's destination-day offset when scheduling Mombasa arrival
   pickups, including the 03:55 next-day Nairobi-to-Mombasa night train.
 - [ ] Test the feeder schedule against train arrivals/departures. The current
@@ -557,6 +645,9 @@ AWS EC2 is the intended web/API host; the local Docker stack is for testing only
   06:00 for 08:00, 13:00 for 15:00, and 20:00 for 22:00.
 - [ ] Until a KRC data feed exists, assign an operator to update timetable
   changes and mark train delays before affected booking cutoffs.
+- [ ] Add a date-specific train-delay control that shifts affected cutoff and
+  feeder times; current admin tooling supports timetable edits but has no
+  dedicated delay switch.
 
 ### Driver platform and assignment
 
@@ -727,3 +818,10 @@ not connect to Mireli's current Mombasa routes. It notes long-distance service
 on Friday, Saturday, and Sunday. Kenya Railways contact details printed on the
 PDF are www.krc.co.ke, info@krc.co.ke, 0709 907 000, and 0709 907 555; these
 are not Mireli customer-support contacts.
+
+The table above was cross-checked against Kenya Railways' [updated 2026
+passenger schedule](https://krc.co.ke/wp-content/uploads/2026/01/Madaraka-Express-Passenger-Service-Train-Schedule.pdf)
+and its [Madaraka Express passenger-service page](https://krc.co.ke/madaraka-express-passenger-service/).
+The additive timetable migration seeds missing entries from this schedule;
+verify the official timetable and the active operating days again before
+launch. The app still has no date-specific train-delay switch.
