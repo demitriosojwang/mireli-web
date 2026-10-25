@@ -215,8 +215,8 @@ export async function POST(req: NextRequest) {
   }
 
   // Quote every booking from the exact cab the passenger selected. Shared
-  // 10/11-seat vehicles get the approved KSh 50 per-seat fare reduction;
-  // charter fares continue to use the listed base fare and the 10% split.
+  // fares use the listed stage fare for every cab size; the separate KSh 50
+  // fee is added to each booked seat. Charters use the listed base fare and 10% split.
   const selectedTrip = await db.trip.findUnique({
     where: { id: tripId },
     select: { capacity: true, routeId: true, direction: true },

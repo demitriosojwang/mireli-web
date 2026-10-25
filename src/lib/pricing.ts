@@ -2,22 +2,14 @@
  *  A charter still records one KSh 50 fee inside its 10% platform share. */
 export const DEFAULT_BOOKING_FEE_AMOUNT = 50;
 
-/** Shared fares for 10/11-seat cabs are KSh 50 lower per passenger seat. */
-export const LARGE_SHARED_VEHICLE_CAPACITIES = [10, 11] as const;
-export const LARGE_SHARED_VEHICLE_DISCOUNT = 50;
-
 export function calculateSharedSeatFare(stageFare: number, vehicleCapacity: number): number {
   if (!Number.isSafeInteger(stageFare) || stageFare < 1 ||
       !Number.isSafeInteger(vehicleCapacity) || vehicleCapacity < 1) {
     throw new RangeError("Shared fare requires a valid stage fare and vehicle capacity.");
   }
-  const fare = stageFare - (LARGE_SHARED_VEHICLE_CAPACITIES.includes(vehicleCapacity as 10 | 11)
-    ? LARGE_SHARED_VEHICLE_DISCOUNT
-    : 0);
-  if (!Number.isSafeInteger(fare) || fare < 1) {
-    throw new RangeError("The 10/11-seat discount cannot exceed the stage fare.");
-  }
-  return fare;
+  // Every shared passenger pays the approved stage fare. The separate KSh 50
+  // booking fee is added per seat and retained by Mireli, regardless of cab size.
+  return stageFare;
 }
 
 export function calculateSharedFare(stageFare: number, vehicleCapacity: number, seats: number): number {

@@ -43,6 +43,11 @@ describe("driver identity and evidence",()=>{
   });
 });
 describe("settlement proof",()=>{
+  it("passes the full listed fare to the driver on a two-seat shared booking",()=>{
+    // KSh 400 stage fare × 2 + KSh 50 fee × 2 = KSh 900 charged;
+    // Mireli keeps KSh 100 and the driver receives the KSh 800 stage fares.
+    expect(calculateSettlement(900,0,100,1000,false)).toEqual({gross:900,surcharge:0,platformFee:100,commission:0,net:800});
+  });
   it("keeps the per-seat booking fee and passes the full pooled fare and home surcharge to the driver",()=>{
     expect(calculateSettlement(1200,100,100,1000,false)).toEqual({gross:1200,surcharge:100,platformFee:100,commission:0,net:1100});
   });

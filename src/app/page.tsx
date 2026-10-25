@@ -869,21 +869,21 @@ export default function Home() {
                 </button>
               </div>
 
-              <fieldset className="space-y-2">
+              <fieldset className="space-y-1.5">
                 <legend className="text-xs font-medium text-muted-foreground">
-                  {direction === "FROM_TERMINUS" ? "Where should we drop you?" : "Where should we pick you up?"}
+                  {direction === "FROM_TERMINUS" ? "Drop-off location" : "Pickup location"}
                 </legend>
                 <div role="group" aria-label={`${pointLabelCap} preference`} className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     aria-pressed={!homePickup}
                     onClick={() => setHomePickup(false)}
-                    className={cn("min-h-[76px] rounded-xl border bg-card p-3 text-left transition-colors", !homePickup ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
+                    className={cn("min-h-[60px] rounded-xl border bg-card px-2.5 py-2 text-left transition-colors", !homePickup ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
                   >
-                    <span className="flex items-center gap-1.5 text-sm font-medium">
-                      <MapPin className="h-3.5 w-3.5 shrink-0 text-primary" /> Designated SGR stage
+                    <span className="flex items-center gap-1.5 text-xs font-semibold">
+                      <MapPin className="h-3.5 w-3.5 shrink-0 text-primary" /> At the SGR stage
                     </span>
-                    <span className="mt-1 block truncate text-[11px] text-muted-foreground">
+                    <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">
                       {selectedPoint?.point.name ?? "Choose a stop first"}
                     </span>
                   </button>
@@ -892,17 +892,17 @@ export default function Home() {
                     aria-pressed={homePickup}
                     disabled={!selectedPoint || !charter}
                     onClick={() => setHomePickup(true)}
-                    className={cn("min-h-[76px] rounded-xl border bg-card p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-55", homePickup ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
+                    className={cn("min-h-[60px] rounded-xl border bg-card px-2.5 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-55", homePickup ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
                   >
-                    <span className="flex items-center gap-1.5 text-sm font-medium">
-                      <HomeIcon className="h-3.5 w-3.5 shrink-0 text-primary" /> Door-to-door
+                    <span className="flex items-center gap-1.5 text-xs font-semibold">
+                      <HomeIcon className="h-3.5 w-3.5 shrink-0 text-primary" /> At my address
                     </span>
-                    <span className="mt-1 block text-[11px] text-muted-foreground">
+                    <span className="mt-0.5 block text-[10px] leading-snug text-muted-foreground">
                       {!selectedPoint
                         ? "Choose a designated stage first"
                         : charter
-                          ? "Choose your address · no distance fee"
-                          : "KSh 50 per extra km goes to the driver · not available yet"}
+                          ? "Charter · no extra distance fee"
+                          : "Shared ride distance pricing is not ready yet"}
                     </span>
                   </button>
                 </div>

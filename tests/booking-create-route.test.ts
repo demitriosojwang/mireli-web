@@ -387,7 +387,7 @@ describe("booking creation with no driver supply", () => {
     expect(mocks.bookingCreate.mock.invocationCallOrder[0]).toBeLessThan(mocks.allocateBooking.mock.invocationCallOrder[0]);
   });
 
-  it("applies the approved stage fare, large-cab discount, and KSh 50 fee per shared seat", async () => {
+  it("applies the approved stage fare and KSh 50 fee per shared seat for a large cab", async () => {
     mocks.passengerFindUnique.mockResolvedValue({ id: "passenger-1", phone: "+254712345678" });
     mocks.tripFindUnique.mockResolvedValue({ capacity: 10, routeId: "route-1", direction: "FROM_TERMINUS" });
     mocks.routeFindUnique.mockResolvedValue({
@@ -402,7 +402,7 @@ describe("booking creation with no driver supply", () => {
     expect(response.status).toBe(409); // The fixture has no assignable driver.
     expect(mocks.bookingCreate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        fareAmount: 800, // (approved KSh 400 - KSh 50) × 2 + KSh 50 × 2
+        fareAmount: 900, // approved KSh 400 × 2 + KSh 50 × 2
         platformFeeAmount: 100,
         homeSurcharge: 0,
         seats: 2,

@@ -11,10 +11,10 @@ VM access, build-flavor, and release rules.
 
 ## Confirmed fares and driver earnings
 
-- Shared ride: stage fare × booked seats, plus KSh 50 for each booked seat.
-  For 10/11-seat vehicles, reduce the listed fare by KSh 50 per passenger seat.
-  The fee is retained by Mireli and is deducted from the driver's settlement.
-  There is no percentage commission on shared rides.
+- Shared ride: listed stage fare × booked seats, plus KSh 50 for each booked
+  seat. The fee is retained by Mireli and deducted from the driver's settlement.
+  There is no percentage commission on shared rides; vehicle capacity does not
+  change the approved stage fare.
 - Private charter: assigned vehicle capacity × (selected stage fare + KSh 100
   per vehicle seat). The KSh 50 fee is included inside Mireli's 10% share; it
   is not added again. For a 4-seat vehicle and KSh 400 stage fare, the total is

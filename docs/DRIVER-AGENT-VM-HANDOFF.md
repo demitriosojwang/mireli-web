@@ -249,14 +249,14 @@ these checks. The SSM Run Command itself is recorded in AWS as an audit event.
   `hasEligibleDrivers: false` and no trips. No approved driver inventory is
   available; do not display invented vehicles or schedules.
 - Local source branch pricing update (not yet deployed): the owner-approved
-  fare sheet is transcribed in `src/lib/fare-catalogue.ts`; shared 10/11-seat
-  fares are KSh 50 lower per passenger seat, and Mireli retains KSh 50 per
-  booked shared seat. Charters retain the agreed 10% split, including one
-  KSh 50 fee line; the driver receives the remaining charter amount and the
-  full door surcharge. Android must consume server-calculated amounts from
-  `/api/v1/driver/earnings` and must not recalculate fares or payouts. The VM's
-  active stage table remains empty, and verified coordinates and surcharge
-  amounts are still needed before the listed stages can be published.
+  fare sheet is transcribed in `src/lib/fare-catalogue.ts`; shared rides charge
+  the listed fare plus KSh 50 per booked seat, which Mireli retains. Charters
+  retain the agreed 10% split, including one KSh 50 fee line; the driver
+  receives the remaining charter amount and the full door surcharge. Android
+  must consume server-calculated amounts from `/api/v1/driver/earnings` and
+  must not recalculate fares or payouts. The VM's active stage table remains
+  empty, and verified coordinates and surcharge amounts are still needed
+  before the listed stages can be published.
 - `/api/v1/driver/status` reports strict mode (`simulation: false`), but phone
   and email sign-in, registration, and navigation are closed. The response says
   driver email sign-in is not configured. Keep driver sign-in closed until real

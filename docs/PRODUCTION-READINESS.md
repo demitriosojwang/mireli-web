@@ -1,7 +1,7 @@
 # Mireli booking launch checklist
 
 **Status: not ready to accept customer bookings.** Current source checks passed
-on 25 October 2026, but the AWS VM and public hostname were not reachable for a
+on 26 October 2026, but the AWS VM and public hostname were not reachable for a
 fresh runtime check. The last confirmed EC2 state (19 October, 22:53 EAT) was
 Running with 3/3 status checks and `Managed: false`; SSM Connect was disabled
 and port 22 was closed. The last successful VM shell/API check is historical
@@ -20,8 +20,12 @@ accept payment until the end-to-end gates below pass.
   [40232957922](https://github.com/demitriosojwang/mireli-web/actions/runs/40232957922)
   and
   [40232963375](https://github.com/demitriosojwang/mireli-web/actions/runs/40232963375).
-- [x] Full Vitest suite: 251 tests passed across 47 files. TypeScript
-  (`tsc --noEmit`) and ESLint also passed on the current branch.
+- [x] Full Vitest suite: 252 tests passed across 47 files. TypeScript
+  (`tsc --noEmit`) and ESLint also passed on the current branch. The latest
+  owner pricing clarification is covered: every shared seat pays the listed
+  stage fare plus KSh 50, independent of vehicle capacity; the full listed
+  fare goes to the driver. The pickup/drop-off choice controls were shortened
+  to reduce vertical scrolling.
 - [x] New passenger national ID/passport values are AES-256-GCM encrypted in
   profile and booking snapshot fields. The passenger profile API decrypts only
   for that passenger; strict production writes fail closed without the separate
@@ -33,10 +37,11 @@ accept payment until the end-to-end gates below pass.
   creation, payment options/preflight, and ticket email. The stop endpoint
   requires a two-character query, caps responses at 12, and returns explicit
   retry/empty states; the page debounces requests and cancels stale searches.
-- [x] Unpriced door-to-door service is disabled in the customer UI and rejected
-  by the booking API when a stop has no configured driver surcharge. Changing
-  stops resets the prior door-service selection, so a previously selected
-  surcharge cannot silently carry to another stop.
+- [x] Shared off-stage door-to-door service is disabled in the customer UI and
+  rejected by the booking API until the app can securely price it. Changing
+  stops resets the prior door-service selection, so a previous address option
+  cannot carry to another stop. Charter address service remains available with
+  no extra-distance charge.
 - [x] Customer trip availability no longer queries or serializes driver
   identity, and the pre-payment trip card and checkout sheet cannot render a
   driver name or plate. Paid booking responses remain the source of driver
@@ -809,13 +814,12 @@ entries are Mtwapa KSh 400, Malindi KSh 700, Changamwe KSh 200, Mikindani KSh
 Coast entries are Likoni Ferry Container KSh 400, Kona Mpya (Fayaz) KSh 400,
 Shika Adabu (Checkpoint) KSh 400, and Diani Naivas KSh 500 per seat.
 
-The owner clarified that shared fares for 10/11-seat cabs are exactly KSh 50
-lower per passenger seat. Mireli retains KSh 50 for each booked shared seat;
-the driver receives the rest, including the full door-to-door surcharge. For
-private charters, keep the agreed rule: vehicle capacity × (listed stage fare +
-KSh 100 per seat). Mireli retains 10% of that charter total, with one KSh 50
-fee line inside the 10% share; the driver receives the rest plus the full
-surcharge.
+The owner clarified that shared rides charge the listed fare for every booked
+seat plus KSh 50 per seat for Mireli, regardless of vehicle size. The listed
+stage fare goes to the driver, as does the full door-to-door surcharge. For
+private charters, use vehicle capacity × (listed stage fare + KSh 100 per seat).
+Mireli retains 10% of that charter total, with one KSh 50 fee line inside the
+10% share; the driver receives the rest plus the full surcharge.
 
 These rules are implemented in `src/lib/pricing.ts`,
 `src/lib/fare-catalogue.ts`, the customer quote, booking API, and settlement

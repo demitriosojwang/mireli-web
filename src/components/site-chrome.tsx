@@ -132,7 +132,7 @@ function AboutSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: b
           <section className="space-y-1.5">
             <h3 className="text-base font-semibold">How fares and driver pay work</h3>
             <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground">
-              <li>Shared rides include a KSh 50 Mireli fee for each booked seat; 10/11-seat shared cabs are KSh 50 cheaper per seat. Private charters use Mireli&apos;s 10% share.</li>
+              <li>Shared rides charge the listed stage fare plus a KSh 50 Mireli fee for each booked seat. Private charters use Mireli&apos;s 10% share.</li>
               <li>Charter total is vehicle seat capacity × (the approved per-seat fare + KSh 100 per seat). The KSh 50 fee is included, not added again.</li>
               <li>Mireli keeps 10% of the charter total; the remaining 90% goes to the driver. Door-to-door surcharge goes to the driver in full.</li>
             </ul>
