@@ -56,17 +56,23 @@ accept payment until the end-to-end gates below pass.
   `.next-build/static/...`). No TypeScript or application compile diagnostic
   was reported before the filesystem failure. Re-run the build in CI or a
   non-synced checkout.
-- [ ] The local HTTP preview could not be queried from this environment: GETs
-  to the running local server timed out, and browser automation is unavailable
-  in Work settings. No live page interaction or API result is claimed here.
-- [ ] On 25 October, `docker compose ps` was denied access to Docker Desktop's
-  Linux engine named pipe (`npipe:////./pipe/dockerDesktopLinuxEngine`), so the
-  local container stack could not be checked. The ignored local `.env.docker`
-  is configured for unsafe demo mode and mock M-Pesa; keep it local-only and do
-  not use it for real passenger bookings. This environment also could not
-  access `127.0.0.1:3000`. Direct checks of the public AWS health, route, stage-search,
-  and sitemap URLs were also inaccessible through the available web tool. No
-  local or production HTTP response was verified in this attempt.
+- [x] A later read-only local runtime check (25 October 2026, 22:55 EAT)
+  reached Docker Desktop's one-container stack: `mireli-app-1` is healthy on
+  `mireli-web:latest`, an image created six days earlier. The home page and
+  `/api/health` return 200; `/api/routes` has zero points; `/api/trains` is
+  empty; `/api/stages?q=mtwapa` returns no points; and `/api/driver-supply`
+  reports no eligible drivers. `/api/v1/driver/status` reports
+  `simulation: true`. `/api/pay/options` advertises STK only with a null
+  paybill; in this local demo that is simulated payment, not live Daraja
+  readiness. The demo's `/sitemap.xml` is empty and `/robots.txt` disallows
+  indexing, as intended. These results confirm the existing local preview
+  starts, but it is an older image and has no bookable catalogue or driver
+  supply. They do not verify this branch's Docker build or production booking.
+- [ ] The first ordinary sandbox request to Docker's Linux engine was denied;
+  the read-only recheck succeeded with elevated local-engine access. Browser
+  automation remains unavailable in Work settings, and public AWS endpoints
+  were not verified in this attempt. Rebuild this branch's Docker image and
+  repeat local runtime checks before using the local preview for release review.
 - [ ] The local production build did not apply database migrations, seed
   routes/drivers, or deploy to AWS. No approved stage or driver data was
   invented. Production launch remains blocked by the live catalogue, driver
