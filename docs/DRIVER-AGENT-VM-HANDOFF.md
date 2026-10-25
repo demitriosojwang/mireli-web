@@ -238,6 +238,9 @@ these checks. The SSM Run Command itself is recorded in AWS as an audit event.
   and AMD64/ARM64 image builds. The Vercel GitHub App still emits checks for
   this repo; AWS remains the runtime target, and the app connection must be
   removed separately in GitHub/Vercel settings.
+- Fresh public HTTPS checks on 26 October timed out for health, route, train,
+  driver-supply, and sitemap endpoints. Treat the deployed VM state as
+  unreachable until the host and public API can be checked again.
 - The last read-only production database inspection (18 October, 11:14 EAT)
   found four applied migrations:
   `20261001_initial_postgres`, `20261006_driver_services`,

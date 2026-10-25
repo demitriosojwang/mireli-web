@@ -12,6 +12,11 @@ catalogue had no published stops or trains, driver supply was empty, and live
 payment/email credentials were unverified. Keep pooled cabs at zero and do not
 accept payment until the end-to-end gates below pass.
 
+Fresh public HTTPS probes from this workstation on 26 October 2026 to
+`/api/health`, `/api/routes`, `/api/trains`, `/api/driver-supply`, and
+`/sitemap.xml` each timed out after eight seconds with HTTP 000. The current
+host data and customer endpoints are therefore unreachable and unverified.
+
 ## Current source validation (26 October 2026)
 
 - [x] GitHub Actions passed on commit `c6fddd8` for the branch push and PR #4:
@@ -463,7 +468,9 @@ accept payment until the end-to-end gates below pass.
   deployment status; no Vercel workflow exists in this repository. Remove
   `mireli-web` from the Vercel GitHub App installation to stop Vercel previews.
   This workspace does not have authenticated GitHub App settings access, so
-  the external integration remains connected.
+  the external integration remains connected. The local AWS-only follow-up
+  `f8cfebe` removes the Vercel API rewrite; it is not pushed until the app
+  connection is removed.
 - [ ] Real passenger/driver authentication, M-Pesa callbacks and reconciliation,
   Brevo ticket delivery, and post-trip payouts are not configured on the VM.
 - [ ] The fare catalogue is now transcribed and integrated in source, but the
