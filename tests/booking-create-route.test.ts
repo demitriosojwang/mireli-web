@@ -64,6 +64,7 @@ vi.mock("@/lib/nairobi-time", () => ({
 }));
 
 import { POST } from "@/app/api/bookings/route";
+import { decryptPassengerIdNumber, isEncryptedPassengerIdNumber } from "@/lib/passenger-pii";
 
 const request = (body: unknown) => new NextRequest("https://mireli.test/api/bookings", {
   method: "POST",
@@ -113,7 +114,10 @@ beforeEach(() => {
   mocks.allocateBooking.mockResolvedValue({ tripId: null, note: "No eligible drivers." });
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
 
 describe("booking creation with no driver supply", () => {
   it("rejects malformed ride-option flags before loading booking configuration", async () => {
@@ -155,6 +159,19 @@ describe("booking creation with no driver supply", () => {
     });
     expect(mocks.bookingCreate).not.toHaveBeenCalled();
     expect(mocks.allocateBooking).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before writing identity data when production encryption is not configured", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("MIRELI_DEMO_MODE", "false");
+    vi.stubEnv("PASSENGER_PII_ENCRYPTION_KEY", "");
+
+    const response = await POST(request(validBookingBody()));
+
+    expect(response.status).toBe(503);
+    expect((await response.json()).code).toBe("PASSENGER_ID_PROTECTION_UNAVAILABLE");
+    expect(mocks.bookingCreate).not.toHaveBeenCalled();
+    expect(mocks.passengerUpdate).not.toHaveBeenCalled();
   });
 
   it("allows a pooled booking fully covered by available credit without M-Pesa", async () => {
@@ -353,8 +370,15 @@ describe("booking creation with no driver supply", () => {
     expect(payload.booking.cashDue).toBe(2000);
     expect(payload.booking.trip.driver).toBeNull();
     expect(mocks.bookingCreate).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ fareAmount: 2000, cashDue: 2000 }),
+      data: expect.objectContaining({
+        fareAmount: 2000,
+        cashDue: 2000,
+        passengerIdNumber: expect.stringMatching(/^mireli-pii:v1:/),
+      }),
     }));
+    const storedId = mocks.bookingCreate.mock.calls[0][0].data.passengerIdNumber;
+    expect(isEncryptedPassengerIdNumber(storedId)).toBe(true);
+    expect(decryptPassengerIdNumber(storedId)).toBe("12345678");
     expect(mocks.tripFindUnique).toHaveBeenCalledWith({
       where: { id: "trip-1" },
       select: { capacity: true, routeId: true, direction: true },

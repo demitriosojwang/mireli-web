@@ -359,6 +359,13 @@ owner verifies DNS, HTTPS, and strict-mode status from outside AWS.
 5. Coordinate additive API/schema changes with Mireli Web. Do not add a second
    driver or payment database. Keep boarding credentials and passenger identity
    data out of manifests and logs.
+6. Passenger national ID/passport values are encrypted at rest in both the
+   passenger profile and booking snapshot using the web service's
+   `PASSENGER_PII_ENCRYPTION_KEY`. The driver service must never read ciphertext
+   as customer data or expose these values in driver APIs/manifests. If an
+   operational requirement needs an identity check, coordinate a narrowly
+   authorized backend endpoint with Mireli Web; do not add decryption to the
+   Android client or copy the encryption key to the VM/driver build.
 
 Read the authoritative contract and build-flavor requirements in
 [DRIVER-INTEGRATION.md](DRIVER-INTEGRATION.md) and

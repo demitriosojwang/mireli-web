@@ -17,7 +17,7 @@ model Passenger {
   // Primary-passenger profile — captured on the booking form; guests upgrade
   // into an account by re-submitting the exact same details.
   idType      String? // "id" | "passport"
-  idNumber    String? // National ID or passport number
+  idNumber    String? // AES-256-GCM encrypted National ID or passport number; legacy plaintext until backfill
   nationality String?
   gender      String?
   createdAt   DateTime @default(now())
@@ -159,7 +159,7 @@ model Booking {
   // manifest shows) — stays frozen even if the profile is edited later.
   passengerEmail       String?
   passengerIdType      String?
-  passengerIdNumber    String?
+  passengerIdNumber    String? // AES-256-GCM encrypted ID/passport snapshot; legacy plaintext until backfill
   passengerNationality String?
   passengerGender      String?
   ledgerEntry   LedgerEntry?

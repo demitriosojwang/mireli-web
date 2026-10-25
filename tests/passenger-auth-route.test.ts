@@ -63,6 +63,7 @@ vi.mock("@/lib/money", () => ({ issueCredit: mocks.issueCredit }));
 vi.mock("@/lib/audit", () => ({ audit: mocks.audit }));
 
 import { POST } from "@/app/api/auth/route";
+import { decryptPassengerIdNumber, isEncryptedPassengerIdNumber } from "@/lib/passenger-pii";
 
 const post = (body: unknown) => new NextRequest("https://mireli.example/api/auth", {
   method: "POST",
@@ -196,8 +197,16 @@ describe("passenger authentication route", () => {
     expect(response.headers.get("set-cookie")).toContain("mireli_session=signed-passenger-session");
     expect(mocks.txPassengerUpdate).toHaveBeenCalledWith({
       where: { id: guest.id },
-      data: expect.objectContaining({ phone: account.phone, email: account.email, name: account.name }),
+      data: expect.objectContaining({
+        phone: account.phone,
+        email: account.email,
+        name: account.name,
+        idNumber: expect.stringMatching(/^mireli-pii:v1:/),
+      }),
     });
+    const storedId = mocks.txPassengerUpdate.mock.calls[0][0].data.idNumber;
+    expect(isEncryptedPassengerIdNumber(storedId)).toBe(true);
+    expect(decryptPassengerIdNumber(storedId)).toBe(account.idNumber);
     expect(mocks.txBookingUpdateMany).not.toHaveBeenCalled();
     expect(mocks.txCreditUpdateMany).not.toHaveBeenCalled();
     expect(mocks.audit).toHaveBeenCalledWith(expect.objectContaining({ action: "auth.signup", entityId: guest.id }));

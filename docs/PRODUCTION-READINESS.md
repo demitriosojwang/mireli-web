@@ -20,8 +20,14 @@ accept payment until the end-to-end gates below pass.
   [40229709670](https://github.com/demitriosojwang/mireli-web/actions/runs/40229709670)
   and
   [40229714182](https://github.com/demitriosojwang/mireli-web/actions/runs/40229714182).
-- [x] Full Vitest suite: 245 tests passed across 46 files. TypeScript
-  (`tsc --noEmit`) and ESLint also passed.
+- [x] Full Vitest suite: 251 tests passed across 47 files. TypeScript
+  (`tsc --noEmit`) and ESLint also passed on the current branch.
+- [x] New passenger national ID/passport values are AES-256-GCM encrypted in
+  profile and booking snapshot fields. The passenger profile API decrypts only
+  for that passenger; strict production writes fail closed without the separate
+  key. A compare-and-set backfill covers legacy rows. The Android handoff says
+  never to expose ciphertext or copy the key to the driver app. Backfill and
+  production key provisioning remain launch gates below.
 - [x] Fresh focused runs: 68 tests passed across 10 files covering stage
   search/API, catalogue state, trip availability, driver supply, booking
   creation, payment options/preflight, and ticket email. The stop endpoint
@@ -734,6 +740,23 @@ AWS EC2 is the intended web/API host; the local Docker stack is for testing only
 
 ### Operations, security, and launch checks
 
+- [ ] Create and securely back up a separate random 32-byte
+  `PASSENGER_PII_ENCRYPTION_KEY` (64 hex characters) in the production secret
+  store. Never reuse `SESSION_SECRET`, commit the key, or print it in logs.
+  Deploy it before enabling booking/account-claim writes; strict mode fails
+  closed if this key is absent or invalid.
+- [ ] Back up the database, then run `npm run db:encrypt-passenger-pii` against
+  the production database. The idempotent, compare-and-set backfill encrypts
+  legacy passenger profile and booking snapshot IDs and prints counts only.
+  Verify the counts and test the authenticated `/api/me` prefill before
+  opening bookings. Keep the legacy plaintext-read path until the backfill is
+  confirmed complete; plan key rotation as a separate reviewed migration.
+- [ ] Treat passenger ID/passport values as sensitive: return plaintext only
+  to the authenticated passenger's own `/api/me` flow. Keep raw values out of
+  admin listings, driver manifests, audit metadata, email, analytics, and logs.
+- [x] Configure cancellation requests to open WhatsApp or phone contact at
+  **0797118292**; this only submits the customer's request and does not execute
+  a refund automatically.
 - [ ] Configure production `SESSION_SECRET`, `DRIVER_AUTH_SECRET`, Africa's
   Talking SMS credentials, and Brevo email credentials; verify real delivery,
   expiry, resend throttling, and lockout with production-like accounts.

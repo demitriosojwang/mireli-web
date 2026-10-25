@@ -12,6 +12,7 @@ import { calculateCharterFare, calculateCharterPlatformShare } from "@/lib/chart
 import { calculateBookingFeeAmount, calculateSharedFare } from "@/lib/pricing";
 import { getApprovedStageFare } from "@/lib/fare-catalogue";
 import { expireUnpaidBookingReservations } from "@/lib/unpaid-booking-expiry";
+import { assertPassengerPiiEncryptionReady, encryptPassengerIdNumber } from "@/lib/passenger-pii";
 
 /** Statuses that count towards the guest booking limit — a cancelled booking
  *  frees the guest to rebook their single no-login seat. */
@@ -144,6 +145,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: `Enter a valid ${idType === "passport" ? "passport number" : "ID number"}` },
       { status: 400 },
+    );
+  }
+  let encryptedIdNumber: string;
+  try {
+    assertPassengerPiiEncryptionReady();
+    encryptedIdNumber = encryptPassengerIdNumber(idNumber)!;
+  } catch (error) {
+    console.error(
+      "[api/bookings] Passenger identity encryption is unavailable:",
+      error instanceof Error ? error.message : "unknown error",
+    );
+    return NextResponse.json(
+      { error: "Secure booking is temporarily unavailable. Please try again shortly.", code: "PASSENGER_ID_PROTECTION_UNAVAILABLE" },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }
   const nationality = String(passengerNationality || "").trim();
@@ -300,7 +315,7 @@ export async function POST(req: NextRequest) {
         name: fullName.slice(0, 80),
         email,
         idType,
-        idNumber,
+        idNumber: encryptedIdNumber,
         nationality,
         gender,
       },
@@ -336,7 +351,7 @@ export async function POST(req: NextRequest) {
       passengerPhone: phone,
       passengerEmail: email,
       passengerIdType: idType,
-      passengerIdNumber: idNumber,
+      passengerIdNumber: encryptedIdNumber,
       passengerNationality: nationality.slice(0, 60),
       passengerGender: gender,
     },
