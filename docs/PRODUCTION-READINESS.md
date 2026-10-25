@@ -14,6 +14,12 @@ accept payment until the end-to-end gates below pass.
 
 ## Current source validation (25 October 2026)
 
+- [x] GitHub Actions passed on commit `c62aa99` for both the branch push and
+  PR #4: the complete verify job, AWS VM template validation, and AMD64 and
+  ARM64 production-container builds all succeeded. See runs
+  [40229709670](https://github.com/demitriosojwang/mireli-web/actions/runs/40229709670)
+  and
+  [40229714182](https://github.com/demitriosojwang/mireli-web/actions/runs/40229714182).
 - [x] Full Vitest suite: 245 tests passed across 46 files. TypeScript
   (`tsc --noEmit`) and ESLint also passed.
 - [x] Fresh focused runs: 68 tests passed across 10 files covering stage
@@ -73,6 +79,12 @@ accept payment until the end-to-end gates below pass.
   automation remains unavailable in Work settings, and public AWS endpoints
   were not verified in this attempt. Rebuild this branch's Docker image and
   repeat local runtime checks before using the local preview for release review.
+  The attempted rebuild sent the reduced 20 KB context and completed `npm ci`
+  but was stopped before the runner image finished installing its 74.6 MB
+  PostgreSQL runtime packages over a very slow connection. It did not replace
+  the running six-day-old demo image or touch the database volume; the exact
+  branch's AMD64 and ARM64 image builds were instead verified by the successful
+  GitHub Actions runs above.
 - [ ] The local production build did not apply database migrations, seed
   routes/drivers, or deploy to AWS. No approved stage or driver data was
   invented. Production launch remains blocked by the live catalogue, driver
@@ -742,9 +754,10 @@ AWS EC2 is the intended web/API host; the local Docker stack is for testing only
   the owned mail domain with SPF/DKIM/DMARC, and verify a paid test booking
   reaches a real passenger inbox. Confirm a duplicate callback does not resend
   the ticket and review failures in the admin booking view.
-- [ ] Run the GitHub CI workflow for the committed branch and verify the ARM64
-  image build. Deploy only an immutable image through the AWS VM release
-  procedure; apply migrations only through the reviewed deployment setting.
+- [x] Run the GitHub CI workflow for the committed branch: the full verify job,
+  AWS template checks, and AMD64/ARM64 image builds passed on `c62aa99`.
+- [ ] Deploy an immutable image through the AWS VM release procedure; apply
+  migrations only through the reviewed deployment setting.
 - [ ] Complete a full customer-to-driver journey in staging: choose route,
   point, date/train and cab; pay; receive confirmation; board with PIN; complete
   trip; confirm driver payout and ledger entries.
