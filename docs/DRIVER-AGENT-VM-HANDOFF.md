@@ -233,6 +233,11 @@ these checks. The SSM Run Command itself is recorded in AWS as an audit event.
   OIDC provider. Do not use long-lived AWS keys as a workaround. The new
   release workflow also checks route, train, stage-search, driver-supply, and
   health API contracts before declaring a deployment ready.
+- As of 26 October, commit `c6fddd8` is pushed on the feature branch and both
+  branch and PR checks passed, including verification, AWS template validation,
+  and AMD64/ARM64 image builds. The Vercel GitHub App still emits checks for
+  this repo; AWS remains the runtime target, and the app connection must be
+  removed separately in GitHub/Vercel settings.
 - The last read-only production database inspection (18 October, 11:14 EAT)
   found four applied migrations:
   `20261001_initial_postgres`, `20261006_driver_services`,

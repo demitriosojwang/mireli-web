@@ -9,8 +9,8 @@ import { join } from "node:path";
  * copy of the schema that also declares the Linux engine Prisma ships in the
  * image (Debian / OpenSSL 3). Without it the generator falls back to a legacy
  * engine name and the server cannot reach PostgreSQL at runtime. The
- * developer's own prisma/schema.prisma is left untouched, so local preview and
- * Vercel builds keep their existing behaviour.
+ * developer's own prisma/schema.prisma is left untouched, so local preview
+ * builds and the AWS VM use the same checked-in schema.
  */
 const root = process.cwd();
 const source = readFileSync(join(root, "prisma", "schema.prisma"), "utf8");

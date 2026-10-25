@@ -14,13 +14,13 @@ accept payment until the end-to-end gates below pass.
 
 ## Current source validation (26 October 2026)
 
-- [x] GitHub Actions passed on commit `1614c06` for both the branch push and
-  PR #4: the complete verify job, AWS VM template validation, and AMD64 and
-  ARM64 production-container builds all succeeded. See runs
-  [40232957922](https://github.com/demitriosojwang/mireli-web/actions/runs/40232957922)
+- [x] GitHub Actions passed on commit `c6fddd8` for the branch push and PR #4:
+  verification, AWS VM template validation, and AMD64 and ARM64 production
+  container builds all succeeded. See runs
+  [40235042758](https://github.com/demitriosojwang/mireli-web/actions/runs/40235042758)
   and
-  [40232963375](https://github.com/demitriosojwang/mireli-web/actions/runs/40232963375).
-- [x] Full Vitest suite: 252 tests passed across 47 files. TypeScript
+  [40235047529](https://github.com/demitriosojwang/mireli-web/actions/runs/40235047529).
+- [x] Full Vitest suite: 245 tests passed across 47 files. TypeScript
   (`tsc --noEmit`) and ESLint also passed on the current branch. The latest
   owner pricing clarification is covered: every shared seat pays the listed
   stage fare plus KSh 50, independent of vehicle capacity; the full listed
@@ -458,12 +458,12 @@ accept payment until the end-to-end gates below pass.
   the WSL optional component needs Windows administrator action. No sample
   records were inserted. Repair Docker Desktop and enable the Windows/firmware
   prerequisites before attempting the local end-to-end journey.
-- [ ] GitHub PR #4 still points to `48dfc11`; the local branch has the
-  booking-flow change at `e91edf2` and follow-up documentation at `01f5bb3`, so
-  the green PR checks do not cover the current local source yet. GitHub PR
-  updates still start Vercel Preview checks. Vercel project access returned
-  HTTP 403 and no Vercel CLI is installed, so the preview integration could
-  not be disabled from this session; no push was made.
+- [ ] GitHub PR #4 includes commit `c6fddd8`, and its push and PR checks passed.
+  The Vercel GitHub App still posts a `Vercel Preview Comments` check and a
+  deployment status; no Vercel workflow exists in this repository. Remove
+  `mireli-web` from the Vercel GitHub App installation to stop Vercel previews.
+  This workspace does not have authenticated GitHub App settings access, so
+  the external integration remains connected.
 - [ ] Real passenger/driver authentication, M-Pesa callbacks and reconciliation,
   Brevo ticket delivery, and post-trip payouts are not configured on the VM.
 - [ ] The fare catalogue is now transcribed and integrated in source, but the
