@@ -12,14 +12,14 @@ catalogue had no published stops or trains, driver supply was empty, and live
 payment/email credentials were unverified. Keep pooled cabs at zero and do not
 accept payment until the end-to-end gates below pass.
 
-## Current source validation (25 October 2026)
+## Current source validation (26 October 2026)
 
-- [x] GitHub Actions passed on commit `c62aa99` for both the branch push and
+- [x] GitHub Actions passed on commit `1614c06` for both the branch push and
   PR #4: the complete verify job, AWS VM template validation, and AMD64 and
   ARM64 production-container builds all succeeded. See runs
-  [40229709670](https://github.com/demitriosojwang/mireli-web/actions/runs/40229709670)
+  [40232957922](https://github.com/demitriosojwang/mireli-web/actions/runs/40232957922)
   and
-  [40229714182](https://github.com/demitriosojwang/mireli-web/actions/runs/40229714182).
+  [40232963375](https://github.com/demitriosojwang/mireli-web/actions/runs/40232963375).
 - [x] Full Vitest suite: 251 tests passed across 47 files. TypeScript
   (`tsc --noEmit`) and ESLint also passed on the current branch.
 - [x] New passenger national ID/passport values are AES-256-GCM encrypted in
@@ -781,7 +781,7 @@ AWS EC2 is the intended web/API host; the local Docker stack is for testing only
   reaches a real passenger inbox. Confirm a duplicate callback does not resend
   the ticket and review failures in the admin booking view.
 - [x] Run the GitHub CI workflow for the committed branch: the full verify job,
-  AWS template checks, and AMD64/ARM64 image builds passed on `c62aa99`.
+  AWS template checks, and AMD64/ARM64 image builds passed on `1614c06`.
 - [ ] Deploy an immutable image through the AWS VM release procedure; apply
   migrations only through the reviewed deployment setting.
 - [ ] Complete a full customer-to-driver journey in staging: choose route,
