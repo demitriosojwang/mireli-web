@@ -124,9 +124,12 @@ export default function BookingsPage() {
     if (!cancelFor) return;
     setCancelling(true);
     try {
-      await api<{ ok: boolean; requestedAt: string }>(`/api/bookings/${cancelFor.id}`, {
+      const request = await api<{ ok: boolean; requestedAt: string }>(`/api/bookings/${cancelFor.id}`, {
         body: { action: "request_cancellation" },
       });
+      setBookings((current) => current?.map((booking) => booking.id === cancelFor.id
+        ? { ...booking, cancellationRequestedAt: request.requestedAt }
+        : booking) ?? current);
       toast({
         title: "Cancellation request recorded",
         description: "Your booking stays active until Mireli confirms the cancellation.",
@@ -135,7 +138,6 @@ export default function BookingsPage() {
         ? cancellationWhatsAppUrl(cancelFor.code)
         : `tel:${MIRELI_SUPPORT_PHONE_E164}`;
       setCancelFor(null);
-      await load();
       window.location.assign(destination);
     } catch (e) {
       toast({ title: "Could not contact Mireli", description: e instanceof Error ? e.message : "Try again", variant: "destructive" });
