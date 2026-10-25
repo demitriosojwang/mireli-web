@@ -140,12 +140,12 @@ export default function AdminReconciliation() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <AlertTriangle className="h-4 w-4 text-red-600" /> Failed Daraja transactions (manual retry surface)
+            <AlertTriangle className="h-4 w-4 text-red-600" /> Failed or unmatched collection receipts (review required)
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
           {(data?.failedTransactions || []).length === 0 && (
-            <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-900">No failed collections.</p>
+            <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-900">No failed or mismatched collections.</p>
           )}
           {(data?.failedTransactions || []).map((t) => (
             <div key={t.id} className="rounded-md border border-red-200 bg-red-50 p-3 text-sm">

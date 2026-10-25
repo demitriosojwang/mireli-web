@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { confirmBookingPayment } from "@/lib/money";
-import { RESULT_CODES } from "@/lib/daraja";
+import { isPaymentIntentId, RESULT_CODES, verifyCallbackToken } from "@/lib/daraja";
 
 /**
  * Safaricom Daraja → STK Push result webhook (CallBackURL).
@@ -39,12 +39,35 @@ function meta(items: StkCallbackItem[] | undefined, name: string): string | unde
 
 export async function POST(req: NextRequest) {
   const accepted = NextResponse.json({ ResultCode: 0, ResultDesc: "Accepted" });
+  const intentId = req.nextUrl.searchParams.get("intent");
+  if (!verifyCallbackToken("stk", req.nextUrl.searchParams.get("mireli_token"))) {
+    return NextResponse.json({ error: "Invalid callback authorization" }, { status: 401 });
+  }
   try {
     const body = (await req.json().catch(() => ({}))) as StkCallbackBody;
     const cb = body.Body?.stkCallback;
     if (!cb?.CheckoutRequestID) return accepted;
 
-    const tx = await db.mpesaTransaction.findUnique({ where: { checkoutRequestId: cb.CheckoutRequestID } });
+    let tx = await db.mpesaTransaction.findUnique({ where: { checkoutRequestId: cb.CheckoutRequestID } });
+    if (!tx && intentId) {
+      const candidate = await db.mpesaTransaction.findUnique({ where: { id: intentId } });
+      if (
+        candidate &&
+        isPaymentIntentId(candidate.checkoutRequestId) &&
+        ["pending", "ambiguous"].includes(candidate.status)
+      ) {
+        await db.mpesaTransaction.updateMany({
+          where: { id: candidate.id, checkoutRequestId: candidate.checkoutRequestId, status: { in: ["pending", "ambiguous"] } },
+          data: {
+            checkoutRequestId: cb.CheckoutRequestID,
+            merchantRequestId: cb.MerchantRequestID || candidate.merchantRequestId,
+          },
+        });
+        // If the payment route just stored the provider ID, this lookup still
+        // succeeds; if it did not, the correlation update above makes it succeed.
+        tx = await db.mpesaTransaction.findUnique({ where: { checkoutRequestId: cb.CheckoutRequestID } });
+      }
+    }
     if (!tx || ["confirmed", "failed"].includes(tx.status)) return accepted; // already terminal
 
     const code = String(cb.ResultCode ?? "");

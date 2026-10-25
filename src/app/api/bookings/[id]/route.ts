@@ -1,13 +1,16 @@
+import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getPassengerSession } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import {
   confirmBookingPayment,
-  executeCancellation,
   resolveRefundTier,
 } from "@/lib/money";
 import * as daraja from "@/lib/daraja";
+import { isBookingReadyForPayment } from "@/lib/booking-payment-eligibility";
+import { MIRELI_SUPPORT_PHONE_E164 } from "@/lib/support";
+import { describeCancellationCutoff, LATE_CANCELLATION_CREDIT_VALIDITY_DAYS } from "@/lib/cancellation-policy";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -25,16 +28,17 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
   const cfg = await getConfigQuick();
   const { tier, detail } = await resolveRefundTier(id);
+  const cutoff = describeCancellationCutoff(cfg.fullRefundCutoffMinutes);
   return NextResponse.json({
     code: booking.code,
     tier,
     detail,
     cashDue: booking.cashDue,
     creditApplied: booking.creditApplied,
-    creditValidityDays: cfg.creditValidityDays,
+    creditValidityDays: LATE_CANCELLATION_CREDIT_VALIDITY_DAYS,
     policy: {
-      early: "Full cash refund to your M-Pesa.",
-      late: `No cash refund — your full fare converts to travel credit, valid ${cfg.creditValidityDays} days.`,
+      early: `Cancellation notice at least ${cutoff} before scheduled pickup receives a full refund.`,
+      late: `Cancellation notice within ${cutoff} of scheduled pickup receives 75% of the fare as travel credit for ${LATE_CANCELLATION_CREDIT_VALIDITY_DAYS} days; the remaining 25% is forfeited.`,
       no_show: "Fare forfeited — the seat was held and the driver went to the stage for it.",
       platform_cancelled: "Full cash refund always, regardless of timing.",
     },
@@ -74,22 +78,101 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (booking.status !== "awaiting_payment" || booking.cashDue <= 0) {
       return NextResponse.json({ error: "Nothing to pay on this booking" }, { status: 400 });
     }
+    if (!isBookingReadyForPayment(booking)) {
+      return NextResponse.json(
+        { error: "An active driver and future departure are not secured for this booking. No payment request was sent." },
+        { status: 409 },
+      );
+    }
     const phoneRaw = String(body.phone || "");
     const { normalizePhone } = await import("@/lib/session");
     const phone = normalizePhone(phoneRaw);
     if (!phone) return NextResponse.json({ error: "Enter a valid M-Pesa number (07XX or 2547XX)" }, { status: 400 });
 
-    // Idempotency: reuse a live push instead of double-charging
-    const live = await db.mpesaTransaction.findFirst({
-      where: { bookingId: booking.id, status: { in: ["pending", "stk_push_sent"] } },
-      orderBy: { createdAt: "desc" },
+    // Persist an idempotent intent before contacting Daraja. Lock the booking
+    // row so simultaneous taps cannot each initiate a separate charge.
+    const attempt = await db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "Booking" WHERE "id" = ${booking.id} FOR UPDATE`;
+      const liveBooking = await tx.booking.findUnique({
+        where: { id: booking.id },
+        select: {
+          status: true,
+          cashDue: true,
+          trip: {
+            select: {
+              driverId: true,
+              status: true,
+              departureAt: true,
+              driver: { select: { status: true } },
+            },
+          },
+        },
+      });
+      if (!liveBooking || !isBookingReadyForPayment(liveBooking)) return { blocked: true as const };
+
+      const live = await tx.mpesaTransaction.findFirst({
+        where: { bookingId: booking.id, status: { in: ["pending", "stk_push_sent", "ambiguous"] } },
+        orderBy: { createdAt: "desc" },
+      });
+      if (live) return { blocked: false as const, transaction: live, created: false as const };
+
+      const intentReference = `${daraja.PAYMENT_INTENT_PREFIX}${randomUUID()}`;
+      const transaction = await tx.mpesaTransaction.create({
+        data: {
+          bookingId: booking.id,
+          phone,
+          amount: liveBooking.cashDue,
+          checkoutRequestId: intentReference,
+          merchantRequestId: `intent-${randomUUID()}`,
+          status: "pending",
+        },
+      });
+      return { blocked: false as const, transaction, created: true as const };
     });
-    if (live) {
-      return NextResponse.json({ ok: true, checkoutRequestId: live.checkoutRequestId, amount: live.amount, phone: live.phone, reused: true });
+
+    if (attempt.blocked) {
+      return NextResponse.json(
+        { error: "This unpaid booking has expired or no longer has an active driver and future departure. Please book an available cab again." },
+        { status: 409 },
+      );
     }
 
-    const push = await daraja.stkPush(phone, booking.cashDue, booking.code);
+    if (!attempt.created) {
+      const existing = attempt.transaction;
+      const unresolved = daraja.isPaymentIntentId(existing.checkoutRequestId) || existing.status === "ambiguous";
+      return NextResponse.json({
+        ok: true,
+        amount: existing.amount,
+        phone: existing.phone,
+        reused: true,
+        paymentPending: unresolved || existing.status === "pending",
+        message: unresolved || existing.status === "pending"
+          ? "An earlier M-Pesa request is still being checked. Please do not start another payment."
+          : undefined,
+      });
+    }
+
+    const tx = attempt.transaction;
+    const push = await daraja.stkPush(phone, tx.amount, booking.code, tx.id);
     if (!push.ok || !push.checkoutRequestId) {
+      const uncertain = push.responseCode === daraja.RESULT_CODES.TIMEOUT || push.ok;
+      await db.mpesaTransaction.updateMany({
+        where: { id: tx.id, status: "pending" },
+        data: {
+          status: uncertain ? "ambiguous" : "failed",
+          resultCode: push.responseCode,
+          resultDesc: push.responseDescription,
+        },
+      });
+      if (uncertain) {
+        return NextResponse.json({
+          ok: true,
+          paymentPending: true,
+          amount: tx.amount,
+          phone,
+          message: "The M-Pesa request may still be processing. Do not pay again; check your phone and use Verify shortly.",
+        });
+      }
       await audit({
         actorId: session.id,
         actorName: session.name,
@@ -97,15 +180,13 @@ export async function POST(req: NextRequest, { params }: Params) {
         action: "payment.push_rejected",
         entity: "booking",
         entityId: booking.id,
-        metadata: { code: booking.code, amount: booking.cashDue, phone, responseCode: push.responseCode, desc: push.responseDescription },
+        metadata: { code: booking.code, amount: tx.amount, phone, responseCode: push.responseCode, desc: push.responseDescription },
       });
       return NextResponse.json({ error: push.responseDescription || "M-Pesa rejected the payment request" }, { status: 400 });
     }
-    const tx = await db.mpesaTransaction.create({
+    await db.mpesaTransaction.updateMany({
+      where: { id: tx.id, checkoutRequestId: tx.checkoutRequestId, status: "pending" },
       data: {
-        bookingId: booking.id,
-        phone,
-        amount: booking.cashDue,
         checkoutRequestId: push.checkoutRequestId,
         merchantRequestId: push.merchantRequestId,
         status: "stk_push_sent",
@@ -118,9 +199,9 @@ export async function POST(req: NextRequest, { params }: Params) {
       action: "payment.initiate",
       entity: "booking",
       entityId: booking.id,
-      metadata: { code: booking.code, amount: booking.cashDue, phone },
+      metadata: { code: booking.code, amount: tx.amount, phone },
     });
-    return NextResponse.json({ ok: true, checkoutRequestId: tx.checkoutRequestId, amount: booking.cashDue, phone });
+    return NextResponse.json({ ok: true, amount: tx.amount, phone });
   }
 
   // ── Verify: the customer acted on the prompt → poll the result ────────────
@@ -128,14 +209,31 @@ export async function POST(req: NextRequest, { params }: Params) {
   // pending push (Paybill path) the demo simulates the C2B confirmation,
   // live mode waits for the real C2B webhook to land.
   if (action === "verify") {
+    if (booking.status === "awaiting_payment" && !isBookingReadyForPayment(booking)) {
+      return NextResponse.json(
+        { error: "An active driver and future departure are not secured for this booking. Payment cannot be confirmed yet." },
+        { status: 409 },
+      );
+    }
     const tx = await db.mpesaTransaction.findFirst({
-      where: { bookingId: booking.id, status: { in: ["stk_push_sent", "pending"] } },
+      where: { bookingId: booking.id, status: { in: ["stk_push_sent", "pending", "ambiguous"] } },
       orderBy: { createdAt: "desc" },
     });
     if (!tx) {
       // Maybe already confirmed (sweep or webhook got there first)
       if (booking.status === "confirmed" && booking.ledgerEntry) {
         return NextResponse.json({ ok: true, alreadyConfirmed: true, receipt: booking.ledgerEntry.mpesaReceipt, driver: driverContact() });
+      }
+      const unmatchedPaybill = await db.mpesaTransaction.findFirst({
+        where: { bookingId: booking.id, merchantRequestId: { startsWith: "c2b-" }, status: "failed" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (unmatchedPaybill) {
+        const supportEmail = process.env.MIRELI_SUPPORT_EMAIL?.trim() || "mirelisgr001@gmail.com";
+        const error = unmatchedPaybill.amount > 0
+          ? `We received a Paybill payment of KSh ${unmatchedPaybill.amount}, but this booking requires exactly KSh ${booking.cashDue}. Please contact ${supportEmail} with reference ${booking.code} before paying again.`
+          : `We received a Paybill receipt for this booking that could not be matched to its fare. Please contact ${supportEmail} with reference ${booking.code} before paying again.`;
+        return NextResponse.json({ error, paymentNeedsReview: true }, { status: 409 });
       }
       const creds = await daraja.resolveDaraja();
       if (creds.mode === "mock") {
@@ -159,6 +257,12 @@ export async function POST(req: NextRequest, { params }: Params) {
       }
       return NextResponse.json(
         { error: "We can't see your payment yet — it usually lands within a minute. Try again shortly." },
+        { status: 409 },
+      );
+    }
+    if (daraja.isPaymentIntentId(tx.checkoutRequestId)) {
+      return NextResponse.json(
+        { error: "M-Pesa is still confirming this request. Do not pay again; wait briefly and check your phone before retrying.", paymentPending: true },
         { status: 409 },
       );
     }
@@ -205,22 +309,36 @@ export async function POST(req: NextRequest, { params }: Params) {
     });
   }
 
-  // ── Cancel: resolve the config-driven tier and execute ───────────────────
-  if (action === "cancel") {
+  // ── Timestamp a cancellation request before sending the passenger to support.
+  if (action === "request_cancellation") {
     if (!["awaiting_payment", "confirmed", "boarded"].includes(booking.status)) {
       return NextResponse.json({ error: "This booking can no longer be cancelled" }, { status: 400 });
     }
     if (booking.trip && ["departed", "completed"].includes(booking.trip.status)) {
       return NextResponse.json({ error: "Trip already departed — cancellation window closed" }, { status: 400 });
     }
-    const result = await executeCancellation({ bookingId: booking.id, actor, trigger: "passenger_cancel" });
-    const messages: Record<string, string> = {
-      voided_unpaid: "Booking cancelled — nothing was collected.",
-      refunded: "Full cash refund sent to your M-Pesa.",
-      converted_to_credit: "Your fare is saved as travel credit for your next ride.",
-      forfeited: "Fare forfeited.",
-    };
-    return NextResponse.json({ ok: true, ...result, message: messages[result.outcome] || result.outcome });
+    const requestedAt = booking.cancellationRequestedAt ?? new Date();
+    if (!booking.cancellationRequestedAt) {
+      await db.booking.update({ where: { id: booking.id }, data: { cancellationRequestedAt: requestedAt } });
+      await audit({
+        actorId: session.id,
+        actorName: session.name,
+        actorRole: "passenger",
+        action: "booking.cancellation_requested",
+        entity: "booking",
+        entityId: booking.id,
+        metadata: { code: booking.code, requestedAt: requestedAt.toISOString() },
+      });
+    }
+    return NextResponse.json({ ok: true, requestedAt: requestedAt.toISOString() });
+  }
+
+  // Passenger cancellations are requests to support; an operator processes
+  // the refund or credit after verifying the request and its timestamp.
+  if (action === "cancel") {
+    return NextResponse.json({
+      error: `Cancellation requests are handled by Mireli support. Call or WhatsApp ${MIRELI_SUPPORT_PHONE_E164}.`,
+    }, { status: 409 });
   }
 
   // ── Check in at the stage (prevents the no-show tier) ─────────────────────

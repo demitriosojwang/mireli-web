@@ -21,6 +21,7 @@ export async function GET() {
       stuckRefundHours: cfg.stuckRefundHours,
       stuckPayoutHours: cfg.stuckPayoutHours,
       sweepPendingMinutes: cfg.sweepPendingMinutes,
+      unpaidBookingHoldMinutes: cfg.unpaidBookingHoldMinutes,
       tripHorizonDays: cfg.tripHorizonDays,
       bookingWindowMinutes: cfg.bookingWindowMinutes,
       terminusArrivalBufferMinutes: cfg.terminusArrivalBufferMinutes,
@@ -101,6 +102,11 @@ export async function PUT(req: NextRequest) {
     const v = parseInt(body.sweepPendingMinutes, 10);
     if (Number.isNaN(v) || v < 1 || v > 120) return NextResponse.json({ error: "Sweep threshold must be 1–120 minutes" }, { status: 400 });
     data.sweepPendingMinutes = v;
+  }
+  if (body.unpaidBookingHoldMinutes !== undefined) {
+    const v = parseInt(body.unpaidBookingHoldMinutes, 10);
+    if (Number.isNaN(v) || v < 1 || v > 120) return NextResponse.json({ error: "Unpaid booking hold must be 1–120 minutes" }, { status: 400 });
+    data.unpaidBookingHoldMinutes = v;
   }
   if (body.tripHorizonDays !== undefined) {
     const v = parseInt(body.tripHorizonDays, 10);

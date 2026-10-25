@@ -17,7 +17,7 @@ model Passenger {
   // Primary-passenger profile — captured on the booking form; guests upgrade
   // into an account by re-submitting the exact same details.
   idType      String? // "id" | "passport"
-  idNumber    String? // National ID or passport number
+  idNumber    String? // AES-256-GCM encrypted National ID or passport number; legacy plaintext until backfill
   nationality String?
   gender      String?
   createdAt   DateTime @default(now())
@@ -66,6 +66,7 @@ model Train {
   originTime    String // "HH:MM" departure at origin terminus
   destTime      String // "HH:MM" arrival at destination terminus
   destDayOffset Int     @default(0) // 1 when arrival is next calendar day (night train)
+  serviceDays   Int[]   @default([0, 1, 2, 3, 4, 5, 6]) // ISO-independent JS weekdays: Sunday 0 through Saturday 6, at origin terminus
   active        Boolean @default(true)
   trips         Trip[]
 }
@@ -74,7 +75,7 @@ model Route {
   id             String       @id @default(cuid())
   name           String
   durationMinutes Int
-  charterPrice   Int
+  charterPrice   Int // Legacy only; customer charter pricing uses assigned capacity and stage fare
   active         Boolean      @default(true)
   stages         RouteStage[]
   trips          Trip[]
@@ -136,13 +137,14 @@ model Booking {
   homeAddress   String?
   seats         Int       @default(1)
   isCharter     Boolean   @default(false)
-  fareAmount    Int // total charged: fare + door surcharge + flat platform fee
-  platformFeeAmount Int @default(0) // flat fee retained by Mi-Reli; not paid to the driver
+  fareAmount    Int // total charged: shared fare + surcharge + fee; charter fare + surcharge with fee embedded in platform share
+  platformFeeAmount Int @default(0) // shared: KSh fee per booked passenger seat; charter: one fee recorded within Mireli's 10% share
   homeSurcharge Int // total home surcharge for this booking
   creditApplied Int // portion covered by travel credit (never cash)
   cashDue       Int // portion to collect via M-Pesa STK
   status        String    @default("awaiting_payment") // awaiting_payment | confirmed | boarded | cancelled | completed | no_show
   cancelTier    String? // early | late | platform_cancelled | no_show
+  cancellationRequestedAt DateTime? // first passenger request time; support processes the cancellation
   cancelledAt   DateTime?
   checkedInAt   DateTime?
   boardedSeats  Int       @default(0)
@@ -157,13 +159,32 @@ model Booking {
   // manifest shows) — stays frozen even if the profile is edited later.
   passengerEmail       String?
   passengerIdType      String?
-  passengerIdNumber    String?
+  passengerIdNumber    String? // AES-256-GCM encrypted ID/passport snapshot; legacy plaintext until backfill
   passengerNationality String?
   passengerGender      String?
   ledgerEntry   LedgerEntry?
+  ticketEmailDelivery BookingTicketEmailDelivery?
   refunds       RefundRecord[]
   mpesaTransactions MpesaTransaction[]
   createdAt     DateTime  @default(now())
+  @@index([status, createdAt])
+}
+
+// Durable delivery state for the customer ticket. A unique row per booking
+// prevents duplicate webhook callbacks from sending duplicate tickets.
+model BookingTicketEmailDelivery {
+  id                String   @id @default(cuid())
+  bookingId         String   @unique
+  booking           Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  status            String   @default("pending") // pending | sending | sent | failed | blocked | uncertain
+  attempts          Int      @default(0)
+  providerMessageId String?
+  lastErrorCode     String?
+  lastAttemptAt     DateTime?
+  sentAt            DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  @@index([status, updatedAt])
 }
 
 // ─── Money (the ledger) ──────────────────────────────────────────────────────
@@ -178,10 +199,10 @@ model LedgerEntry {
   cashAmount          Int // actually collected via STK push
   creditApplied       Int // portion paid with travel credit
   homeSurchargeAmount Int // tracked separately — passes to driver in full
-  platformFeeAmount   Int      @default(0) // flat booking fee retained by Mi-Reli
+  platformFeeAmount   Int      @default(0) // shared: per-seat Mireli fee total; charter: one fee included within the 10% share
   mpesaReceipt        String?
   collectedAt         DateTime?
-  status              String   @default("held") // held | driver_payable | commission_taken | refunded | partially_refunded | converted_to_credit | forfeited
+  status              String   @default("held") // held | driver_payable | commission_taken | refunded | partially_refunded | converted_to_credit | partially_converted_to_credit | forfeited
   statusChangedAt     DateTime @default(now())
   createdAt           DateTime @default(now())
   refunds             RefundRecord[]
@@ -195,7 +216,7 @@ model RefundRecord {
   booking            Booking  @relation(fields: [bookingId], references: [id])
   amount             Int // cash returned to passenger
   creditRestored     Int      @default(0) // credit portion restored as travel credit (info)
-  commissionReversed Int      @default(0) // platform commission given back on refunded fare
+  commissionReversed Int      @default(0) // charter platform share (commission plus embedded fee) reversed
   driverClawback     Int      @default(0) // driver share to recover (from future payout)
   reason             String // cancelled_early | cancelled_late | no_show_partial | admin_override | platform_cancelled
   method             String // reversal | b2c
@@ -205,6 +226,28 @@ model RefundRecord {
   failureReason      String?
   initiatedAt        DateTime @default(now())
   completedAt        DateTime?
+  attempts           RefundAttempt[]
+}
+
+// Every provider refund is correlated to a private callback capability before
+// submission. An accepted HTTP response is pending, never proof of settlement.
+model RefundAttempt {
+  id                String   @id @default(cuid())
+  refundId          String
+  refund            RefundRecord @relation(fields: [refundId], references: [id], onDelete: Restrict)
+  callbackHash      String   @unique
+  method            String // reversal | b2c
+  amount            Int
+  receiverPhone     String?
+  originalReceipt   String?
+  state             String   @default("submitting") // submitting | processing | ambiguous | confirmed | failed
+  conversationId    String?  @unique
+  originatorId      String?  @unique
+  receipt           String?  @unique
+  resultCode        String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  @@index([refundId, state])
 }
 
 model PayoutRecord {
@@ -213,10 +256,10 @@ model PayoutRecord {
   driver              Driver    @relation(fields: [driverId], references: [id])
   tripId              String?
   trip                Trip?     @relation(fields: [tripId], references: [id])
-  grossFareTotal      Int
-  commissionAmount    Int
+  grossFareTotal      Int // customer total before separately itemized platform fee and commission
+  commissionAmount    Int // charter percentage share minus its separately recorded embedded booking fee
   homeSurchargeAmount Int // passes through in full — not part of commission base
-  platformFeeAmount   Int      @default(0) // recorded separately; excluded from driver gross
+  platformFeeAmount   Int      @default(0) // separate platform take; deducted from gross before driver net
   netPayoutAmount     Int
   method              String    @default("b2c")
   mpesaResultCode     String?
@@ -413,8 +456,8 @@ model MpesaTransaction {
 model PlatformConfig {
   id                         String    @id @default("main")
   commissionRate             Float     @default(0.10) // charter commission; must stay under NTSA 18% cap
-  bookingFeeAmount           Int       @default(50) // flat KSh fee per booking, retained by Mi-Reli
-  fullRefundCutoffMinutes    Int       @default(60) // lock cutoff before departure
+  bookingFeeAmount           Int       @default(50) // KSh Mireli fee per shared passenger seat; one fee is included in a charter's 10% share
+  fullRefundCutoffMinutes    Int       @default(1440) // 24 hours before scheduled pickup
   seatFillThresholdPercent   Int       @default(70) // trip locks early when this full
   creditValidityDays         Int       @default(30) // late-cancellation credit validity
   payoutMode                 String    @default("instant_per_trip") // after each completed trip
@@ -422,6 +465,7 @@ model PlatformConfig {
   stuckRefundHours           Int       @default(4) // pending refund alert threshold
   stuckPayoutHours           Int       @default(24) // queued payout alert threshold
   sweepPendingMinutes        Int       @default(5) // STK ambiguity → Transaction Status sweep
+  unpaidBookingHoldMinutes   Int       @default(15) // unpaid reservation expiry after checkout is abandoned
   tripHorizonDays            Int       @default(2)
   bookingWindowMinutes       Int       @default(15) // min minutes before departure to book
   terminusArrivalBufferMinutes Int     @default(60) // TO_TERMINUS cabs reach MTM this early before train departure

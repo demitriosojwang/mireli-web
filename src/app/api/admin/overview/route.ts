@@ -11,6 +11,7 @@ const LEDGER_BUCKETS = [
   "refunded",
   "partially_refunded",
   "converted_to_credit",
+  "partially_converted_to_credit",
   "forfeited",
 ] as const;
 
@@ -59,6 +60,26 @@ export async function GET() {
   const ambiguousTx = await db.mpesaTransaction.findMany({
     where: { status: { in: ["stk_push_sent", "pending", "ambiguous"] } },
   });
+  const closedBookingCaptures = await db.mpesaTransaction.findMany({
+    where: {
+      status: "confirmed",
+      booking: {
+        is: {
+          status: { in: ["cancelled", "no_show"] },
+          ledgerEntry: { is: { status: "held" } },
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+    include: { booking: true },
+  });
+  const paybillMismatches = await db.mpesaTransaction.findMany({
+    where: { status: "failed", merchantRequestId: { startsWith: "c2b-" } },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+    include: { booking: true },
+  });
   const unallocated = await db.booking.findMany({
     where: { tripId: null, status: { in: ["awaiting_payment", "confirmed"] } },
   });
@@ -93,6 +114,18 @@ export async function GET() {
       failedPayouts: failedPayouts.map((p) => ({ id: p.id, driver: p.driver.name, amount: p.netPayoutAmount, reason: p.failureReason })),
       failedRefunds: failedRefunds.map((r) => ({ id: r.id, code: r.booking.code, amount: r.amount, reason: r.failureReason })),
       ambiguousPayments: ambiguousTx.length,
+      closedBookingCaptures: closedBookingCaptures.map((tx) => ({
+        id: tx.id,
+        code: tx.booking.code,
+        amount: tx.amount,
+        status: tx.booking.status,
+      })),
+      paybillMismatches: paybillMismatches.map((tx) => ({
+        id: tx.id,
+        code: tx.booking.code,
+        received: tx.amount,
+        expected: tx.booking.cashDue,
+      })),
       unallocatedBookings: unallocated.length,
       creditLiability: activeCredits.reduce((s, c) => s + c.amount, 0),
       activeCredits: activeCredits.length,

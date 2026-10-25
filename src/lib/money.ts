@@ -4,6 +4,15 @@ import * as daraja from "@/lib/daraja";
 import type {Prisma} from "@prisma/client";
 import {calculateSettlement} from "@/lib/payout-settlement";
 import {DriverError} from "@/lib/driver/errors";
+import { attemptBookingTicketEmail } from "@/lib/booking-ticket-email";
+import { isLocalDemoEnabled } from "@/lib/runtime-mode";
+import { submitRefund } from "@/lib/refund-settlement";
+import {
+  calculateLateCancellationCredit,
+  describeCancellationCutoff,
+  getPassengerCancellationTier,
+  LATE_CANCELLATION_CREDIT_VALIDITY_DAYS,
+} from "@/lib/cancellation-policy";
 
 /**
  * The money engine.
@@ -12,7 +21,7 @@ import {DriverError} from "@/lib/driver/errors";
  * — it never goes directly to a driver. Every shilling is tracked in the
  * ledger as exactly one of:
  *   held | driver_payable | commission_taken | refunded | partially_refunded
- *   | converted_to_credit | forfeited
+ *   | converted_to_credit | partially_converted_to_credit | forfeited
  *
  * The admin never touches these flows — they are config-driven and automatic.
  */
@@ -54,35 +63,54 @@ export async function issueCredit(params: {
 export async function applyCredits(
   passengerId: string,
   bookingId: string,
-  needed: number
+  needed: number,
+  options: { requireFull?: boolean } = {},
 ): Promise<number> {
-  const credits = await db.credit.findMany({
-    where: {
-      passengerId,
-      status: "active",
-      amount: { gt: 0 },
-      expiresAt: { gt: new Date() },
-    },
-    orderBy: { expiresAt: "asc" }, // use soonest-expiring first
-  });
-  let applied = 0;
-  for (const c of credits) {
-    if (applied >= needed) break;
-    const take = Math.min(c.amount, needed - applied);
-    if (take <= 0) continue;
-    const remaining = c.amount - take;
-    await db.credit.update({
-      where: { id: c.id },
-      data: {
-        amount: remaining,
-        status: remaining <= 0 ? "redeemed" : "active",
-        redeemedAt: remaining <= 0 ? new Date() : null,
-        redeemedBookingId: bookingId,
+  return db.$transaction(async (tx) => {
+    // A balance read followed by independent updates can double-spend when a
+    // passenger checks out in two tabs. Lock every existing active credit for
+    // this passenger first; concurrent redemptions then re-read the balance
+    // only after the previous transaction commits.
+    await tx.$queryRaw`
+      SELECT "id" FROM "Credit"
+      WHERE "passengerId" = ${passengerId}
+        AND "status" = 'active'
+        AND "amount" > 0
+      ORDER BY "expiresAt" ASC, "id" ASC
+      FOR UPDATE
+    `;
+    const now = new Date();
+    const credits = await tx.credit.findMany({
+      where: {
+        passengerId,
+        status: "active",
+        amount: { gt: 0 },
+        expiresAt: { gt: now },
       },
+      orderBy: [{ expiresAt: "asc" }, { id: "asc" }], // FIFO, stable tie-break
     });
-    applied += take;
-  }
-  return applied;
+    const available = credits.reduce((sum, credit) => sum + credit.amount, 0);
+    if (options.requireFull && available < needed) return 0;
+
+    let applied = 0;
+    for (const credit of credits) {
+      if (applied >= needed) break;
+      const take = Math.min(credit.amount, needed - applied);
+      if (take <= 0) continue;
+      const remaining = credit.amount - take;
+      await tx.credit.update({
+        where: { id: credit.id },
+        data: {
+          amount: remaining,
+          status: remaining <= 0 ? "redeemed" : "active",
+          redeemedAt: remaining <= 0 ? now : null,
+          redeemedBookingId: bookingId,
+        },
+      });
+      applied += take;
+    }
+    return applied;
+  });
 }
 
 /** Restore a credit portion when a booking that used credit is cancelled
@@ -151,12 +179,12 @@ export async function recordCollection(params: {
 // ─── Refund tiers ────────────────────────────────────────────────────────────
 
 export type RefundTier =
-  | "early" // before trip lock → full cash refund
-  | "late" // after lock, before departure → full fare converts to credit
+  | "early" // notice at least 24 hours before scheduled pickup → full cash refund
+  | "late" // notice inside 24 hours → 75% credit, valid 30 days; 25% forfeited
   | "no_show" // never cancelled, never showed → forfeited
   | "platform_cancelled"; // platform/driver cancelled → full cash refund always
 
-/** Resolves the tier from the booking/trip state + config (never hardcoded). */
+/** Resolves the passenger tier from the timestamped request and pickup schedule. */
 export async function resolveRefundTier(bookingId: string): Promise<{
   tier: RefundTier | null;
   detail: string;
@@ -181,10 +209,13 @@ export async function resolveRefundTier(bookingId: string): Promise<{
   if (trip.status === "departed" || trip.status === "completed")
     return { tier: null, detail: "Trip already departed — cancellation window closed." };
 
-  // Trip still pre-departure: lock state decides early vs late
-  const locked = trip.status === "locked" || trip.lockedAt !== null;
-  if (locked) return { tier: "late", detail: "Trip locked — late cancellation converts fare to credit." };
-  return { tier: "early", detail: "Before lock — full cash refund." };
+  const cfg = await getConfig();
+  const requestedAt = booking.cancellationRequestedAt ?? new Date();
+  const tier = getPassengerCancellationTier(requestedAt, trip.departureAt, cfg.fullRefundCutoffMinutes);
+  const cutoff = describeCancellationCutoff(cfg.fullRefundCutoffMinutes);
+  return tier === "early"
+    ? { tier, detail: `Request received at least ${cutoff} before scheduled pickup — full refund.` }
+    : { tier, detail: `Request received within ${cutoff} of scheduled pickup — 75% travel credit for 30 days; 25% is forfeited.` };
 }
 
 const REFUND_METHOD_WINDOW_MS = 24 * 60 * 60 * 1000; // Reversal works in a short window
@@ -263,28 +294,9 @@ export async function executeCancellation(params: {
       },
     });
 
+    let refundStatus: "completed" | "pending" | "failed" = "completed";
     if (entry.cashAmount > 0) {
-      const result =
-        method === "reversal"
-          ? await daraja.reversal({ transactionId: entry.mpesaReceipt || booking.code, amount: entry.cashAmount })
-          : await daraja.b2c({ receiverPhone: await passengerPhone(booking.passengerId), amount: entry.cashAmount });
-      const ok = result.resultCode === daraja.RESULT_CODES.SUCCESS;
-      await db.refundRecord.update({
-        where: { id: refund.id },
-        data: {
-          status: ok ? "completed" : "failed",
-          mpesaResultCode: result.resultCode,
-          failureReason: ok ? null : result.resultDesc,
-          completedAt: ok ? new Date() : null,
-        },
-      });
-      await db.ledgerEntry.update({
-        where: { id: entry.id },
-        data: {
-          status: ok ? "refunded" : "partially_refunded",
-          statusChangedAt: new Date(),
-        },
-      });
+      refundStatus = await submitRefund(refund.id);
     } else {
       // Credit-only booking: no cash to move, ledger simply releases the hold
       await db.refundRecord.update({
@@ -319,13 +331,35 @@ export async function executeCancellation(params: {
       entityId: booking.id,
       metadata: { code: booking.code, amount: entry.cashAmount, method, tier },
     });
-    return { outcome: "refunded", tier };
+    return { outcome: refundStatus === "completed" ? "refunded" : refundStatus === "pending" ? "refund_pending" : "refund_failed", tier };
   }
 
   if (tier === "late") {
     if (params.trigger === "admin_override") {
       // Discretionary cash refund by admin (disputes) — amount from params
-      const amount = Math.min(params.overrideAmount ?? entry.cashAmount, entry.cashAmount);
+      const priorRefunds = await db.refundRecord.aggregate({
+        where: { ledgerEntryId: entry.id, status: { in: ["pending", "completed"] } },
+        _sum: { amount: true },
+      });
+      const remainingCash = Math.max(0, entry.cashAmount - (priorRefunds._sum.amount || 0));
+      const amount = Math.min(params.overrideAmount ?? remainingCash, remainingCash);
+      if (amount <= 0) throw new DriverError(409, "REFUND_BALANCE_EXHAUSTED", "No unrefunded cash remains on this booking.");
+      // Commission reversal is proportional — the platform never keeps a
+      // commission on a refunded fare.
+      const cfgC = await getConfig();
+      const refundedShare = entry.totalAmount > 0 ? Math.min(1, amount / entry.totalAmount) : 0;
+      const split = calculateSettlement(
+        entry.totalAmount,
+        entry.homeSurchargeAmount,
+        entry.platformFeeAmount,
+        Math.round(cfgC.commissionRate * 10000),
+        booking.isCharter,
+      );
+      const platformRetained = split.commission + split.platformFee;
+      const commissionReversed = booking.isCharter
+        ? Math.round(platformRetained * refundedShare)
+        : 0;
+      const driverClawback = amount - commissionReversed;
       const refund = await db.refundRecord.create({
         data: {
           ledgerEntryId: entry.id,
@@ -334,42 +368,11 @@ export async function executeCancellation(params: {
           reason: "admin_override",
           method: "b2c",
           status: "pending",
+          commissionReversed,
+          driverClawback,
         },
       });
-      const result = await daraja.b2c({
-        receiverPhone: await passengerPhone(booking.passengerId),
-        amount,
-      });
-      const ok = result.resultCode === daraja.RESULT_CODES.SUCCESS;
-      await db.refundRecord.update({
-        where: { id: refund.id },
-        data: {
-          status: ok ? "completed" : "failed",
-          mpesaResultCode: result.resultCode,
-          failureReason: ok ? null : result.resultDesc,
-          completedAt: ok ? new Date() : null,
-        },
-      });
-      // Commission reversal is proportional — the platform never keeps a
-      // commission on a refunded fare.
-      const cfgC = await getConfig();
-      const commissionableFare = Math.max(0, entry.totalAmount - entry.homeSurchargeAmount - entry.platformFeeAmount);
-      const refundedShare = entry.totalAmount > 0 ? Math.min(1, amount / entry.totalAmount) : 0;
-      const commissionReversed = booking.isCharter
-        ? Math.round(commissionableFare * refundedShare * cfgC.commissionRate)
-        : 0;
-      const driverClawback = amount - commissionReversed;
-      await db.refundRecord.update({
-        where: { id: refund.id },
-        data: { commissionReversed, driverClawback },
-      });
-      await db.ledgerEntry.update({
-        where: { id: entry.id },
-        data: {
-          status: amount >= entry.cashAmount ? "refunded" : "partially_refunded",
-          statusChangedAt: new Date(),
-        },
-      });
+      const refundStatus = await submitRefund(refund.id);
       await db.booking.update({
         where: { id: booking.id },
         data: { status: "cancelled", cancelledAt: now, cancelTier: "late" },
@@ -383,22 +386,28 @@ export async function executeCancellation(params: {
         entityId: booking.id,
         metadata: { code: booking.code, amount, commissionReversed, driverClawback },
       });
-      return { outcome: "admin_refund", tier: "late" };
+      return { outcome: refundStatus === "completed" ? "admin_refund" : refundStatus === "pending" ? "refund_pending" : "refund_failed", tier: "late" };
     }
 
-    // Passenger late cancellation: NO cash moves — full fare converts to a
-    // travel credit. The money stays on the platform as a liability, not a
-    // payout, and the passenger never loses it.
-    await issueCredit({
-      passengerId: booking.passengerId,
-      sourceBookingId: booking.id,
-      amount: entry.totalAmount, // full fare: cash + credit portions
-      note: `Late cancellation of ${booking.code} — fare saved as credit`,
-      validityDays: cfg.creditValidityDays,
-    });
+    // Passenger late cancellation: issue 75% of the paid fare as travel
+    // credit for 30 days and explicitly record the remaining 25% as forfeited.
+    const creditAmount = calculateLateCancellationCredit(entry.totalAmount);
+    const forfeitedAmount = entry.totalAmount - creditAmount;
+    if (creditAmount > 0) {
+      await issueCredit({
+        passengerId: booking.passengerId,
+        sourceBookingId: booking.id,
+        amount: creditAmount,
+        note: `Late cancellation of ${booking.code} — 75% travel credit`,
+        validityDays: LATE_CANCELLATION_CREDIT_VALIDITY_DAYS,
+      });
+    }
     await db.ledgerEntry.update({
       where: { id: entry.id },
-      data: { status: "converted_to_credit", statusChangedAt: new Date() },
+      data: {
+        status: creditAmount > 0 ? "partially_converted_to_credit" : "forfeited",
+        statusChangedAt: new Date(),
+      },
     });
     await db.booking.update({
       where: { id: booking.id },
@@ -413,11 +422,12 @@ export async function executeCancellation(params: {
       entityId: booking.id,
       metadata: {
         code: booking.code,
-        creditIssued: entry.totalAmount,
-        validDays: cfg.creditValidityDays,
+        creditIssued: creditAmount,
+        forfeitedAmount,
+        validDays: LATE_CANCELLATION_CREDIT_VALIDITY_DAYS,
       },
     });
-    return { outcome: "converted_to_credit", tier: "late" };
+    return { outcome: "partially_converted_to_credit", tier: "late" };
   }
 
   // no_show — reached only via the completion engine
@@ -439,11 +449,6 @@ export async function executeCancellation(params: {
     metadata: { code: booking.code, amount: entry.totalAmount },
   });
   return { outcome: "forfeited", tier: "no_show" };
-}
-
-async function passengerPhone(passengerId: string): Promise<string> {
-  const p = await db.passenger.findUnique({ where: { id: passengerId } });
-  return p?.phone || "";
 }
 
 // ─── Trip completion → payout records ────────────────────────────────────────
@@ -561,6 +566,27 @@ export async function runReconciliationSweep(
     expiredCredits: 0,
   };
 
+  // A webhook/verify request can mark the provider transaction confirmed and
+  // then fail before creating its ledger entry. Recover those captures from
+  // the stored receipt; never query or re-charge the provider for a terminal
+  // success. The relation filter keeps normal completed payments out of every
+  // nightly run.
+  const confirmedWithoutLedger = await db.mpesaTransaction.findMany({
+    where: {
+      status: "confirmed",
+      booking: { is: { ledgerEntry: null } },
+    },
+    orderBy: { createdAt: "asc" },
+    take: 100,
+  });
+  for (const tx of confirmedWithoutLedger) {
+    const applied = await confirmBookingPayment(tx.bookingId, {
+      receipt: tx.mpesaReceipt || tx.checkoutRequestId,
+      checkoutRequestId: tx.checkoutRequestId,
+    });
+    if (applied) summary.recoveredPayments++;
+  }
+
   // 1. Ambiguous STK pushes older than the sweep threshold
   const cutoff = new Date(now.getTime() - cfg.sweepPendingMinutes * 60 * 1000);
   const ambiguous = await db.mpesaTransaction.findMany({
@@ -598,7 +624,7 @@ export async function runReconciliationSweep(
     }
   }
 
-  // 2. Refunds stuck in pending — give them a terminal state or flag
+  // 2. Refunds stuck in pending — flag them for a human to reconcile
   const pendingRefunds = await db.refundRecord.findMany({ where: { status: "pending" } });
   for (const r of pendingRefunds) {
     const stuck = now.getTime() - r.initiatedAt.getTime() > cfg.stuckRefundHours * 60 * 60 * 1000;
@@ -610,22 +636,24 @@ export async function runReconciliationSweep(
       summary.flaggedStuckRefunds++;
     }
   }
-  // Prototype: sweep also completes pending reversals/b2c (simulated callback)
-  const completable = await db.refundRecord.findMany({
-    where: { status: "pending", stuckFlaggedAt: null },
-    take: 20,
-  });
-  for (const r of completable) {
-    // Prototype: the refund callback arrives — give it its terminal state.
-    await db.refundRecord.update({
-      where: { id: r.id },
-      data: { status: "completed", mpesaResultCode: daraja.RESULT_CODES.SUCCESS, completedAt: now },
+  // Local demo only: simulate the provider's asynchronous refund callback.
+  // In strict mode, only a correlated Daraja result may complete a refund.
+  if (isLocalDemoEnabled()) {
+    const completable = await db.refundRecord.findMany({
+      where: { status: "pending", stuckFlaggedAt: null },
+      take: 20,
     });
-    await db.ledgerEntry.update({
-      where: { id: r.ledgerEntryId },
-      data: { status: "refunded", statusChangedAt: now },
-    });
-    summary.completedRefunds++;
+    for (const r of completable) {
+      await db.refundRecord.update({
+        where: { id: r.id },
+        data: { status: "completed", mpesaResultCode: daraja.RESULT_CODES.SUCCESS, completedAt: now },
+      });
+      await db.ledgerEntry.update({
+        where: { id: r.ledgerEntryId },
+        data: { status: "refunded", statusChangedAt: now },
+      });
+      summary.completedRefunds++;
+    }
   }
 
   // 3. Expire stale credits
@@ -653,35 +681,60 @@ export async function confirmBookingPayment(
   bookingId: string,
   tx: { receipt: string; checkoutRequestId: string }
 ): Promise<boolean> {
-  const booking = await db.booking.findUnique({
-    where: { id: bookingId },
-    include: { ledgerEntry: true },
-  });
-  if (!booking) return false;
-  if (booking.status === "awaiting_payment") {
-    await db.booking.update({
+  const confirmed = await db.$transaction(async (dbTx) => {
+    // Serialize payment confirmation against unpaid-reservation expiry and
+    // concurrent callbacks. A late capture on a cancelled booking is recorded
+    // in the ledger but never reopens that booking.
+    await dbTx.$queryRaw`SELECT "id" FROM "Booking" WHERE "id" = ${bookingId} FOR UPDATE`;
+    const booking = await dbTx.booking.findUnique({
       where: { id: bookingId },
-      data: { status: "confirmed" },
+      include: { ledgerEntry: true },
     });
-  }
-  await recordCollection({
-    bookingId: booking.id,
-    tripId: booking.tripId,
-    totalAmount: booking.fareAmount,
-    cashAmount: booking.cashDue,
-    creditApplied: booking.creditApplied,
-    homeSurchargeAmount: booking.homeSurcharge,
-    platformFeeAmount: booking.platformFeeAmount,
-    mpesaReceipt: tx.receipt,
+    if (!booking) return null;
+
+    const wasAwaitingPayment = booking.status === "awaiting_payment";
+    if (wasAwaitingPayment) {
+      await dbTx.booking.update({
+        where: { id: bookingId },
+        data: { status: "confirmed" },
+      });
+    }
+
+    const ledgerEntry = booking.ledgerEntry ?? await dbTx.ledgerEntry.create({
+      data: {
+        bookingId: booking.id,
+        tripId: booking.tripId,
+        totalAmount: booking.fareAmount,
+        cashAmount: booking.cashDue,
+        creditApplied: booking.creditApplied,
+        homeSurchargeAmount: booking.homeSurcharge,
+        platformFeeAmount: booking.platformFeeAmount,
+        mpesaReceipt: tx.receipt,
+        collectedAt: booking.cashDue > 0 ? new Date() : null,
+        status: "held",
+      },
+    });
+    return { booking, ledgerEntry };
   });
+  if (!confirmed) return false;
+  const { booking, ledgerEntry } = confirmed;
+  const arrivedAfterClosure = ["cancelled", "no_show"].includes(booking.status);
   await audit({
     actorId: booking.passengerId,
     actorName: "Passenger",
     actorRole: "passenger",
-    action: "payment.confirm",
+    action: arrivedAfterClosure ? "payment.capture_after_closed_booking" : "payment.confirm",
     entity: "booking",
     entityId: booking.id,
-    metadata: { receipt: tx.receipt, amount: booking.cashDue },
+    metadata: {
+      receipt: tx.receipt,
+      amount: booking.cashDue,
+      ledgerEntryId: ledgerEntry.id,
+      bookingStatus: booking.status,
+    },
   });
+  // A late capture on a cancelled/no-show booking belongs in the ledger for
+  // finance review, but must not confirm the ride or send a stale ticket.
+  if (!arrivedAfterClosure) await attemptBookingTicketEmail(booking.id);
   return true;
 }

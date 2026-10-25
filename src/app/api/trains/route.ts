@@ -19,6 +19,7 @@ export async function GET() {
         originTime: t.originTime,
         destTime: t.destTime,
         destDayOffset: t.destDayOffset,
+        serviceDays: t.serviceDays,
       })),
     });
   } catch {

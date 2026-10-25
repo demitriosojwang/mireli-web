@@ -18,7 +18,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/client";
 import { fmtDate, fmtDateTime, ksh, TIER_LABELS } from "@/lib/format";
-import { Ban, Search, Undo2 } from "lucide-react";
+import { Ban, ClipboardCheck, Mail, Search, Undo2 } from "lucide-react";
 
 interface AdminBooking {
   id: string;
@@ -37,11 +37,13 @@ interface AdminBooking {
   cashDue: number;
   status: string;
   cancelTier: string | null;
+  cancellationRequestedAt: string | null;
   createdAt: string;
   departureAt: string | null;
   tripStatus: string | null;
   driver: { name: string; plate: string } | null;
   allocationNote: string | null;
+  ticketEmail: { status: string; attempts: number; sentAt: string | null; lastErrorCode: string | null } | null;
   ledger: { status: string; cash: number; credit: number; homeSurcharge: number; receipt: string | null } | null;
 }
 
@@ -80,6 +82,28 @@ export default function AdminBookings() {
     }
   }
 
+  async function processPassengerCancellation(b: AdminBooking) {
+    setBusy(true);
+    try {
+      const result = await api<{ outcome: string; tier: string | null }>("/api/admin/bookings", {
+        body: { bookingId: b.id, action: "process_passenger_cancel" },
+      });
+      const outcomeLabel = result.outcome === "refunded"
+        ? "Full refund requested. Check the refund status for completion."
+        : result.outcome === "partially_converted_to_credit"
+          ? "75% credit issued for 30 days; 25% forfeited."
+          : result.outcome === "voided_unpaid"
+            ? "Unpaid booking voided."
+            : result.outcome.replaceAll("_", " ");
+      toast({ title: `Cancellation processed · ${b.code}`, description: outcomeLabel });
+      refresh();
+    } catch (e) {
+      toast({ title: "Could not process cancellation", description: e instanceof Error ? e.message : "Try again", variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submitOverride() {
     if (!overrideFor) return;
     setBusy(true);
@@ -93,6 +117,28 @@ export default function AdminBookings() {
       refresh();
     } catch (e) {
       toast({ title: "Failed", description: e instanceof Error ? e.message : "Try again", variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function retryTicketEmail(b: AdminBooking) {
+    setBusy(true);
+    try {
+      const result = await api<{ ok: boolean; ticketEmail: { status: string; lastErrorCode?: string | null } }>("/api/admin/bookings", {
+        body: { bookingId: b.id, action: "retry_ticket_email" },
+      });
+      toast({
+        title: result.ticketEmail.status === "sent" ? "Ticket email accepted" : "Ticket email needs attention",
+        description:
+          result.ticketEmail.status === "sent"
+            ? "The email provider accepted the ticket. Check its delivery log if the passenger does not receive it."
+            : `${result.ticketEmail.status.replaceAll("_", " ")}${result.ticketEmail.lastErrorCode ? ` · ${result.ticketEmail.lastErrorCode}` : ""}`,
+        variant: result.ticketEmail.status === "sent" ? "default" : "destructive",
+      });
+      refresh();
+    } catch (e) {
+      toast({ title: "Ticket email not sent", description: e instanceof Error ? e.message : "Try again", variant: "destructive" });
     } finally {
       setBusy(false);
     }
@@ -153,6 +199,11 @@ export default function AdminBookings() {
                     Departure {fmtDateTime(b.departureAt)} · trip {b.tripStatus || "unallocated"}
                     {b.driver ? ` · ${b.driver.name} (${b.driver.plate})` : ""}
                   </p>
+                  {b.cancellationRequestedAt && (
+                    <p className="text-xs font-medium text-amber-800">
+                      Passenger cancellation requested {fmtDateTime(b.cancellationRequestedAt)}
+                    </p>
+                  )}
                   {b.allocationNote && <p className="text-xs text-muted-foreground">{b.allocationNote}</p>}
                 </div>
                 <div className="text-right text-sm">
@@ -169,8 +220,13 @@ export default function AdminBookings() {
                 </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
+                {b.cancellationRequestedAt && !["cancelled", "completed", "no_show"].includes(b.status) && (
+                  <Button size="sm" onClick={() => void processPassengerCancellation(b)} disabled={busy}>
+                    <ClipboardCheck className="h-4 w-4" /> Process passenger request
+                  </Button>
+                )}
                 <Button size="sm" variant="outline" onClick={() => platformCancel(b)} disabled={busy || ["cancelled", "completed", "no_show"].includes(b.status)}>
-                  <Ban className="h-4 w-4" /> Cancel for passenger (full refund)
+                  <Ban className="h-4 w-4" /> Platform cancel (full refund)
                 </Button>
                 <Button
                   size="sm"
@@ -183,6 +239,23 @@ export default function AdminBookings() {
                 >
                   <Undo2 className="h-4 w-4" /> Override refund (dispute)
                 </Button>
+                {b.ticketEmail && (
+                  <span className="self-center text-xs text-muted-foreground" role="status">
+                    Ticket email: {b.ticketEmail.status.replaceAll("_", " ")}
+                    {b.ticketEmail.sentAt ? ` · ${fmtDateTime(b.ticketEmail.sentAt)}` : ""}
+                  </span>
+                )}
+                {["confirmed", "boarded", "completed"].includes(b.status) &&
+                  b.ticketEmail?.status !== "sent" && b.ticketEmail?.status !== "uncertain" && (
+                    <Button size="sm" variant="outline" onClick={() => retryTicketEmail(b)} disabled={busy}>
+                      <Mail className="h-4 w-4" /> {b.ticketEmail ? "Retry ticket email" : "Send ticket email"}
+                    </Button>
+                  )}
+                {b.ticketEmail?.status === "uncertain" && (
+                  <span className="self-center text-xs text-amber-800">
+                    Check Brevo’s delivery log before retrying to avoid a duplicate.
+                  </span>
+                )}
               </div>
             </CardContent>
           </Card>

@@ -51,22 +51,59 @@ export function isValidMpesaPhone(input: string): boolean {
   return /^(?:254|0)?(?:7|1)\d{8}$/.test(digits);
 }
 
+export class ApiTimeoutError extends Error {
+  constructor() {
+    super("Request timed out. Please try again.");
+    this.name = "ApiTimeoutError";
+  }
+}
+
 export async function api<T = unknown>(
   path: string,
-  options?: { method?: string; body?: unknown; signal?: AbortSignal }
+  options?: { method?: string; body?: unknown; signal?: AbortSignal; timeoutMs?: number }
 ): Promise<T> {
-  const res = await fetch(path, {
-    method: options?.method || (options?.body ? "POST" : "GET"),
-    headers: options?.body ? { "Content-Type": "application/json" } : undefined,
-    body: options?.body ? JSON.stringify(options.body) : undefined,
-    cache: "no-store",
-    signal: options?.signal,
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error((data as { error?: string }).error || `Request failed (${res.status})`);
+  const controller = new AbortController();
+  const callerSignal = options?.signal;
+  const relayCallerAbort = () => controller.abort();
+  let timedOut = false;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  if (callerSignal?.aborted) {
+    relayCallerAbort();
+  } else {
+    callerSignal?.addEventListener("abort", relayCallerAbort, { once: true });
   }
-  return data as T;
+
+  if (options?.timeoutMs && options.timeoutMs > 0) {
+    timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, options.timeoutMs);
+  }
+
+  try {
+    const res = await fetch(path, {
+      method: options?.method || (options?.body ? "POST" : "GET"),
+      headers: options?.body ? { "Content-Type": "application/json" } : undefined,
+      body: options?.body ? JSON.stringify(options.body) : undefined,
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    const data = await res.json().catch((error) => {
+      if (controller.signal.aborted) throw error;
+      return {};
+    });
+    if (!res.ok) {
+      throw new Error((data as { error?: string }).error || `Request failed (${res.status})`);
+    }
+    return data as T;
+  } catch (error) {
+    if (timedOut) throw new ApiTimeoutError();
+    throw error;
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+    callerSignal?.removeEventListener("abort", relayCallerAbort);
+  }
 }
 
 /** Passenger session hook — refreshes on demand. */

@@ -38,6 +38,7 @@ vi.mock("@/lib/money", () => ({ issueCredit: mocks.issueCredit }));
 vi.mock("@/lib/audit", () => ({ audit: mocks.audit }));
 
 import { GET } from "@/app/api/me/route";
+import { encryptPassengerIdNumber } from "@/lib/passenger-pii";
 
 const guest = {
   id: "passenger-1",
@@ -63,6 +64,31 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("guest passenger session", () => {
+  it("decrypts an encrypted ID only in the passenger's own profile response", async () => {
+    const signedIn = {
+      role: "passenger" as const,
+      id: guest.id,
+      name: "Amina Wanjiru",
+      identifier: "+254712345678",
+      exp: Date.now() + 60_000,
+    };
+    mocks.getPassengerSession.mockResolvedValue(signedIn);
+    mocks.passengerFindUnique.mockResolvedValue({
+      ...guest,
+      phone: "+254712345678",
+      name: "Amina Wanjiru",
+      idType: "id",
+      idNumber: encryptPassengerIdNumber("12345678"),
+    });
+
+    const response = await GET();
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(payload.passenger.idNumber).toBe("12345678");
+  });
+
   it("lets a first-time visitor browse when platform configuration is not set up", async () => {
     const response = await GET();
 

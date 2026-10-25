@@ -3,9 +3,16 @@ import { db } from "@/lib/db";
 import { getPassengerSession } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import { applyCredits, getConfig, recordCollection } from "@/lib/money";
-import { allocateBooking } from "@/lib/engine";
-import { generateBookingCode, toMpesaMsISDN } from "@/lib/daraja";
+import { allocateBooking, releaseUnpaidBookingReservation } from "@/lib/engine";
+import { generateBookingCode, getPublicPayOptions, toMpesaMsISDN } from "@/lib/daraja";
 import { nairobiDate, nairobiDayRange } from "@/lib/nairobi-time";
+import { isBookingReadyForPayment } from "@/lib/booking-payment-eligibility";
+import { attemptBookingTicketEmail } from "@/lib/booking-ticket-email";
+import { calculateCharterFare, calculateCharterPlatformShare } from "@/lib/charter-pricing";
+import { calculateBookingFeeAmount, calculateSharedFare } from "@/lib/pricing";
+import { getApprovedStageFare } from "@/lib/fare-catalogue";
+import { expireUnpaidBookingReservations } from "@/lib/unpaid-booking-expiry";
+import { assertPassengerPiiEncryptionReady, encryptPassengerIdNumber } from "@/lib/passenger-pii";
 
 /** Statuses that count towards the guest booking limit — a cancelled booking
  *  frees the guest to rebook their single no-login seat. */
@@ -16,6 +23,18 @@ const GUEST_COUNTING_STATUSES = {
 /** The exact rule copy shown to guests who try to go past the 1-seat limit. */
 const GUEST_LIMIT_ERROR =
   "You can only book up to 1 seat without logging in. Login to book more seats.";
+
+const PAYMENT_UNAVAILABLE_ERROR =
+  "M-Pesa is temporarily unavailable. No booking was created and no payment was requested.";
+
+async function hasStkPaymentMethod(): Promise<boolean> {
+  try {
+    const options = await getPublicPayOptions();
+    return options.methods.includes("mpesa_stk");
+  } catch {
+    return false;
+  }
+}
 
 /** My bookings */
 export async function GET() {
@@ -49,13 +68,14 @@ export async function GET() {
       cashDue: b.cashDue,
       status: b.status,
       cancelTier: b.cancelTier,
+      cancellationRequestedAt: b.cancellationRequestedAt?.toISOString() || null,
       createdAt: b.createdAt,
       departureAt: b.trip?.departureAt || null,
       tripStatus: b.trip?.status || null,
-      // Driver phone unlocks once the fare is settled (paid or credit-covered);
-      // identity (name + plate) is visible from the start.
+      // Keep driver identity and vehicle registration private until payment is
+      // settled (paid or fully covered by travel credit).
       driver:
-        b.trip?.driver
+        ["confirmed", "boarded", "completed"].includes(b.status) && b.trip?.driver
           ? {
               name: b.trip.driver.name,
               plate: b.trip.driver.plate,
@@ -63,18 +83,16 @@ export async function GET() {
               phone: ["confirmed", "boarded", "completed"].includes(b.status) ? b.trip.driver.phone : null,
             }
           : null,
-      allocationNote: b.allocationNote,
+      allocationNote: ["confirmed", "boarded", "completed"].includes(b.status)
+        ? b.allocationNote
+        : b.status === "awaiting_payment" ? "Your cab is held while payment is pending." : b.allocationNote,
       passengerName: b.passengerName,
       passengerPhone: b.passengerPhone,
       checkedInAt: b.checkedInAt,
-      lockNote:
-        b.trip?.status === "locked"
-          ? "Trip locked — cancelling now converts your fare to credit"
-          : null,
       ledger: b.ledgerEntry
         ? { status: b.ledgerEntry.status, cash: b.ledgerEntry.cashAmount, credit: b.ledgerEntry.creditApplied, receipt: b.ledgerEntry.mpesaReceipt }
         : null,
-      canPay: b.status === "awaiting_payment" && b.cashDue > 0,
+      canPay: isBookingReadyForPayment(b, now),
       canCancel: ["awaiting_payment", "confirmed", "boarded"].includes(b.status) && b.trip?.status !== "departed" && b.trip?.status !== "completed",
       canCheckIn: b.status === "confirmed" && b.trip && ["scheduled", "locked"].includes(b.trip.status),
       refund: b.refunds.length ? { amount: b.refunds[0].amount, status: b.refunds[0].status, reason: b.refunds[0].reason } : null,
@@ -91,6 +109,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const {
     routeId,
+    tripId,
     direction = "FROM_TERMINUS",
     stageId,
     homePickup = false,
@@ -128,6 +147,20 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
+  let encryptedIdNumber: string;
+  try {
+    assertPassengerPiiEncryptionReady();
+    encryptedIdNumber = encryptPassengerIdNumber(idNumber)!;
+  } catch (error) {
+    console.error(
+      "[api/bookings] Passenger identity encryption is unavailable:",
+      error instanceof Error ? error.message : "unknown error",
+    );
+    return NextResponse.json(
+      { error: "Secure booking is temporarily unavailable. Please try again shortly.", code: "PASSENGER_ID_PROTECTION_UNAVAILABLE" },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
   const nationality = String(passengerNationality || "").trim();
   if (!nationality) {
     return NextResponse.json({ error: "Select your nationality" }, { status: 400 });
@@ -147,26 +180,109 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
+  if (typeof routeId !== "string" || routeId.length === 0 || typeof tripId !== "string" || tripId.length === 0 || typeof stageId !== "string" || stageId.length === 0) {
+    return NextResponse.json({ error: "Choose an available cab, route, and stop." }, { status: 400 });
+  }
+  if (typeof homePickup !== "boolean" || typeof isCharter !== "boolean" || typeof applyCredit !== "boolean") {
+    return NextResponse.json({ error: "Review your ride options and try again." }, { status: 400 });
+  }
+  if (!Number.isSafeInteger(seats) || seats < 1 || seats > 6) {
+    return NextResponse.json({ error: "Choose between 1 and 6 seats." }, { status: 400 });
+  }
 
   const cfg = await getConfig();
   const route = await db.route.findUnique({ where: { id: routeId }, include: { stages: true } });
-  if (!route) return NextResponse.json({ error: "Route not found" }, { status: 400 });
-  const stage = route.stages.find((s) => s.id === stageId);
-  if (!stage) return NextResponse.json({ error: "Pickup stage required" }, { status: 400 });
+  if (!route || !route.active) {
+    return NextResponse.json({ error: "This route is not currently open for booking." }, { status: 409 });
+  }
+  const stage = route.stages.find((s) => s.id === stageId && s.order > 0);
+  if (!stage) {
+    return NextResponse.json({ error: "Choose a published pickup or drop-off stop." }, { status: 409 });
+  }
+  const stageFare = getApprovedStageFare(stage.name) ?? stage.fare;
+  if (!Number.isSafeInteger(stageFare) || stageFare <= 0 ||
+      !Number.isSafeInteger(stage.homeSurcharge) || stage.homeSurcharge < 0) {
+    return NextResponse.json({ error: "This stop's fare is not configured for booking yet." }, { status: 503 });
+  }
+  if (homePickup && !isCharter) {
+    return NextResponse.json(
+      { error: "Off-stage shared rides are not available until distance pricing is configured. Choose the designated SGR stage." },
+      { status: 409 },
+    );
+  }
   if (homePickup && (!homeAddress || String(homeAddress).trim().length < 5)) {
-    return NextResponse.json({ error: "Home pickup needs an address" }, { status: 400 });
+    return NextResponse.json({ error: "Door-to-door service needs a pickup or drop-off address" }, { status: 400 });
   }
 
-  const tripSeats = isCharter ? 0 : Math.max(1, Math.min(parseInt(seats, 10) || 1, 6));
-  const fare = isCharter ? route.charterPrice : stage.fare * tripSeats;
-  const homeSurcharge = homePickup ? (isCharter ? stage.homeSurcharge : stage.homeSurcharge * tripSeats) : 0;
-  const platformFeeAmount = cfg.bookingFeeAmount;
-  const total = fare + homeSurcharge + platformFeeAmount;
+  // Quote every booking from the exact cab the passenger selected. Shared
+  // fares use the listed stage fare for every cab size; the separate KSh 50
+  // fee is added to each booked seat. Charters use the listed base fare and 10% split.
+  const selectedTrip = await db.trip.findUnique({
+    where: { id: tripId },
+    select: { capacity: true, routeId: true, direction: true },
+  });
+  if (!selectedTrip || selectedTrip.routeId !== route.id || selectedTrip.direction !== direction ||
+      !Number.isSafeInteger(selectedTrip.capacity) || selectedTrip.capacity < 1) {
+    return NextResponse.json(
+      { error: "That cab is no longer available. Refresh the list and choose another cab or date." },
+      { status: 409 },
+    );
+  }
+
+  const tripSeats = isCharter ? 0 : seats;
+  let fare: number;
+  let platformFeeAmount: number;
+  try {
+    fare = isCharter
+      ? calculateCharterFare(selectedTrip.capacity, stageFare)
+      : calculateSharedFare(stageFare, selectedTrip.capacity, tripSeats);
+    platformFeeAmount = calculateBookingFeeAmount(cfg.bookingFeeAmount, isCharter ? 1 : tripSeats, isCharter);
+  } catch {
+    return NextResponse.json(
+      { error: "We couldn't confirm this cab's fare. No booking was created; please try again." },
+      { status: 503 },
+    );
+  }
+  // Private charters may use the passenger's desired address without an extra
+  // mileage charge. Shared off-stage pricing fails closed above until it can
+  // quote verified driving distance from the nearest designated stage.
+  const homeSurcharge = 0;
+  let total = fare + homeSurcharge + (isCharter ? 0 : platformFeeAmount);
+
+  if (isCharter) {
+    if (calculateCharterPlatformShare(fare, Math.round(cfg.commissionRate * 10000)) < platformFeeAmount) {
+      return NextResponse.json(
+        { error: "This vehicle's charter fare cannot cover the booking fee. Choose another cab." },
+        { status: 409 },
+      );
+    }
+    total = fare + homeSurcharge;
+  }
 
   // ── Guest rule: 1 seat, 1 booking — no login required. Anything more needs
   // a Mi-Reli account created with the exact same details. ─────────────────
   const passenger = await db.passenger.findUnique({ where: { id: session.id } });
   const isGuest = !!passenger && passenger.phone.startsWith("guest-");
+  let availableCreditBalance = 0;
+  if (applyCredit) {
+    try {
+      const credits = await db.credit.findMany({
+        where: {
+          passengerId: session.id,
+          status: "active",
+          amount: { gt: 0 },
+          expiresAt: { gt: new Date() },
+        },
+        select: { amount: true },
+      });
+      availableCreditBalance = credits.reduce((sum, credit) => sum + credit.amount, 0);
+    } catch {
+      return NextResponse.json(
+        { error: "We couldn't verify your travel credit. No booking was created; please try again." },
+        { status: 503 },
+      );
+    }
+  }
   if (isGuest) {
     const priorBookings = await db.booking.count({
       where: { passengerId: session.id, ...GUEST_COUNTING_STATUSES },
@@ -177,7 +293,20 @@ export async function POST(req: NextRequest) {
         { status: 403 },
       );
     }
-  } else if (passenger) {
+  }
+
+  // Refuse before creating a booking or allocating a seat if cash will be due
+  // but the real STK method is not ready. Charter total is based on the exact
+  // selected vehicle capacity above.
+  const estimatedCashDue = total - Math.min(total, availableCreditBalance);
+  if (estimatedCashDue > 0 && !(await hasStkPaymentMethod())) {
+    return NextResponse.json(
+      { error: PAYMENT_UNAVAILABLE_ERROR, code: "PAYMENT_OPTIONS_UNAVAILABLE" },
+      { status: 503 },
+    );
+  }
+
+  if (!isGuest && passenger) {
     // Signed-in account — keep the profile in sync with the details they book
     // with, so future bookings prefill identically.
     await db.passenger.update({
@@ -186,12 +315,15 @@ export async function POST(req: NextRequest) {
         name: fullName.slice(0, 80),
         email,
         idType,
-        idNumber,
+        idNumber: encryptedIdNumber,
         nationality,
         gender,
       },
     });
   }
+
+  // Clear safe, abandoned checkout holds before assigning this new booking.
+  await expireUnpaidBookingReservations();
 
   const booking = await db.booking.create({
     data: {
@@ -200,12 +332,16 @@ export async function POST(req: NextRequest) {
       routeId: route.id,
       direction,
       stageId: stage.id,
-      stageName: homePickup ? `Home pickup · ${stage.name} area` : stage.name,
+      stageName: homePickup
+        ? `${direction === "FROM_TERMINUS" ? "Home drop-off" : "Home pickup"} · ${stage.name} area`
+        : stage.name,
       homePickup,
       homeAddress: homePickup ? String(homeAddress).slice(0, 200) : null,
       seats: isCharter ? 1 : tripSeats,
       isCharter,
-      fareAmount: total, // total charged (fare + home surcharge + flat platform fee)
+      // Charter fare was calculated from the exact selected vehicle before
+      // creating the draft; allocation is pinned to that same trip.
+      fareAmount: total,
       platformFeeAmount,
       homeSurcharge,
       creditApplied: 0,
@@ -215,7 +351,7 @@ export async function POST(req: NextRequest) {
       passengerPhone: phone,
       passengerEmail: email,
       passengerIdType: idType,
-      passengerIdNumber: idNumber,
+      passengerIdNumber: encryptedIdNumber,
       passengerNationality: nationality.slice(0, 60),
       passengerGender: gender,
     },
@@ -228,6 +364,7 @@ export async function POST(req: NextRequest) {
     allocation = await allocateBooking({
       bookingId: booking.id,
       routeId: route.id,
+      selectedTripId: tripId,
       direction,
       seats: isCharter ? 999 : tripSeats, // charter handled inside allocator
       travelDate: travelDateDate,
@@ -245,7 +382,7 @@ export async function POST(req: NextRequest) {
   if (!allocation.tripId) {
     await db.booking.delete({ where: { id: booking.id } });
     return NextResponse.json(
-      { error: "No approved driver and cab are available for this journey yet. No payment was taken; please try another date later." },
+      { error: "That cab is no longer available. No payment was taken; refresh the list and choose another cab or date." },
       { status: 409 },
     );
   }
@@ -253,7 +390,39 @@ export async function POST(req: NextRequest) {
   // Credit offer — the passenger chooses; partial use supported
   let creditApplied = 0;
   if (applyCredit) {
-    creditApplied = await applyCredits(session.id, booking.id, total);
+    // If the preflight thought credit covered the whole fare, make the final
+    // redemption all-or-nothing. A competing checkout may have spent it after
+    // the balance read. In that case only continue if real M-Pesa is available.
+    const requireFullCredit = estimatedCashDue === 0;
+    creditApplied = await applyCredits(session.id, booking.id, total, {
+      requireFull: requireFullCredit,
+    });
+    if (requireFullCredit && creditApplied < total) {
+      if (!(await hasStkPaymentMethod())) {
+        let released = false;
+        try {
+          released = await releaseUnpaidBookingReservation(booking.id, allocation.tripId);
+        } catch {
+          // Keep the customer from retrying into a potentially stale seat hold.
+        }
+        if (!released) {
+          return NextResponse.json(
+            {
+              error: "We couldn't safely clear this cab reservation. Check your bookings before trying again.",
+              code: "BOOKING_RESERVATION_REVIEW_REQUIRED",
+            },
+            { status: 503 },
+          );
+        }
+        return NextResponse.json(
+          { error: PAYMENT_UNAVAILABLE_ERROR, code: "PAYMENT_OPTIONS_UNAVAILABLE" },
+          { status: 503 },
+        );
+      }
+      // M-Pesa is ready, so redeem whatever remains under the same row-lock
+      // protection and let the passenger pay the residual cash amount.
+      creditApplied = await applyCredits(session.id, booking.id, total);
+    }
   }
   const cashDue = total - creditApplied;
   if (creditApplied > 0) {
@@ -295,6 +464,7 @@ export async function POST(req: NextRequest) {
       entityId: booking.id,
       metadata: { code: booking.code, creditApplied },
     });
+    await attemptBookingTicketEmail(booking.id);
   }
 
   const fresh = await db.booking.findUnique({
@@ -324,7 +494,7 @@ export async function POST(req: NextRequest) {
             departureAt: fresh!.trip.departureAt,
             status: fresh!.trip.status,
             routeName: fresh!.trip.route.name,
-            driver: fresh!.trip.driver
+            driver: ["confirmed", "boarded", "completed"].includes(fresh!.status) && fresh!.trip.driver
               ? {
                   name: fresh!.trip.driver.name,
                   plate: fresh!.trip.driver.plate,
@@ -336,9 +506,10 @@ export async function POST(req: NextRequest) {
               : null,
           }
         : null,
-      allocationNote: fresh!.allocationNote,
+      allocationNote: ["confirmed", "boarded", "completed"].includes(fresh!.status)
+        ? fresh!.allocationNote
+        : fresh!.status === "awaiting_payment" ? "Your cab is held while payment is pending." : fresh!.allocationNote,
     },
     bookingWindowMinutes: cfg.bookingWindowMinutes,
   });
 }
-

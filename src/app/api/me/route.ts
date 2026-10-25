@@ -10,6 +10,7 @@ import {
 } from "@/lib/session";
 import { issueCredit } from "@/lib/money";
 import { audit } from "@/lib/audit";
+import { decryptPassengerIdNumber } from "@/lib/passenger-pii";
 
 /**
  * Passenger identity — frictionless by design.
@@ -107,6 +108,19 @@ async function respondFor(
   session: Session,
   setCookie = false
 ) {
+  let idNumber: string | null;
+  try {
+    idNumber = decryptPassengerIdNumber(passenger.idNumber);
+  } catch (error) {
+    console.error(
+      "[api/me] Passenger identity is unavailable:",
+      error instanceof Error ? error.message : "unknown error",
+    );
+    return NextResponse.json(
+      { error: "Your saved passenger details are temporarily unavailable. Please try again shortly." },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
   const credits = await db.credit.findMany({
     where: { passengerId: passenger.id, status: "active", expiresAt: { gt: new Date() } },
   });
@@ -125,7 +139,7 @@ async function respondFor(
       phone: passenger.phone,
       email: passenger.email,
       idType: passenger.idType,
-      idNumber: passenger.idNumber,
+      idNumber,
       nationality: passenger.nationality,
       gender: passenger.gender,
       isGuest: passenger.phone.startsWith("guest-"),

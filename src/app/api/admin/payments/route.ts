@@ -46,6 +46,8 @@ export async function GET() {
       paybill: creds.shortcode || null,
       callbacks: urls,
       hasCallbackBase: !!urls.base,
+      liveRefundsEnabled: creds.mode === "live" && process.env.MPESA_LIVE_REFUNDS_ENABLED === "true",
+      livePayoutsEnabled: creds.mode === "live" && process.env.MPESA_LIVE_PAYOUTS_ENABLED === "true",
     },
     saved: {
       environment: cfg.mpesaEnvironment,
