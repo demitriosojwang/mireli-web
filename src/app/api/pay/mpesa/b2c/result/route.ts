@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { audit } from "@/lib/audit";
+import { verifyCallbackToken } from "@/lib/daraja";
 
 /**
  * Safaricom Daraja → B2C / Reversal result webhook (ResultURL).
@@ -14,6 +15,9 @@ import { audit } from "@/lib/audit";
  */
 export async function POST(req: NextRequest) {
   const accepted = NextResponse.json({ ResultCode: 0, ResultDesc: "Accepted" });
+  if (!verifyCallbackToken("b2c", req.nextUrl.searchParams.get("mireli_token"))) {
+    return NextResponse.json({ error: "Invalid callback authorization" }, { status: 401 });
+  }
   try {
     const body = (await req.json().catch(() => ({}))) as {
       Result?: {

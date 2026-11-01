@@ -5,13 +5,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar as CalendarIcon, ChevronDown, Minus, Plus, Users } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { nairobiToday } from "@/lib/nairobi-time";
 
 /* ─── Date helpers ─────────────────────────────────────────────────────────── */
 
 export function todayStr(offset = 0): string {
-  const d = new Date();
-  d.setDate(d.getDate() + offset);
-  return d.toISOString().slice(0, 10);
+  return nairobiToday(offset);
 }
 
 export function isToday(v: string): boolean {
@@ -104,6 +103,7 @@ export function TrainPill({ time, label, name, active, gone, onClick }: {
       onClick={gone ? undefined : onClick}
       disabled={gone}
       aria-disabled={gone || undefined}
+      aria-pressed={active}
       className={cn(
         "min-w-[110px] flex-1 rounded-2xl border px-3.5 py-2.5 text-left transition-all duration-200",
         gone
@@ -152,7 +152,8 @@ export function DatePicker({ value, onChange }: { value: string; onChange: (v: s
     return new Date(y, m - 1, d);
   })();
 
-  const today = new Date();
+  const [todayYear, todayMonth, todayDay] = todayStr().split("-").map(Number);
+  const today = new Date(todayYear, todayMonth - 1, todayDay);
   today.setHours(0, 0, 0, 0);
 
   function handleSelect(d: Date | undefined) {

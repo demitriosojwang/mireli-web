@@ -1,8 +1,36 @@
 # Connect Mireli Driver to this backend
 
-The driver API below is now implemented locally, with native Android integration
-and isolated PostgreSQL verification. It is not deployed to the official website.
-Only the server uses Prisma/PostgreSQL; Android uses authenticated HTTPS.
+The driver API runs on the same AWS VM as Mireli Web; Android uses the API over
+HTTPS and never connects to PostgreSQL directly. The internal VM health check
+passed on 16 October 2026, but the public DuckDNS record still points to the old
+IP and public TLS has not been verified. The API is strict mode but driver
+sign-in and registration remain closed until real credentials, staff review,
+and approved supply are ready. Follow
+[DRIVER-SHARED-BACKEND-SETUP.md](DRIVER-SHARED-BACKEND-SETUP.md) for the current
+VM access, build-flavor, and release rules.
+
+## Confirmed fares and driver earnings
+
+- Shared ride: listed stage fare × booked seats, plus KSh 50 for each booked
+  seat. The fee is retained by Mireli and deducted from the driver's settlement.
+  There is no percentage commission on shared rides; vehicle capacity does not
+  change the approved stage fare.
+- Private charter: assigned vehicle capacity × (selected stage fare + KSh 100
+  per vehicle seat). The KSh 50 fee is included inside Mireli's 10% share; it
+  is not added again. For a 4-seat vehicle and KSh 400 stage fare, the total is
+  KSh 2,000, Mireli's total share is KSh 200, and the driver receives KSh 1,800.
+- Shared off-stage pickup/drop-off, once enabled, adds KSh 50 per extra
+  kilometre from the nearest approved stage; the full surcharge goes to the
+  driver. This option remains closed until approved stage coordinates and a
+  trusted server-side road-distance quote are available. A private charter can
+  use the passenger's address with no extra-distance fee.
+- Driver payout is created and dispatched only after trip completion. The API's
+  server-calculated earnings and payout fields are authoritative; Android must
+  not recalculate fares, commission, or net payout locally.
+- Earnings lines expose `grossMinor`, `platformFeeMinor`, `commissionMinor`,
+  `surchargeMinor`, and `netMinor`. The payout reconciles as gross minus the
+  separately recorded fee and commission; the full home surcharge is already
+  part of gross and remains in net.
 
 ## Implemented contract — 6 October 2026
 
@@ -17,6 +45,11 @@ Only the server uses Prisma/PostgreSQL; Android uses authenticated HTTPS.
 - GET `trips`, POST `trips/{id}/commands`: accept/decline/arrive/board/no_show/start/
   complete, driver ownership, versioned receipts and atomic settlement creation.
   Manifests omit boarding codes and identity numbers; historical trips omit PII.
+- A passenger's unpaid seat hold uses `Booking.reservationTripId`; it is not a
+  driver manifest assignment. Only successful payment moves the booking to
+  `Booking.tripId`, after which the driver manifest can include it. Keep the
+  backend's status filter even if older rows or test fixtures contain an unpaid
+  booking in `Trip.bookings`.
 - GET `earnings`, POST `payout-destination`: KES minor units, settlement status,
   explicit beneficiary attestation and finance approval before transfers.
 - GET/POST `support`: driver-owned cases, replay protection and staff replies.

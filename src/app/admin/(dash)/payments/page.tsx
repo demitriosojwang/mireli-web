@@ -38,6 +38,8 @@ interface PaymentsData {
     paybill: string | null;
     callbacks: { base: string; stkResult: string; stkTimeout: string; c2bConfirmation: string; b2cResult: string };
     hasCallbackBase: boolean;
+    liveRefundsEnabled: boolean;
+    livePayoutsEnabled: boolean;
   };
   saved: {
     environment: string;
@@ -198,9 +200,13 @@ export default function AdminPayments() {
             <p className="truncate font-mono text-[11px]">{status.callbacks.base || "—"}</p>
             {status.hasCallbackBase && (
               <p className="mt-1 text-[10px] text-muted-foreground">
-                Safaricom will POST results to /api/pay/mpesa/callback · /timeout · /c2b · /b2c/result
+                Safaricom will POST payment results to /api/pay/mpesa/callback · /timeout · /c2b. Refund and payout results use private per-attempt callback URLs.
               </p>
             )}
+          </div>
+          <div className="grid grid-cols-2 gap-2 rounded-lg border bg-muted/30 p-2.5">
+            <p>Live refunds · <strong>{status.liveRefundsEnabled ? "enabled" : "disabled"}</strong></p>
+            <p>Live driver payouts · <strong>{status.livePayoutsEnabled ? "enabled" : "disabled"}</strong></p>
           </div>
           {lastTest && (
             <div className="flex items-start gap-2 rounded-lg border bg-muted/30 p-2.5">

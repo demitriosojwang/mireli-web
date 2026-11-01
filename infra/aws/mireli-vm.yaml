@@ -1,0 +1,554 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  One-host Mireli SGR pilot in the selected AWS Region. Runs the existing
+  single web/API/PostgreSQL container on encrypted EBS with a static IPv4,
+  SSM-only administration, private ECR, generated runtime secrets, and daily
+  encrypted database backups. This pilot is not a high-availability design.
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+  com.aws.cloudformation.Context:
+    purpose: >-
+      Host the Mireli SGR web/API on one Graviton EC2 instance in eu-north-1
+      while keeping deployment repeatable, auditable, and within the temporary
+      Free-plan pilot.
+    constraints:
+      - Deploy only in the project's selected Region.
+      - Keep a single Mireli Docker image and one EC2 host; PostgreSQL remains
+        embedded in that container for this credit-limited pilot.
+      - Do not allow inbound SSH or expose the application port to the internet.
+      - Do not switch customer DNS until DNS, TLS, booking, payment, driver,
+        backup, and recovery checks pass.
+      - Read optional Brevo transactional-email settings only from the runtime
+        secret; keep credentials out of templates, images, and logs.
+    mutability:
+      AppInstance: replace-with-care
+      DatabaseBackupBucket: retain-data
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Default: vpc-03eea2ff6a1ef41eb
+    Description: Existing default VPC in eu-north-1.
+  PublicSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Default: subnet-0ffd81ee301becd7b
+    Description: Public default subnet in eu-north-1b; must belong to VpcId.
+  AmazonLinuxAmi:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-arm64
+    Description: Latest AWS-published Amazon Linux 2023 ARM64 image.
+  InstanceType:
+    Type: String
+    Default: t4g.small
+    AllowedValues:
+      - t4g.small
+    Description: Free-plan-eligible Graviton pilot host. t4g.small is 2 vCPU and 2 GiB RAM.
+  PublicHostname:
+    Type: String
+    Default: mirelisgr.duckdns.org
+    Description: Hostname Caddy will serve after its DNS A record points to the Elastic IP.
+
+Resources:
+  MireliRuntimeSecret:
+    Type: AWS::SecretsManager::Secret
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Keep database and provider credentials out of user data, template outputs, and image layers; expose only an explicit one-line runtime allowlist.
+        must:
+          - Only the EC2 instance role may read this secret.
+          - Keep manually added values one line and compatible with the protected host runtime environment file.
+    Properties:
+      Description: Generated database password for the Mireli single-host pilot.
+      GenerateSecretString:
+        SecretStringTemplate: '{"POSTGRES_USER":"mireli","POSTGRES_DB":"mireli"}'
+        GenerateStringKey: POSTGRES_PASSWORD
+        PasswordLength: 48
+        ExcludePunctuation: true
+      Tags:
+        - Key: application
+          Value: mireli
+        - Key: environment
+          Value: pilot
+
+  MireliSessionSecret:
+    Type: AWS::SecretsManager::Secret
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Keep the application session-signing secret outside the repository, image, and user data.
+        must:
+          - Only the EC2 instance role may read this secret.
+    Properties:
+      Description: Generated Mireli session-signing secret for the single-host pilot.
+      GenerateSecretString:
+        PasswordLength: 64
+        ExcludePunctuation: true
+      Tags:
+        - Key: application
+          Value: mireli
+        - Key: environment
+          Value: pilot
+
+  AppImageRepository:
+    Type: AWS::ECR::Repository
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Store one immutable, multi-architecture-tested Mireli image for deployment to the ARM64 host.
+        must:
+          - Enable image scanning and immutable tags.
+          - Expire untagged layers and retain a bounded set of tagged releases.
+    Properties:
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {"rulePriority": 1, "description": "Remove untagged layers after 7 days", "selection": {"tagStatus": "untagged", "countType": "sinceImagePushed", "countUnit": "days", "countNumber": 7}, "action": {"type": "expire"}},
+              {"rulePriority": 2, "description": "Keep the most recent 20 immutable releases", "selection": {"tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 20}, "action": {"type": "expire"}}
+            ]
+          }
+      Tags:
+        - Key: application
+          Value: mireli
+
+  DatabaseBackupBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Store daily compressed PostgreSQL dumps in the selected Region for recovery from a single-host failure.
+        must:
+          - Block all public access and require TLS.
+          - Encrypt objects at rest and expire backups after 30 days for the credit-limited pilot.
+          - Retain the bucket if the stack is removed so data is not silently destroyed.
+          - The selected AWS Guard registry rule S3_BUCKET_LOGGING_ENABLED is suppressed because this bucket is the sole backup destination; object-level S3 audit logging remains a production follow-up and CloudTrail management events do not cover object reads/writes.
+        mutability: retain-data
+      guard:
+        SuppressedRules:
+          - S3_BUCKET_LOGGING_ENABLED
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-${AWS::AccountId}-db-backups-${AWS::Region}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldDatabaseDumps
+            Status: Enabled
+            ExpirationInDays: 30
+            Prefix: !Sub '${AWS::StackName}/database/'
+      Tags:
+        - Key: application
+          Value: mireli
+        - Key: data-classification
+          Value: customer-database-backup
+
+  DatabaseBackupBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Enforce HTTPS for every request to the private backup bucket.
+        must:
+          - Deny requests when aws:SecureTransport is false.
+    Properties:
+      Bucket: !Ref DatabaseBackupBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt DatabaseBackupBucket.Arn
+              - !Sub '${DatabaseBackupBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Expose only public web traffic; route all administration through Systems Manager.
+        must:
+          - Do not add an inbound SSH rule.
+          - Do not expose TCP 3000 publicly.
+    Properties:
+      GroupDescription: Mireli SGR public HTTP/HTTPS; administration over SSM only.
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - Description: HTTP for ACME certificate validation and HTTPS redirects.
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - Description: Customer web/API HTTPS through Caddy.
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - Description: HTTPS access to AWS APIs, package repositories, and certificate services.
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - Description: DNS resolution for AWS APIs, packages, and public hostname.
+          IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 0.0.0.0/0
+        - Description: HTTP package mirrors and ACME redirect/validation endpoints.
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: application
+          Value: mireli
+
+  AppInstanceRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Let the host register with SSM, pull only Mireli images, read generated runtime secrets, and write/read its own backups.
+        must:
+          - Trust EC2 only.
+          - Grant no application-container access to instance metadata credentials.
+          - Scope ECR, Secrets Manager, and S3 permissions to this stack's resources.
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+      Tags:
+        - Key: application
+          Value: mireli
+
+  AppRuntimePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Scope runtime access to the Mireli ECR repository, generated secrets, and backup bucket.
+        must:
+          - Do not add wildcard resources except ECR authorization token retrieval.
+          - Attach this managed policy only to AppInstanceRole.
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: GetEcrLoginToken
+            Effect: Allow
+            Action: ecr:GetAuthorizationToken
+            Resource: '*'
+          - Sid: PullMireliImages
+            Effect: Allow
+            Action:
+              - ecr:BatchCheckLayerAvailability
+              - ecr:BatchGetImage
+              - ecr:GetDownloadUrlForLayer
+            Resource: !GetAtt AppImageRepository.Arn
+          - Sid: ReadRuntimeSecrets
+            Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource:
+              - !Ref MireliRuntimeSecret
+              - !Ref MireliSessionSecret
+          - Sid: WriteAndRestoreDatabaseBackups
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:AbortMultipartUpload
+            Resource: !Sub '${DatabaseBackupBucket.Arn}/${AWS::StackName}/database/*'
+          - Sid: ListDatabaseBackupPrefix
+            Effect: Allow
+            Action: s3:ListBucket
+            Resource: !GetAtt DatabaseBackupBucket.Arn
+            Condition:
+              StringLike:
+                s3:prefix:
+                  - !Sub '${AWS::StackName}/database/*'
+      Roles:
+        - !Ref AppInstanceRole
+
+  AppInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Attach the least-privilege runtime role to the Mireli EC2 host.
+        must:
+          - Attach only AppInstanceRole.
+    Properties:
+      Roles:
+        - !Ref AppInstanceRole
+
+  AppInstance:
+    Type: AWS::EC2::Instance
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Run one low-cost ARM64 Mireli container host in the selected Region.
+        must:
+          - Require IMDSv2 and use standard CPU credits to avoid burst-credit overage bills.
+          - Encrypt a 30 GiB gp3 root volume and retain it during instance termination.
+          - Expose no SSH and bind the app port to loopback only.
+          - Keep production/demo mode strict; missing real provider credentials must fail closed.
+    Properties:
+      ImageId: !Ref AmazonLinuxAmi
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref AppInstanceProfile
+      CreditSpecification:
+        CPUCredits: standard
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+        HttpPutResponseHopLimit: 1
+      NetworkInterfaces:
+        - DeviceIndex: '0'
+          AssociatePublicIpAddress: true
+          SubnetId: !Ref PublicSubnetId
+          GroupSet:
+            - !Ref AppSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            Encrypted: true
+            VolumeSize: 30
+            VolumeType: gp3
+            Iops: 3000
+            DeleteOnTermination: false
+      UserData:
+        Fn::Base64:
+          Fn::Sub:
+            - |
+              #!/bin/bash
+              set -Eeuo pipefail
+              exec > >(tee -a /var/log/mireli-bootstrap.log | logger -t mireli-bootstrap -s 2>/dev/console) 2>&1
+
+              for attempt in {1..12}; do
+                # Amazon Linux 2023 ships curl-minimal; installing curl conflicts with it.
+                if dnf update -y && dnf install -y awscli-2 docker tar gzip jq python3; then
+                  break
+                fi
+                if [ "$attempt" -eq 12 ]; then exit 1; fi
+                sleep 10
+              done
+              systemctl enable --now docker
+              install -d -m 0700 /var/lib/mireli/postgres
+              install -d -m 0750 -o 1001 -g 1001 /var/lib/mireli/app-state
+              install -d -m 0755 /etc/mireli /etc/caddy /var/lib/caddy
+              useradd --system --home-dir /var/lib/caddy --shell /sbin/nologin caddy || true
+
+              curl -fsSL 'https://github.com/caddyserver/caddy/releases/download/v2.11.7/caddy_2.11.7_linux_arm64.tar.gz' -o /tmp/caddy.tar.gz
+              echo '3db36ba90c7a6e8dda40ee3dd71fa08844c76b5fb08f61b31e5e78d2ed38e71c51dc7baed875e50d1ca1279196e84302967237386ae87c91ae9f2aaceada682e  /tmp/caddy.tar.gz' | sha512sum -c -
+              tar -xzf /tmp/caddy.tar.gz -C /tmp caddy
+              install -m 0755 /tmp/caddy /usr/local/bin/caddy
+              chown -R caddy:caddy /var/lib/caddy
+
+              cat > /etc/caddy/Caddyfile <<'CADDYFILE'
+              ${PublicHostname} {
+                encode zstd gzip
+                header {
+                  X-Content-Type-Options nosniff
+                  Referrer-Policy strict-origin-when-cross-origin
+                  X-Frame-Options DENY
+                }
+                reverse_proxy 127.0.0.1:3000
+              }
+              CADDYFILE
+              chown root:caddy /etc/caddy/Caddyfile
+              chmod 0640 /etc/caddy/Caddyfile
+
+              cat > /etc/systemd/system/caddy.service <<'CADDYUNIT'
+              [Unit]
+              Description=Caddy HTTPS reverse proxy for Mireli
+              After=network-online.target
+              Wants=network-online.target
+              [Service]
+              User=caddy
+              Group=caddy
+              Environment=XDG_DATA_HOME=/var/lib/caddy
+              AmbientCapabilities=CAP_NET_BIND_SERVICE
+              CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+              NoNewPrivileges=true
+              ProtectSystem=strict
+              ProtectHome=true
+              PrivateTmp=true
+              ReadWritePaths=/var/lib/caddy
+              ExecStart=/usr/local/bin/caddy run --environ --config /etc/caddy/Caddyfile
+              ExecReload=/usr/local/bin/caddy reload --config /etc/caddy/Caddyfile
+              Restart=on-failure
+              RestartSec=5s
+              [Install]
+              WantedBy=multi-user.target
+              CADDYUNIT
+
+              cat > /etc/mireli/bootstrap.env <<'BOOTSTRAP'
+              AWS_REGION='${AWS::Region}'
+              DB_SECRET_ARN='${RuntimeSecretArn}'
+              SESSION_SECRET_ARN='${SessionSecretArn}'
+              ECR_URI='${RepositoryUri}'
+              IMAGE_TAG='bootstrap'
+              BACKUP_BUCKET='${BackupBucketName}'
+              BACKUP_PREFIX='${AWS::StackName}/database'
+              PUBLIC_HOSTNAME='${PublicHostname}'
+              BOOTSTRAP
+              chmod 0600 /etc/mireli/bootstrap.env
+
+              cat > /usr/local/bin/mireli-start <<'MIRELISTART'
+              #!/bin/bash
+              set -Eeuo pipefail
+              . /etc/mireli/bootstrap.env
+              set +x
+              DB_SECRET_JSON=$(aws secretsmanager get-secret-value --region "$AWS_REGION" --secret-id "$DB_SECRET_ARN" --query SecretString --output text)
+              DB_PASSWORD=$(printf '%s' "$DB_SECRET_JSON" | jq -r '.POSTGRES_PASSWORD')
+              SESSION_SECRET=$(aws secretsmanager get-secret-value --region "$AWS_REGION" --secret-id "$SESSION_SECRET_ARN" --query SecretString --output text)
+              [[ "$DB_PASSWORD" =~ ^[A-Za-z0-9]+$ ]]
+              [[ "$SESSION_SECRET" =~ ^[A-Za-z0-9]+$ ]]
+              ECR_HOST=$(printf '%s' "$ECR_URI" | cut -d/ -f1)
+              aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_HOST"
+              docker pull "$ECR_URI:$IMAGE_TAG"
+              umask 077
+              printf 'POSTGRES_USER=mireli\nPOSTGRES_PASSWORD=%s\nPOSTGRES_DB=mireli\nSESSION_SECRET=%s\nNODE_OPTIONS=--max-old-space-size=768\nMIRELI_DATABASE_MODE=embedded\nMIRELI_DEMO_MODE=false\nMIRELI_ALLOW_UNSAFE_DEMO=false\nMIRELI_APPLY_DATABASE_MIGRATIONS=true\nMIRELI_BOOTSTRAP_PLATFORM_CONFIG=true\nMIRELI_PUBLIC_ORIGIN=https://%s\nTZ=Africa/Nairobi\n' "$DB_PASSWORD" "$SESSION_SECRET" "$PUBLIC_HOSTNAME" > /etc/mireli/runtime.env
+              for key in DRIVER_AUTH_SECRET AT_USERNAME AT_API_KEY AT_SENDER_ID BREVO_API_KEY BREVO_SENDER_EMAIL BREVO_SENDER_NAME MIRELI_SUPPORT_EMAIL VALHALLA_URL VALHALLA_API_TOKEN DRIVER_DOCUMENT_BUCKET DRIVER_SCAN_COMMAND DRIVER_COMPLIANCE_REVIEWERS DRIVER_SUPPORT_REVIEWERS DRIVER_FINANCE_REVIEWERS DRIVER_POLICY_VERSION DRIVER_PRIVACY_URL DRIVER_TERMS_URL MPESA_ENVIRONMENT MPESA_CONSUMER_KEY MPESA_CONSUMER_SECRET MPESA_SHORTCODE MPESA_PASSKEY MPESA_CALLBACK_BASE_URL MPESA_B2C_SHORTCODE MPESA_INITIATOR_NAME MPESA_INITIATOR_PASSWORD MPESA_SECURITY_CREDENTIAL MPESA_LIVE_PAYOUTS_ENABLED; do
+                value=$(printf '%s' "$DB_SECRET_JSON" | jq -r --arg name "$key" 'if .[$name] == null then empty elif (.[$name] | type) == "string" then .[$name] else error("optional runtime values must be strings") end')
+                if [[ -n "$value" ]]; then
+                  [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]]
+                  printf '%s=%s\n' "$key" "$value" >> /etc/mireli/runtime.env
+                fi
+              done
+              chmod 0600 /etc/mireli/runtime.env
+              exec docker run --rm --name mireli \
+                --publish 127.0.0.1:3000:3000 \
+                --env-file /etc/mireli/runtime.env \
+                --volume /var/lib/mireli/postgres:/var/lib/postgresql/data \
+                --volume /var/lib/mireli/app-state:/app/.local \
+                --memory 1400m --cpus 1.8 \
+                --log-opt max-size=10m --log-opt max-file=5 \
+                "$ECR_URI:$IMAGE_TAG"
+              MIRELISTART
+              chmod 0750 /usr/local/bin/mireli-start
+
+              cat > /etc/systemd/system/mireli-app.service <<'APPUNIT'
+              [Unit]
+              Description=Mireli single-container web and API service
+              After=docker.service network-online.target
+              Requires=docker.service
+              Wants=network-online.target
+              [Service]
+              Type=simple
+              ExecStart=/usr/local/bin/mireli-start
+              ExecStop=/usr/bin/docker stop --time 30 mireli
+              Restart=always
+              RestartSec=30s
+              TimeoutStartSec=0
+              TimeoutStopSec=45s
+              KillMode=process
+              [Install]
+              WantedBy=multi-user.target
+              APPUNIT
+
+              cat > /usr/local/bin/mireli-backup <<'BACKUP'
+              #!/bin/bash
+              set -Eeuo pipefail
+              . /etc/mireli/bootstrap.env
+              if ! docker inspect --format '{{.State.Running}}' mireli 2>/dev/null | grep -qx true; then
+                echo 'Mireli container is not running; skipping this backup.'
+                exit 0
+              fi
+              backup_key="${!BACKUP_PREFIX}/$(date -u +%Y-%m-%dT%H-%M-%SZ).sql.gz"
+              docker exec mireli sh -lc 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump --host=127.0.0.1 --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" | gzip -c' \
+                | aws s3 cp - "s3://$BACKUP_BUCKET/$backup_key" --region "$AWS_REGION" --sse AES256 --content-type application/gzip
+              BACKUP
+              chmod 0750 /usr/local/bin/mireli-backup
+
+              cat > /etc/systemd/system/mireli-backup.service <<'BACKUPUNIT'
+              [Unit]
+              Description=Create an encrypted Mireli database backup in S3
+              After=docker.service network-online.target
+              [Service]
+              Type=oneshot
+              ExecStart=/usr/local/bin/mireli-backup
+              BACKUPUNIT
+
+              cat > /etc/systemd/system/mireli-backup.timer <<'BACKUPTIMER'
+              [Unit]
+              Description=Daily Mireli database backup
+              [Timer]
+              OnCalendar=*-*-* 01:30:00 UTC
+              Persistent=true
+              [Install]
+              WantedBy=timers.target
+              BACKUPTIMER
+
+              systemctl daemon-reload
+              systemctl enable --now caddy.service
+              systemctl enable mireli-app.service
+              systemctl enable --now mireli-backup.timer
+            - RuntimeSecretArn: !Ref MireliRuntimeSecret
+              SessionSecretArn: !Ref MireliSessionSecret
+              RepositoryUri: !GetAtt AppImageRepository.RepositoryUri
+              BackupBucketName: !Ref DatabaseBackupBucket
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-web'
+        - Key: application
+          Value: mireli
+        - Key: environment
+          Value: pilot
+
+  AppElasticIp:
+    Type: AWS::EC2::EIP
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Provide one stable IPv4 address for DuckDNS to resolve to.
+        must:
+          - Keep the address associated with the Mireli EC2 instance.
+          - Rotate the exposed DuckDNS token before updating the DNS record.
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref AppInstance
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-public-ip'
+        - Key: application
+          Value: mireli
+
+Outputs:
+  InstanceId:
+    Description: Mireli EC2 instance managed through Systems Manager.
+    Value: !Ref AppInstance
+  PublicIPv4:
+    Description: Point mirelisgr.duckdns.org to this address after rotating its exposed token.
+    Value: !Ref AppElasticIp
+  EcrRepositoryUri:
+    Description: Push immutable ARM64 Mireli release images here.
+    Value: !GetAtt AppImageRepository.RepositoryUri
+  DatabaseBackupBucketName:
+    Description: Private selected-Region bucket with 30-day database dump retention.
+    Value: !Ref DatabaseBackupBucket
+  ServiceUrl:
+    Description: The HTTPS service URL becomes valid after DNS and certificate issuance.
+    Value: !Sub 'https://${PublicHostname}'

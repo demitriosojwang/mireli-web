@@ -1,10 +1,14 @@
 import {NextRequest, NextResponse} from "next/server";
 import {browserSecurityHeaders, contentSecurityPolicy, rejectBrowserMutation} from "@/lib/http-security";
+import {isLocalDemoEnabled} from "@/lib/runtime-mode";
 
 export function proxy(request: NextRequest) {
   const development = process.env.NODE_ENV === "development";
   const api = request.nextUrl.pathname.startsWith("/api/");
-  const origin = development ? request.nextUrl.origin : process.env.MIRELI_PUBLIC_ORIGIN;
+  // A demo deployment is reached over whatever host or address the operator
+  // used, so it derives the trusted origin from the request like the dev
+  // server does. A production deployment keeps the pinned public origin.
+  const origin = development || isLocalDemoEnabled() ? request.nextUrl.origin : process.env.MIRELI_PUBLIC_ORIGIN;
   if (api && rejectBrowserMutation(request, origin)) {
     return NextResponse.json({error: "Request origin is not allowed."}, {
       status: 403, headers: {...browserSecurityHeaders, "Cache-Control": "no-store"},

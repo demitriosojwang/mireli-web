@@ -29,6 +29,7 @@ export const LEDGER_LABELS: Record<string, string> = {
   refunded: "Refunded",
   partially_refunded: "Partially refunded",
   converted_to_credit: "Converted to credit",
+  partially_converted_to_credit: "75% credit · 25% forfeited",
   forfeited: "Forfeited (no-show)",
 };
 
@@ -42,8 +43,8 @@ export const BOOKING_LABELS: Record<string, string> = {
 };
 
 export const TIER_LABELS: Record<string, string> = {
-  early: "Early cancellation (before lock)",
-  late: "Late cancellation (after lock)",
+  early: "Cancellation notice at least 24 hours before pickup",
+  late: "Cancellation notice within 24 hours of pickup",
   no_show: "No-show",
   platform_cancelled: "Cancelled by platform",
 };

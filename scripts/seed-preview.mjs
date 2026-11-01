@@ -15,13 +15,16 @@ try {
     id: "main", adminEmails: JSON.stringify(["mirelisgr001@gmail.com"]), admin2faCode: "LOCAL-ONLY",
   } });
   for (const direction of ["MBA_TO_NBO", "NBO_TO_MBA"]) {
+    const arrivalTimes = direction === "MBA_TO_NBO"
+      ? ["14:10", "20:18", "03:55"]
+      : ["14:00", "20:30", "03:55"];
     for (const [i, time] of ["08:00", "15:00", "22:00"].entries()) {
       const id = `preview-train-${direction}-${i}`;
-      await db.train.upsert({ where: { id }, update: {}, create: {
+      await db.train.upsert({ where: { id }, update: { destTime: arrivalTimes[i] }, create: {
         id, name: ["Inter-County", "Express", "Night Train"][i], direction,
         originCode: direction === "MBA_TO_NBO" ? "MTM" : "NTM",
         destCode: direction === "MBA_TO_NBO" ? "NTM" : "MTM",
-        originTime: time, destTime: ["14:00", "20:30", "03:55"][i], destDayOffset: i === 2 ? 1 : 0,
+        originTime: time, destTime: arrivalTimes[i], destDayOffset: i === 2 ? 1 : 0,
       } });
     }
   }

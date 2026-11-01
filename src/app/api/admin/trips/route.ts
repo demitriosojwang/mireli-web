@@ -24,6 +24,10 @@ export async function GET(req: NextRequest) {
         include: { passenger: true, ledgerEntry: true },
         orderBy: { createdAt: "asc" },
       },
+      reservedBookings: {
+        include: { passenger: true, ledgerEntry: true },
+        orderBy: { createdAt: "asc" },
+      },
     },
   });
 
@@ -62,7 +66,9 @@ export async function GET(req: NextRequest) {
       driver: t.driver
         ? { id: t.driver.id, name: t.driver.name, plate: t.driver.plate, phone: t.driver.phone, mpesaNumber: t.driver.mpesaNumber }
         : null,
-      manifest: t.bookings.map((b) => ({
+      manifest: [...t.bookings, ...t.reservedBookings]
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+        .map((b) => ({
         id: b.id,
         code: b.code,
         passenger: b.passenger.name,
@@ -71,6 +77,7 @@ export async function GET(req: NextRequest) {
         seats: b.seats,
         isCharter: b.isCharter,
         status: b.status,
+        assignmentStatus: b.reservationTripId === t.id ? "held_for_payment" : "assigned",
         fare: b.fareAmount,
         homeSurcharge: b.homeSurcharge,
         ledgerStatus: b.ledgerEntry?.status || null,
@@ -97,7 +104,10 @@ export async function POST(req: NextRequest) {
   if (body.action === "cancel_trip") {
     const trip = await db.trip.findUnique({
       where: { id: body.tripId },
-      include: { bookings: { include: { ledgerEntry: true } } },
+      include: {
+        bookings: { include: { ledgerEntry: true } },
+        reservedBookings: { include: { ledgerEntry: true } },
+      },
     });
     if (!trip) return NextResponse.json({ error: "Trip not found" }, { status: 404 });
     if (["completed", "cancelled"].includes(trip.status)) {
@@ -109,7 +119,7 @@ export async function POST(req: NextRequest) {
     // only refund unboarded; boarded passengers' fares proceed to payout.
     let refunded = 0;
     let proceeded = 0;
-    for (const b of trip.bookings) {
+    for (const b of [...trip.bookings, ...trip.reservedBookings]) {
       if (["cancelled", "no_show"].includes(b.status)) continue;
       if (b.status === "boarded") {
         proceeded++;

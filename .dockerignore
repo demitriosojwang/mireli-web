@@ -1,0 +1,46 @@
+# Build-context exclusions. Everything below is either regenerated inside the
+# image, machine-local state, or a secret that must never reach an image layer.
+
+# dependencies & build output (reinstalled / rebuilt in the image)
+node_modules
+.pnpm-store
+.next
+.next-verify
+.next-*
+out
+build
+coverage
+
+# local runtime state and databases
+.local
+.docker-build
+db
+upload
+download
+tool-results
+tmp
+*.db
+*.db-journal
+
+# secrets: configuration is injected at run time (compose env_file / VM env)
+.env
+.env.*
+!.env.example
+.z-ai-config
+.vercel
+
+# tooling that the image does not need
+.git
+.github
+.zscripts
+.claude
+skills
+artifacts
+examples
+mini-services
+
+# logs & caches
+*.log
+dev.out.log
+server.log
+tsconfig.tsbuildinfo

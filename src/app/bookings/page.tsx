@@ -21,6 +21,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { api, useMe } from "@/lib/client";
 import { fmtDateTime, fmtPhone, fmtTime, ksh, TIER_LABELS } from "@/lib/format";
+import { cancellationWhatsAppUrl, MIRELI_SUPPORT_PHONE_E164, MIRELI_SUPPORT_PHONE_LOCAL } from "@/lib/support";
+import { calculateLateCancellationCredit } from "@/lib/cancellation-policy";
 import {
   Banknote,
   CalendarClock,
@@ -52,6 +54,7 @@ interface BookingRow {
   cashDue: number;
   status: string;
   cancelTier: string | null;
+  cancellationRequestedAt: string | null;
   createdAt: string;
   departureAt: string | null;
   tripStatus: string | null;
@@ -60,7 +63,6 @@ interface BookingRow {
   passengerName: string | null;
   passengerPhone: string | null;
   checkedInAt: string | null;
-  lockNote: string | null;
   ledger: { status: string; cash: number; credit: number; receipt: string | null } | null;
   canPay: boolean;
   canCancel: boolean;
@@ -82,6 +84,8 @@ export default function BookingsPage() {
   const { me, loading: meLoading, error: identityError, refresh: retryIdentity } = useMe();
   const { toast } = useToast();
   const [loadedBookings, setBookings] = useState<BookingRow[] | null>(null);
+  const [bookingsLoadError, setBookingsLoadError] = useState(false);
+  const [refreshingBookings, setRefreshingBookings] = useState(false);
   const bookings = me?.session ? loadedBookings : meLoading ? null : [];
   const [payFor, setPayFor] = useState<BookingRow | null>(null);
   const [cancelFor, setCancelFor] = useState<BookingRow | null>(null);
@@ -90,11 +94,15 @@ export default function BookingsPage() {
   const [checkingIn, setCheckingIn] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setRefreshingBookings(true);
     try {
       const res = await api<{ bookings: BookingRow[] }>("/api/bookings");
       setBookings(res.bookings);
+      setBookingsLoadError(false);
     } catch {
-      setBookings([]);
+      setBookingsLoadError(true);
+    } finally {
+      setRefreshingBookings(false);
     }
   }, []);
 
@@ -102,8 +110,12 @@ export default function BookingsPage() {
     if (!me?.session) return;
     let active = true;
     api<{ bookings: BookingRow[] }>("/api/bookings")
-      .then((res) => { if (active) setBookings(res.bookings); })
-      .catch(() => { if (active) setBookings([]); });
+      .then((res) => {
+        if (!active) return;
+        setBookings(res.bookings);
+        setBookingsLoadError(false);
+      })
+      .catch(() => { if (active) setBookingsLoadError(true); });
     return () => { active = false; };
   }, [me?.session?.id]);
 
@@ -118,18 +130,27 @@ export default function BookingsPage() {
     }
   }
 
-  async function confirmCancel() {
+  async function contactSupport(method: "whatsapp" | "phone") {
     if (!cancelFor) return;
     setCancelling(true);
     try {
-      const res = await api<{ message: string }>(`/api/bookings/${cancelFor.id}`, {
-        body: { action: "cancel" },
+      const request = await api<{ ok: boolean; requestedAt: string }>(`/api/bookings/${cancelFor.id}`, {
+        body: { action: "request_cancellation" },
       });
-      toast({ title: "Cancellation processed", description: res.message });
+      setBookings((current) => current?.map((booking) => booking.id === cancelFor.id
+        ? { ...booking, cancellationRequestedAt: request.requestedAt }
+        : booking) ?? current);
+      toast({
+        title: "Cancellation request recorded",
+        description: "Your booking stays active until Mireli confirms the cancellation.",
+      });
+      const destination = method === "whatsapp"
+        ? cancellationWhatsAppUrl(cancelFor.code)
+        : `tel:${MIRELI_SUPPORT_PHONE_E164}`;
       setCancelFor(null);
-      await load();
+      window.location.assign(destination);
     } catch (e) {
-      toast({ title: "Could not cancel", description: e instanceof Error ? e.message : "Try again", variant: "destructive" });
+      toast({ title: "Could not contact Mireli", description: e instanceof Error ? e.message : "Try again", variant: "destructive" });
     } finally {
       setCancelling(false);
     }
@@ -187,9 +208,33 @@ export default function BookingsPage() {
 
         {bookings === null && (
           <div className="grid gap-3">
-            <Skeleton className="h-32 w-full" />
-            <Skeleton className="h-32 w-full" />
+            {bookingsLoadError ? (
+              <Card role="alert">
+                <CardContent className="flex flex-col items-center gap-3 p-6 text-center">
+                  <TicketX className="h-8 w-8 text-muted-foreground" />
+                  <p className="font-medium">Your rides couldn&apos;t load</p>
+                  <p className="text-sm text-muted-foreground">Your bookings may still be active. Retry to check their latest status.</p>
+                  <Button onClick={() => void load()} disabled={refreshingBookings}>
+                    {refreshingBookings ? <Loader2 className="h-4 w-4 animate-spin" /> : "Try again"}
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <>
+                <Skeleton className="h-32 w-full" />
+                <Skeleton className="h-32 w-full" />
+              </>
+            )}
           </div>
+        )}
+
+        {bookings !== null && bookingsLoadError && (
+          <p role="alert" className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+            We couldn&apos;t refresh your rides. The details shown may be out of date. {" "}
+            <button type="button" className="font-semibold underline" onClick={() => void load()} disabled={refreshingBookings}>
+              {refreshingBookings ? "Retrying…" : "Try again"}
+            </button>
+          </p>
         )}
 
         {bookings !== null && bookings.length === 0 && (
@@ -280,27 +325,35 @@ export default function BookingsPage() {
                     </p>
                     {quote.tier === "late" && (
                       <p className="text-sm">
-                        Your full fare of <strong>{ksh(quote.cashDue + quote.creditApplied)}</strong>{" "}
-                        converts to travel credit valid <strong>{quote.creditValidityDays} days</strong>.
-                        The money never leaves the platform and you never lose it.
+                        <strong>75%</strong> of the fare ({ksh(calculateLateCancellationCredit(quote.cashDue + quote.creditApplied))})
+                        becomes travel credit for <strong>30 days</strong>. The remaining 25% is forfeited.
                       </p>
                     )}
                   </>
                 )}
+                <p className="text-sm text-muted-foreground">
+                  Mireli handles cancellation requests. Your booking remains active until support confirms it.
+                </p>
+                {cancelFor?.cancellationRequestedAt && (
+                  <p className="text-sm font-medium text-amber-800">Your request was already recorded. Contact Mireli to continue.</p>
+                )}
+                <p className="text-sm">Support number: <span className="font-medium">{MIRELI_SUPPORT_PHONE_LOCAL}</span></p>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep my seat</AlertDialogCancel>
+            <Button onClick={() => void contactSupport("phone")} disabled={cancelling || !quote} variant="outline">
+              {cancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : `Call ${MIRELI_SUPPORT_PHONE_LOCAL}`}
+            </Button>
             <AlertDialogAction
               onClick={(e) => {
                 e.preventDefault();
-                confirmCancel();
+                void contactSupport("whatsapp");
               }}
               disabled={cancelling || !quote}
-              className="bg-destructive text-white hover:bg-destructive/90"
             >
-              {cancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : "Cancel booking"}
+              {cancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : "Continue on WhatsApp"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -376,8 +429,10 @@ function BookingCard({
           </div>
         </div>
 
-        {b.lockNote && b.status === "confirmed" && (
-          <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">{b.lockNote}</p>
+        {b.cancellationRequestedAt && (
+          <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            Cancellation requested {fmtDateTime(b.cancellationRequestedAt)}. Mireli must confirm before this booking is cancelled.
+          </p>
         )}
 
         {b.direction === "TO_TERMINUS" && b.departureAt &&
@@ -402,7 +457,7 @@ function BookingCard({
           )}
           {b.canCancel && (
             <Button size="sm" variant="ghost" className="h-8 text-destructive hover:text-destructive" onClick={onCancel}>
-              <TicketX className="h-3.5 w-3.5" /> Cancel
+              <TicketX className="h-3.5 w-3.5" /> {b.cancellationRequestedAt ? "Continue request" : "Request cancellation"}
             </Button>
           )}
         </div>
@@ -450,7 +505,7 @@ function PastCard({ b }: { b: BookingRow }) {
         )}
         {b.status === "cancelled" && b.cancelTier === "late" && (
           <p className="rounded-md bg-violet-50 px-3 py-2 text-xs text-violet-900">
-            Your fare was saved as travel credit — see the Credits page. Valid 30 days.
+            75% of the fare became travel credit for 30 days; the remaining 25% was forfeited. See the Credits page.
           </p>
         )}
       </CardContent>

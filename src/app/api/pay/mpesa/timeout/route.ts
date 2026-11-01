@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
+import { isPaymentIntentId, verifyCallbackToken } from "@/lib/daraja";
 
 /**
  * Safaricom Daraja → STK Push queue-timeout webhook (QueueTimeOutURL).
@@ -12,6 +13,9 @@ import { audit } from "@/lib/audit";
  */
 export async function POST(req: NextRequest) {
   const accepted = NextResponse.json({ ResultCode: 0, ResultDesc: "Accepted" });
+  if (!verifyCallbackToken("stk-timeout", req.nextUrl.searchParams.get("mireli_token"))) {
+    return NextResponse.json({ error: "Invalid callback authorization" }, { status: 401 });
+  }
   try {
     const body = (await req.json().catch(() => ({}))) as {
       Body?: { stkCallback?: { CheckoutRequestID?: string } };
@@ -20,8 +24,19 @@ export async function POST(req: NextRequest) {
     const checkoutRequestId = body.Body?.stkCallback?.CheckoutRequestID || body.CheckoutRequestID;
     if (!checkoutRequestId) return accepted;
 
-    const tx = await db.mpesaTransaction.findUnique({ where: { checkoutRequestId } });
-    if (tx && tx.status === "stk_push_sent") {
+    let tx = await db.mpesaTransaction.findUnique({ where: { checkoutRequestId } });
+    const intentId = req.nextUrl.searchParams.get("intent");
+    if (!tx && intentId) {
+      const candidate = await db.mpesaTransaction.findUnique({ where: { id: intentId } });
+      if (candidate && isPaymentIntentId(candidate.checkoutRequestId)) {
+        await db.mpesaTransaction.updateMany({
+          where: { id: candidate.id, checkoutRequestId: candidate.checkoutRequestId, status: { in: ["pending", "ambiguous"] } },
+          data: { checkoutRequestId, merchantRequestId: candidate.merchantRequestId },
+        });
+        tx = await db.mpesaTransaction.findUnique({ where: { checkoutRequestId } });
+      }
+    }
+    if (tx && ["pending", "stk_push_sent"].includes(tx.status)) {
       await db.mpesaTransaction.update({
         where: { id: tx.id },
         data: { status: "ambiguous", resultDesc: "Queue timeout — awaiting Transaction Status sweep" },

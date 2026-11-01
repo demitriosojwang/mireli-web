@@ -23,6 +23,7 @@ interface ConfigData {
     stuckRefundHours: number;
     stuckPayoutHours: number;
     sweepPendingMinutes: number;
+    unpaidBookingHoldMinutes: number;
     tripHorizonDays: number;
     bookingWindowMinutes: number;
     terminusArrivalBufferMinutes: number;
@@ -92,12 +93,12 @@ export default function AdminConfig() {
                 onChange={(e) => setForm({ ...form, commissionRate: Number(e.target.value) })}
               />
               <p className="text-xs text-muted-foreground">
-                Applied only to private charter fare. Door surcharges and the booking fee are excluded.
+                Applied only to private charter fare. Door surcharges and the separate Mireli fee line are excluded.
                 Current: {(form.commissionRate * 100).toFixed(1)}%
               </p>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="c-booking-fee">Flat booking fee (KSh per booking)</Label>
+              <Label htmlFor="c-booking-fee">Mireli fee (KSh per shared passenger seat)</Label>
               <Input
                 id="c-booking-fee"
                 type="number"
@@ -108,12 +109,12 @@ export default function AdminConfig() {
                 onChange={(e) => setForm({ ...form, bookingFeeAmount: Number(e.target.value) })}
               />
               <p className="text-xs text-muted-foreground">
-                Charged once on every shared or private booking. It is included in the total shown before payment.
+                Charged for each seat on shared rides. Private charters use the 10% Mireli share; the configured fee is recorded once inside that share.
               </p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label htmlFor="c-cutoff">Full-refund cutoff (min before departure)</Label>
+                <Label htmlFor="c-cutoff">Full-refund cutoff (minutes before scheduled pickup)</Label>
                 <Input id="c-cutoff" inputMode="numeric" value={form.fullRefundCutoffMinutes} onChange={(e) => setForm({ ...form, fullRefundCutoffMinutes: num(e.target.value) })} />
               </div>
               <div className="space-y-1.5">
@@ -130,7 +131,7 @@ export default function AdminConfig() {
                 onChange={(e) => setForm({ ...form, creditValidityDays: num(e.target.value) })}
               />
               <p className="text-xs text-muted-foreground">
-                Late-cancellation credits stay redeemable this long (currently {form.creditValidityDays} days).
+                Late-cancellation credits are fixed at 30 days. This setting applies to other travel credits.
               </p>
             </div>
           </CardContent>
@@ -180,6 +181,11 @@ export default function AdminConfig() {
               <Label htmlFor="c-window">Booking window (min before departure)</Label>
               <Input id="c-window" inputMode="numeric" value={form.bookingWindowMinutes} onChange={(e) => setForm({ ...form, bookingWindowMinutes: num(e.target.value) })} />
             </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="c-unpaid-hold">Unpaid seat hold (minutes)</Label>
+                <Input id="c-unpaid-hold" inputMode="numeric" min="1" max="120" value={form.unpaidBookingHoldMinutes} onChange={(e) => setForm({ ...form, unpaidBookingHoldMinutes: num(e.target.value) })} />
+                <p className="text-xs text-muted-foreground">Old unpaid checkout drafts release the cab after this time. Unresolved or recorded payments are always kept for review.</p>
+              </div>
             <div className="space-y-1.5">
               <Label htmlFor="c-arr-buffer">Terminus arrival buffer (min before train)</Label>
               <Input

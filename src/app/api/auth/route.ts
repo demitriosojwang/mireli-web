@@ -10,6 +10,7 @@ import {
 import { issueCredit } from "@/lib/money";
 import { audit } from "@/lib/audit";
 import { DriverError, text } from "@/lib/driver/errors";
+import { assertPassengerPiiEncryptionReady, decryptPassengerIdNumber, encryptPassengerIdNumber } from "@/lib/passenger-pii";
 import {
   consumePassengerChallenge,
   requestPassengerChallenge,
@@ -153,6 +154,12 @@ async function claimGuestAccount(body: Record<string, unknown>) {
   const nationality = text(body.nationality, "Nationality", 1, 60);
   const gender = text(body.gender, "Gender", 1, 20).toLowerCase();
   if (!["female", "male", "other"].includes(gender)) return NextResponse.json({ error: "Select a valid gender" }, { status: 400 });
+  try {
+    assertPassengerPiiEncryptionReady();
+  } catch {
+    throw new DriverError(503, "PASSENGER_ID_PROTECTION_UNAVAILABLE", "Secure account setup is temporarily unavailable. Please try again shortly.");
+  }
+  const encryptedIdNumber = encryptPassengerIdNumber(idNumber)!;
 
   const session = await getPassengerSession();
   if (!session) return NextResponse.json({ error: "Session expired — refresh and try again" }, { status: 401, headers: NO_STORE });
@@ -167,7 +174,7 @@ async function claimGuestAccount(body: Record<string, unknown>) {
     return NextResponse.json({ error: "Request a verification code for this phone number first." }, { status: 400, headers: NO_STORE });
   }
 
-  const profile = { name: fullName, email, idType, idNumber, nationality, gender };
+  const profile = { name: fullName, email, idType, idNumber: encryptedIdNumber, nationality, gender };
   const sameDetails = (a: string | null | undefined, b: string) => (a || "").trim().toLowerCase() === b.trim().toLowerCase();
   const result = await db.$transaction(async (tx) => {
     await consumePassengerChallenge(tx, challenge);
@@ -178,7 +185,7 @@ async function claimGuestAccount(body: Record<string, unknown>) {
     if (existing) {
       const matches = sameDetails(existing.name, fullName) &&
         sameDetails(existing.email, email) &&
-        sameDetails(existing.idNumber, idNumber) &&
+        sameDetails(decryptPassengerIdNumber(existing.idNumber), idNumber) &&
         sameDetails(existing.nationality, nationality) &&
         sameDetails(existing.gender, gender);
       if (!matches) throw new DriverError(409, "ACCOUNT_DETAILS_MISMATCH", "An account with this phone already exists. Use the same details as that account, or sign in instead.");
@@ -188,7 +195,9 @@ async function claimGuestAccount(body: Record<string, unknown>) {
       const updated = await tx.passenger.update({ where: { id: existing.id }, data: {
         email: existing.email || email,
         idType: existing.idType || idType,
-        idNumber: existing.idNumber || idNumber,
+        idNumber: existing.idNumber
+          ? encryptPassengerIdNumber(decryptPassengerIdNumber(existing.idNumber))
+          : encryptedIdNumber,
         nationality: existing.nationality || nationality,
         gender: existing.gender || gender,
       } });
