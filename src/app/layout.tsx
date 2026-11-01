@@ -5,7 +5,7 @@ import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 import { connection } from "next/server";
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.MIRELI_PUBLIC_ORIGIN?.replace(/\/$/, "") || "https://mirelisgr.duckdns.org"),
+  metadataBase: new URL(process.env.MIRELI_PUBLIC_ORIGIN?.replace(/\/$/, "") || "https://mireli.online"),
   title: "Mi-Reli — SGR ride booking from Mombasa Terminus",
   description:
     "Plan a ground ride from Mombasa Terminus with Mi-Reli. Approved stops, published train times, fares, and cab availability appear in the booking flow when service is open.",

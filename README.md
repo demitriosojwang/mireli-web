@@ -10,10 +10,10 @@ AWS site stays online when a developer's computer is off.
 
 - EC2: `i-097df027e02b0708f` (`t4g.small`, ARM64), Elastic IP `13.53.183.149`.
 - The VM's app and API are healthy internally on image `794fb87`.
-- The intended hostname is `https://mirelisgr.duckdns.org`, but it still
-  resolves to the old IP `105.161.112.67`. Rotate the exposed DuckDNS token,
-  update its A record to the EIP, and verify public TLS before calling the site
-  live for customers.
+- The production hostname is `https://mireli.online` (registered at Namecheap;
+  DNS cutover, Caddy TLS, and public checks are tracked in
+  [docs/DOMAIN-CUTOVER.md](docs/DOMAIN-CUTOVER.md)). The legacy DuckDNS
+  hostname is retired once the new domain is publicly verified.
 - Production uses strict mode. The stage/timetable catalogue is empty and no
   driver is approved, so available pooled cabs correctly remain at zero.
 - Real customer/driver authentication, Daraja collection and reconciliation,

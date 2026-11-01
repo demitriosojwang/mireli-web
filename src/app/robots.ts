@@ -5,7 +5,7 @@ import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 // Docker image is reused across local and production environments.
 export const dynamic = "force-dynamic";
 
-const SITE_ORIGIN = process.env.MIRELI_PUBLIC_ORIGIN?.replace(/\/$/, "") || "https://mirelisgr.duckdns.org";
+const SITE_ORIGIN = process.env.MIRELI_PUBLIC_ORIGIN?.replace(/\/$/, "") || "https://mireli.online";
 
 export default function robots(): MetadataRoute.Robots {
   if (isLocalDemoEnabled()) {
