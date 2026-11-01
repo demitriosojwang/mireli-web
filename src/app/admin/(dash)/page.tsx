@@ -27,6 +27,7 @@ interface Overview {
     ambiguousPayments: number;
     closedBookingCaptures: { id: string; code: string; amount: number; status: string }[];
     paybillMismatches: { id: string; code: string; received: number; expected: number }[];
+    paymentAssignmentReviews: { id: string; code: string; fareAmount: number }[];
     unallocatedBookings: number;
     creditLiability: number;
     activeCredits: number;
@@ -45,6 +46,7 @@ export default function AdminOverview() {
     data.alerts.failedRefunds.length +
     data.alerts.closedBookingCaptures.length +
     data.alerts.paybillMismatches.length +
+    data.alerts.paymentAssignmentReviews.length +
     (data.alerts.ambiguousPayments > 0 ? 1 : 0) +
     (data.alerts.unallocatedBookings > 0 ? 1 : 0);
 
@@ -105,7 +107,7 @@ export default function AdminOverview() {
           {alertCount === 0 && (
             <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-900">
               All clear — no stuck refunds, failed transfers, ambiguous payments, late captures,
-              Paybill mismatches or unallocated bookings.
+              Paybill mismatches, assignment reviews or unallocated bookings.
             </p>
           )}
           {data.alerts.stuckRefunds.length > 0 && (
@@ -154,6 +156,14 @@ export default function AdminOverview() {
               detail={data.alerts.paybillMismatches.map((p) => `${p.code}: received ${ksh(p.received)}, due ${ksh(p.expected)}`).join(" · ")}
               href="/admin/reconciliation"
               cta="Review payment receipts"
+            />
+          )}
+          {data.alerts.paymentAssignmentReviews.length > 0 && (
+            <AlertRow
+              title={`${data.alerts.paymentAssignmentReviews.length} captured payment(s) need driver assignment review`}
+              detail={data.alerts.paymentAssignmentReviews.map((booking) => `${booking.code} (${ksh(booking.fareAmount)})`).join(", ")}
+              href="/admin/bookings"
+              cta="Review bookings"
             />
           )}
           {data.alerts.unallocatedBookings > 0 && (

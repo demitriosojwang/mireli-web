@@ -84,7 +84,11 @@ export async function GET(req: NextRequest) {
         },
         bookings: {
           where: { status: { in: ["awaiting_payment", "confirmed", "boarded", "completed"] } },
-          select: { seats: true },
+          select: { seats: true, isCharter: true },
+        },
+        reservedBookings: {
+          where: { status: { in: ["awaiting_payment", "confirmed", "boarded", "completed"] } },
+          select: { seats: true, isCharter: true },
         },
       },
     });
@@ -94,7 +98,10 @@ export async function GET(req: NextRequest) {
     // The database query requires at least one valid customer stop without
     // materializing the entire route-stage list for every departure.
     trips: trips.map((t) => {
-      const relevantBooked = t.bookings.reduce((s, b) => s + b.seats, 0);
+      const activeBookings = [...t.bookings, ...t.reservedBookings];
+      const relevantBooked = activeBookings.some((booking) => booking.isCharter)
+        ? t.capacity
+        : activeBookings.reduce((sum, booking) => sum + booking.seats, 0);
       const seatsLeft = Math.max(t.capacity - relevantBooked, 0);
       const isFromTerminus = t.direction === "FROM_TERMINUS";
       const train = t.train

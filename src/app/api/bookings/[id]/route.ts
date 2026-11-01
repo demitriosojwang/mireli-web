@@ -60,7 +60,11 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const booking = await db.booking.findUnique({
     where: { id },
-    include: { ledgerEntry: true, trip: { include: { driver: true } } },
+    include: {
+      ledgerEntry: true,
+      trip: { include: { driver: true } },
+      reservationTrip: { include: { driver: true } },
+    },
   });
   if (!booking || booking.passengerId !== session.id) {
     return NextResponse.json({ error: "Booking not found" }, { status: 404 });
@@ -68,15 +72,23 @@ export async function POST(req: NextRequest, { params }: Params) {
   const actor = { id: session.id, name: session.name, role: "passenger" as const };
 
   /** Driver contact is revealed with the receipt once the fare is settled. */
-  const driverContact = () =>
-    booking.trip?.driver
-      ? { name: booking.trip.driver.name, plate: booking.trip.driver.plate, phone: booking.trip.driver.phone }
+  const driverContact = () => {
+    const assignedTrip = booking.trip ?? booking.reservationTrip;
+    return assignedTrip?.driver
+      ? { name: assignedTrip.driver.name, plate: assignedTrip.driver.plate, phone: assignedTrip.driver.phone }
       : null;
+  };
 
   // ── Pay: initiate STK push for the residual cash ──────────────────────────
   if (action === "pay") {
     if (booking.status !== "awaiting_payment" || booking.cashDue <= 0) {
       return NextResponse.json({ error: "Nothing to pay on this booking" }, { status: 400 });
+    }
+    if (booking.ledgerEntry) {
+      return NextResponse.json(
+        { error: `Payment was received but this booking needs assignment review. Please contact Mireli support with reference ${booking.code}.`, paymentNeedsReview: true },
+        { status: 409 },
+      );
     }
     if (!isBookingReadyForPayment(booking)) {
       return NextResponse.json(
@@ -98,6 +110,14 @@ export async function POST(req: NextRequest, { params }: Params) {
         select: {
           status: true,
           cashDue: true,
+          reservationTrip: {
+            select: {
+              driverId: true,
+              status: true,
+              departureAt: true,
+              driver: { select: { status: true } },
+            },
+          },
           trip: {
             select: {
               driverId: true,
@@ -224,6 +244,12 @@ export async function POST(req: NextRequest, { params }: Params) {
       if (booking.status === "confirmed" && booking.ledgerEntry) {
         return NextResponse.json({ ok: true, alreadyConfirmed: true, receipt: booking.ledgerEntry.mpesaReceipt, driver: driverContact() });
       }
+      if (booking.ledgerEntry) {
+        return NextResponse.json(
+          { error: `Payment was received but this booking needs assignment review. Please contact Mireli support with reference ${booking.code}.`, paymentNeedsReview: true },
+          { status: 409 },
+        );
+      }
       const unmatchedPaybill = await db.mpesaTransaction.findFirst({
         where: { bookingId: booking.id, merchantRequestId: { startsWith: "c2b-" }, status: "failed" },
         orderBy: { createdAt: "desc" },
@@ -298,14 +324,19 @@ export async function POST(req: NextRequest, { params }: Params) {
       receipt: result.mpesaReceipt,
       checkoutRequestId: tx.checkoutRequestId,
     });
-    const fresh = await db.booking.findUnique({ where: { id: booking.id }, include: { ledgerEntry: true } });
+    const fresh = await db.booking.findUnique({
+      where: { id: booking.id },
+      include: { ledgerEntry: true, trip: { include: { driver: true } } },
+    });
     return NextResponse.json({
       ok: true,
       receipt: result.mpesaReceipt,
       amount: booking.cashDue,
       status: fresh?.status,
       ledgerStatus: fresh?.ledgerEntry?.status,
-      driver: driverContact(),
+      driver: fresh?.status === "confirmed" && fresh.trip?.driver
+        ? { name: fresh.trip.driver.name, plate: fresh.trip.driver.plate, phone: fresh.trip.driver.phone }
+        : null,
     });
   }
 
@@ -314,7 +345,8 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (!["awaiting_payment", "confirmed", "boarded"].includes(booking.status)) {
       return NextResponse.json({ error: "This booking can no longer be cancelled" }, { status: 400 });
     }
-    if (booking.trip && ["departed", "completed"].includes(booking.trip.status)) {
+    const bookingTrip = booking.trip ?? booking.reservationTrip;
+    if (bookingTrip && ["departed", "completed"].includes(bookingTrip.status)) {
       return NextResponse.json({ error: "Trip already departed — cancellation window closed" }, { status: 400 });
     }
     const requestedAt = booking.cancellationRequestedAt ?? new Date();
@@ -346,7 +378,8 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (booking.status !== "confirmed") {
       return NextResponse.json({ error: "Only confirmed bookings can check in" }, { status: 400 });
     }
-    if (booking.trip && ["departed", "completed", "cancelled"].includes(booking.trip.status)) {
+    const bookingTrip = booking.trip ?? booking.reservationTrip;
+    if (bookingTrip && ["departed", "completed", "cancelled"].includes(bookingTrip.status)) {
       return NextResponse.json({ error: "Trip is no longer boarding" }, { status: 400 });
     }
     await db.booking.update({

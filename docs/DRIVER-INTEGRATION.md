@@ -19,7 +19,11 @@ VM access, build-flavor, and release rules.
   per vehicle seat). The KSh 50 fee is included inside Mireli's 10% share; it
   is not added again. For a 4-seat vehicle and KSh 400 stage fare, the total is
   KSh 2,000, Mireli's total share is KSh 200, and the driver receives KSh 1,800.
-- Door-to-door surcharge passes to the driver in full for both service types.
+- Shared off-stage pickup/drop-off, once enabled, adds KSh 50 per extra
+  kilometre from the nearest approved stage; the full surcharge goes to the
+  driver. This option remains closed until approved stage coordinates and a
+  trusted server-side road-distance quote are available. A private charter can
+  use the passenger's address with no extra-distance fee.
 - Driver payout is created and dispatched only after trip completion. The API's
   server-calculated earnings and payout fields are authoritative; Android must
   not recalculate fares, commission, or net payout locally.
@@ -41,6 +45,11 @@ VM access, build-flavor, and release rules.
 - GET `trips`, POST `trips/{id}/commands`: accept/decline/arrive/board/no_show/start/
   complete, driver ownership, versioned receipts and atomic settlement creation.
   Manifests omit boarding codes and identity numbers; historical trips omit PII.
+- A passenger's unpaid seat hold uses `Booking.reservationTripId`; it is not a
+  driver manifest assignment. Only successful payment moves the booking to
+  `Booking.tripId`, after which the driver manifest can include it. Keep the
+  backend's status filter even if older rows or test fixtures contain an unpaid
+  booking in `Trip.bookings`.
 - GET `earnings`, POST `payout-destination`: KES minor units, settlement status,
   explicit beneficiary attestation and finance approval before transfers.
 - GET/POST `support`: driver-owned cases, replay protection and staff replies.

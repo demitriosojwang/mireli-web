@@ -25,7 +25,7 @@ export async function expireUnpaidBookingReservations(now = new Date()): Promise
   const candidates = await db.booking.findMany({
     where: {
       status: "awaiting_payment",
-      tripId: { not: null },
+      reservationTripId: { not: null },
       createdAt: { lte: cutoff },
       ledgerEntry: { is: null },
       mpesaTransactions: {
@@ -37,7 +37,7 @@ export async function expireUnpaidBookingReservations(now = new Date()): Promise
         },
       },
     },
-    select: { id: true, tripId: true },
+    select: { id: true, reservationTripId: true },
     orderBy: { createdAt: "asc" },
     take: 100,
   });
@@ -45,11 +45,11 @@ export async function expireUnpaidBookingReservations(now = new Date()): Promise
   let expired = 0;
   let restoredCredit = 0;
   for (const candidate of candidates) {
-    if (!candidate.tripId) continue;
+    if (!candidate.reservationTripId) continue;
     const result = await db.$transaction(async (tx) => {
       // Match allocation's trip-then-booking lock order so the cached seat
       // count cannot race with a new reservation.
-      await tx.$queryRaw`SELECT "id" FROM "Trip" WHERE "id" = ${candidate.tripId} FOR UPDATE`;
+      await tx.$queryRaw`SELECT "id" FROM "Trip" WHERE "id" = ${candidate.reservationTripId} FOR UPDATE`;
       await tx.$queryRaw`SELECT "id" FROM "Booking" WHERE "id" = ${candidate.id} FOR UPDATE`;
       const booking = await tx.booking.findUnique({
         where: { id: candidate.id },
@@ -57,7 +57,7 @@ export async function expireUnpaidBookingReservations(now = new Date()): Promise
           id: true,
           code: true,
           passengerId: true,
-          tripId: true,
+          reservationTripId: true,
           createdAt: true,
           status: true,
           creditApplied: true,
@@ -68,7 +68,7 @@ export async function expireUnpaidBookingReservations(now = new Date()): Promise
       if (
         !booking ||
         booking.status !== "awaiting_payment" ||
-        booking.tripId !== candidate.tripId ||
+        booking.reservationTripId !== candidate.reservationTripId ||
         booking.createdAt.getTime() > cutoff.getTime() ||
         booking.ledgerEntry ||
         booking.mpesaTransactions.some(
@@ -98,18 +98,21 @@ export async function expireUnpaidBookingReservations(now = new Date()): Promise
       }
 
       const trip = await tx.trip.findUnique({
-        where: { id: candidate.tripId! },
+        where: { id: candidate.reservationTripId! },
         select: { capacity: true },
       });
       if (trip) {
         const activeBookings = await tx.booking.findMany({
-          where: { tripId: candidate.tripId, status: { in: ACTIVE_BOOKING_STATUSES } },
+          where: {
+            status: { in: ACTIVE_BOOKING_STATUSES },
+            OR: [{ tripId: candidate.reservationTripId }, { reservationTripId: candidate.reservationTripId }],
+          },
           select: { seats: true, isCharter: true },
         });
         const bookedSeats = activeBookings.some((active) => active.isCharter)
           ? trip.capacity
           : activeBookings.reduce((sum, active) => sum + active.seats, 0);
-        await tx.trip.update({ where: { id: candidate.tripId! }, data: { bookedSeats } });
+        await tx.trip.update({ where: { id: candidate.reservationTripId! }, data: { bookedSeats } });
       }
 
       await tx.auditLog.create({

@@ -148,7 +148,6 @@ export async function expireStaleCredits(): Promise<number> {
  *  but only `cashAmount` ever moved through M-Pesa. */
 export async function recordCollection(params: {
   bookingId: string;
-  tripId: string | null;
   totalAmount: number;
   cashAmount: number;
   creditApplied: number;
@@ -156,23 +155,102 @@ export async function recordCollection(params: {
   platformFeeAmount: number;
   mpesaReceipt: string | null;
 }) {
-  const existing = await db.ledgerEntry.findUnique({
-    where: { bookingId: params.bookingId },
+  const initial = await db.booking.findUnique({
+    where: { id: params.bookingId },
+    select: { reservationTripId: true, tripId: true },
   });
-  if (existing) return existing; // idempotent — never double-record a collection
-  return db.ledgerEntry.create({
-    data: {
-      bookingId: params.bookingId,
-      tripId: params.tripId,
-      totalAmount: params.totalAmount,
-      cashAmount: params.cashAmount,
-      creditApplied: params.creditApplied,
-      homeSurchargeAmount: params.homeSurchargeAmount,
-      platformFeeAmount: params.platformFeeAmount,
-      mpesaReceipt: params.mpesaReceipt,
-      collectedAt: params.cashAmount > 0 ? new Date() : null,
-      status: "held",
+  return db.$transaction(async (tx) => {
+    const lockTripId = initial?.reservationTripId ?? initial?.tripId;
+    if (lockTripId) {
+      await tx.$queryRaw`SELECT "id" FROM "Trip" WHERE "id" = ${lockTripId} FOR UPDATE`;
+    }
+    await tx.$queryRaw`SELECT "id" FROM "Booking" WHERE "id" = ${params.bookingId} FOR UPDATE`;
+    let booking = await tx.booking.findUnique({ where: { id: params.bookingId }, include: { ledgerEntry: true } });
+    if (!booking) throw new Error("Cannot record a collection for a missing booking");
+
+    booking = await assignHeldBookingAfterPayment(tx, booking);
+    if (booking.ledgerEntry) return booking.ledgerEntry;
+    return tx.ledgerEntry.create({
+      data: {
+        bookingId: params.bookingId,
+        tripId: booking.tripId,
+        totalAmount: params.totalAmount,
+        cashAmount: params.cashAmount,
+        creditApplied: params.creditApplied,
+        homeSurchargeAmount: params.homeSurchargeAmount,
+        platformFeeAmount: params.platformFeeAmount,
+        mpesaReceipt: params.mpesaReceipt,
+        collectedAt: params.cashAmount > 0 ? new Date() : null,
+        status: "held",
+      },
+    });
+  });
+}
+
+/** Commit a private seat hold to the driver's manifest only at payment time. */
+async function assignHeldBookingAfterPayment(
+  tx: Prisma.TransactionClient,
+  booking: Prisma.BookingGetPayload<{ include: { ledgerEntry: true } }>,
+) {
+  if (!["awaiting_payment", "confirmed"].includes(booking.status)) {
+    return booking;
+  }
+  const heldTripId = booking.tripId ?? booking.reservationTripId;
+  if (!heldTripId || (booking.status === "confirmed" && booking.tripId)) return booking;
+  const trip = await tx.trip.findUnique({
+    where: { id: heldTripId },
+    select: {
+      id: true,
+      status: true,
+      departureAt: true,
+      driverId: true,
+      driver: { select: { status: true } },
     },
+  });
+  const available = trip &&
+    trip.driverId &&
+    trip.driver?.status === "active" &&
+    ["scheduled", "locked"].includes(trip.status) &&
+    trip.departureAt.getTime() > Date.now();
+  if (!available) {
+    const released = await tx.booking.update({
+      where: { id: booking.id },
+      data: {
+        tripId: null,
+        reservationTripId: null,
+        allocationNote: "Payment was received, but the reserved departure became unavailable. Support review is required; do not pay again.",
+      },
+      include: { ledgerEntry: true },
+    });
+    if (trip) {
+      const refreshedTrip = await tx.trip.findUnique({
+        where: { id: trip.id },
+        select: {
+          capacity: true,
+          bookings: {
+            where: { status: { in: ["awaiting_payment", "confirmed", "boarded"] } },
+            select: { seats: true, isCharter: true },
+          },
+          reservedBookings: {
+            where: { status: { in: ["awaiting_payment", "confirmed", "boarded"] } },
+            select: { seats: true, isCharter: true },
+          },
+        },
+      });
+      if (refreshedTrip) {
+        const activeBookings = [...refreshedTrip.bookings, ...refreshedTrip.reservedBookings];
+        const bookedSeats = activeBookings.some((active) => active.isCharter)
+          ? refreshedTrip.capacity
+          : activeBookings.reduce((sum, active) => sum + active.seats, 0);
+        await tx.trip.update({ where: { id: trip.id }, data: { bookedSeats } });
+      }
+    }
+    return released;
+  }
+  return tx.booking.update({
+    where: { id: booking.id },
+    data: { tripId: trip.id, reservationTripId: null, status: "confirmed" },
+    include: { ledgerEntry: true },
   });
 }
 
@@ -191,18 +269,20 @@ export async function resolveRefundTier(bookingId: string): Promise<{
 }> {
   const booking = await db.booking.findUnique({
     where: { id: bookingId },
-    include: { trip: true },
+    include: { trip: true, reservationTrip: true, ledgerEntry: true },
   });
   if (!booking) return { tier: null, detail: "Booking not found" };
 
-  if (booking.status === "awaiting_payment")
+  if (booking.status === "awaiting_payment" && !booking.ledgerEntry)
     return { tier: null, detail: "Nothing collected yet — booking simply voids." };
   if (["cancelled", "completed", "no_show"].includes(booking.status))
     return { tier: null, detail: `Booking already ${booking.status}.` };
 
-  const trip = booking.trip;
+  const trip = booking.trip ?? booking.reservationTrip;
   if (!trip)
-    return { tier: null, detail: "Booking not yet allocated to a trip — voids without refund." };
+    return booking.ledgerEntry
+      ? { tier: "platform_cancelled", detail: "Payment was collected but no trip assignment was completed — a full refund is due." }
+      : { tier: null, detail: "Booking not yet allocated to a trip — voids without refund." };
 
   if (trip.status === "cancelled")
     return { tier: "platform_cancelled", detail: "Trip was cancelled by the platform." };
@@ -681,24 +761,22 @@ export async function confirmBookingPayment(
   bookingId: string,
   tx: { receipt: string; checkoutRequestId: string }
 ): Promise<boolean> {
+  const initial = await db.booking.findUnique({ where: { id: bookingId }, select: { reservationTripId: true, tripId: true } });
   const confirmed = await db.$transaction(async (dbTx) => {
-    // Serialize payment confirmation against unpaid-reservation expiry and
-    // concurrent callbacks. A late capture on a cancelled booking is recorded
-    // in the ledger but never reopens that booking.
+    // Match the trip-then-booking lock order used by seat allocation and hold
+    // expiry. A late capture on a closed booking is recorded but never reopens it.
+    const lockTripId = initial?.reservationTripId ?? initial?.tripId;
+    if (lockTripId) {
+      await dbTx.$queryRaw`SELECT "id" FROM "Trip" WHERE "id" = ${lockTripId} FOR UPDATE`;
+    }
     await dbTx.$queryRaw`SELECT "id" FROM "Booking" WHERE "id" = ${bookingId} FOR UPDATE`;
-    const booking = await dbTx.booking.findUnique({
+    let booking = await dbTx.booking.findUnique({
       where: { id: bookingId },
       include: { ledgerEntry: true },
     });
     if (!booking) return null;
 
-    const wasAwaitingPayment = booking.status === "awaiting_payment";
-    if (wasAwaitingPayment) {
-      await dbTx.booking.update({
-        where: { id: bookingId },
-        data: { status: "confirmed" },
-      });
-    }
+    booking = await assignHeldBookingAfterPayment(dbTx, booking);
 
     const ledgerEntry = booking.ledgerEntry ?? await dbTx.ledgerEntry.create({
       data: {
@@ -719,11 +797,14 @@ export async function confirmBookingPayment(
   if (!confirmed) return false;
   const { booking, ledgerEntry } = confirmed;
   const arrivedAfterClosure = ["cancelled", "no_show"].includes(booking.status);
+  const needsAssignmentReview = booking.status === "awaiting_payment";
   await audit({
     actorId: booking.passengerId,
     actorName: "Passenger",
     actorRole: "passenger",
-    action: arrivedAfterClosure ? "payment.capture_after_closed_booking" : "payment.confirm",
+    action: arrivedAfterClosure
+      ? "payment.capture_after_closed_booking"
+      : needsAssignmentReview ? "payment.confirm_assignment_review" : "payment.confirm",
     entity: "booking",
     entityId: booking.id,
     metadata: {
@@ -731,10 +812,13 @@ export async function confirmBookingPayment(
       amount: booking.cashDue,
       ledgerEntryId: ledgerEntry.id,
       bookingStatus: booking.status,
+      assignmentReviewRequired: needsAssignmentReview,
     },
   });
   // A late capture on a cancelled/no-show booking belongs in the ledger for
   // finance review, but must not confirm the ride or send a stale ticket.
-  if (!arrivedAfterClosure) await attemptBookingTicketEmail(booking.id);
+  if (!arrivedAfterClosure && booking.status === "confirmed" && booking.tripId) {
+    await attemptBookingTicketEmail(booking.id);
+  }
   return true;
 }

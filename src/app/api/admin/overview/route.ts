@@ -81,7 +81,18 @@ export async function GET() {
     include: { booking: true },
   });
   const unallocated = await db.booking.findMany({
-    where: { tripId: null, status: { in: ["awaiting_payment", "confirmed"] } },
+    where: {
+      tripId: null,
+      reservationTripId: null,
+      status: { in: ["awaiting_payment", "confirmed"] },
+      ledgerEntry: { is: null },
+    },
+  });
+  const paymentAssignmentReviews = await db.booking.findMany({
+    where: { status: "awaiting_payment", ledgerEntry: { isNot: null } },
+    select: { id: true, code: true, fareAmount: true },
+    orderBy: { createdAt: "asc" },
+    take: 50,
   });
   const activeCredits = await db.credit.findMany({
     where: { status: "active", expiresAt: { gt: now } },
@@ -126,6 +137,7 @@ export async function GET() {
         received: tx.amount,
         expected: tx.booking.cashDue,
       })),
+      paymentAssignmentReviews,
       unallocatedBookings: unallocated.length,
       creditLiability: activeCredits.reduce((s, c) => s + c.amount, 0),
       activeCredits: activeCredits.length,

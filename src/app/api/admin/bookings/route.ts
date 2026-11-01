@@ -21,7 +21,9 @@ export async function GET(req: NextRequest) {
     take: 200,
     include: {
       passenger: true,
+      route: true,
       trip: { include: { driver: true, route: true } },
+      reservationTrip: { include: { route: true } },
       ledgerEntry: true,
       ticketEmailDelivery: true,
     },
@@ -37,12 +39,14 @@ export async function GET(req: NextRequest) {
     : bookings;
 
   return NextResponse.json({
-    bookings: filtered.map((b) => ({
+    bookings: filtered.map((b) => {
+      const timelineTrip = b.trip ?? b.reservationTrip;
+      return ({
       id: b.id,
       code: b.code,
       passenger: { name: b.passenger.name, phone: b.passenger.phone },
       guest: b.passengerName ? { name: b.passengerName, phone: b.passengerPhone } : null,
-      routeName: b.trip?.route.name || null,
+      routeName: timelineTrip?.route.name || b.route.name,
       direction: b.direction,
       stageName: b.stageName,
       homePickup: b.homePickup,
@@ -53,13 +57,18 @@ export async function GET(req: NextRequest) {
       creditApplied: b.creditApplied,
       cashDue: b.cashDue,
       status: b.status,
+      assignmentStatus: b.status === "awaiting_payment" && b.ledgerEntry
+        ? "payment_review"
+        : b.reservationTripId ? "held_for_payment" : b.tripId ? "assigned" : "unallocated",
       cancelTier: b.cancelTier,
       cancellationRequestedAt: b.cancellationRequestedAt?.toISOString() || null,
       createdAt: b.createdAt,
-      departureAt: b.trip?.departureAt || null,
-      tripStatus: b.trip?.status || null,
+      departureAt: timelineTrip?.departureAt || null,
+      tripStatus: timelineTrip?.status || null,
       driver: b.trip?.driver ? { name: b.trip.driver.name, plate: b.trip.driver.plate } : null,
-      allocationNote: b.allocationNote,
+      allocationNote: b.status === "awaiting_payment" && b.ledgerEntry
+        ? "Payment was received but no driver assignment was committed. Review and resolve before asking the passenger to pay again."
+        : b.allocationNote,
       ticketEmail: b.ticketEmailDelivery
         ? {
             status: b.ticketEmailDelivery.status,
@@ -77,7 +86,8 @@ export async function GET(req: NextRequest) {
             receipt: b.ledgerEntry.mpesaReceipt,
           }
         : null,
-    })),
+    });
+    }),
   });
 }
 

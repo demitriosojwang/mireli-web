@@ -59,7 +59,7 @@ describe("unpaid booking reservation cleanup", () => {
     expect(released).toBe(true);
     expect(mocks.events).toEqual(["lock-trip", "delete-draft", "recount"]);
     expect(mocks.bookingDeleteMany).toHaveBeenCalledWith({
-      where: { id: "booking-1", tripId: "trip-1", status: "awaiting_payment" },
+      where: { id: "booking-1", reservationTripId: "trip-1", status: "awaiting_payment" },
     });
     expect(mocks.tripUpdate).toHaveBeenCalledWith({
       where: { id: "trip-1" },

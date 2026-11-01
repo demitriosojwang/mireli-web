@@ -114,7 +114,8 @@ model Trip {
   source       String       @default("schedule") // schedule | auto
   trainId      String?
   train        Train?       @relation(fields: [trainId], references: [id])
-  bookings     Booking[]
+  bookings     Booking[] @relation("BookingTrip")
+  reservedBookings Booking[] @relation("BookingReservation")
   payouts      PayoutRecord[]
   createdAt    DateTime     @default(now())
   driverProgress DriverTripProgress[]
@@ -127,7 +128,9 @@ model Booking {
   passengerId   String
   passenger     Passenger @relation(fields: [passengerId], references: [id])
   tripId        String?
-  trip          Trip?     @relation(fields: [tripId], references: [id])
+  trip          Trip?     @relation("BookingTrip", fields: [tripId], references: [id])
+  reservationTripId String?
+  reservationTrip Trip? @relation("BookingReservation", fields: [reservationTripId], references: [id])
   routeId       String
   route         Route     @relation(fields: [routeId], references: [id])
   direction     String
@@ -168,6 +171,7 @@ model Booking {
   mpesaTransactions MpesaTransaction[]
   createdAt     DateTime  @default(now())
   @@index([status, createdAt])
+  @@index([reservationTripId, status])
 }
 
 // Durable delivery state for the customer ticket. A unique row per booking

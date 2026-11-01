@@ -231,7 +231,7 @@ export async function releaseUnpaidBookingReservation(
   return db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "Trip" WHERE "id" = ${tripId} FOR UPDATE`;
     const removed = await tx.booking.deleteMany({
-      where: { id: bookingId, tripId, status: "awaiting_payment" },
+      where: { id: bookingId, reservationTripId: tripId, status: "awaiting_payment" },
     });
     const trip = await tx.trip.findUnique({
       where: { id: tripId },
@@ -239,7 +239,10 @@ export async function releaseUnpaidBookingReservation(
     });
     if (trip) {
       const activeBookings = await tx.booking.findMany({
-        where: { tripId, status: { in: ["awaiting_payment", "confirmed", "boarded"] } },
+        where: {
+          status: { in: ["awaiting_payment", "confirmed", "boarded"] },
+          OR: [{ tripId }, { reservationTripId: tripId }],
+        },
         select: { seats: true, isCharter: true },
       });
       const bookedSeats = activeBookings.some((booking) => booking.isCharter)
@@ -308,20 +311,25 @@ export async function allocateBooking(params: {
             where: { status: { in: ["awaiting_payment", "confirmed", "boarded"] } },
             select: { seats: true, isCharter: true },
           },
+          reservedBookings: {
+            where: { status: { in: ["awaiting_payment", "confirmed", "boarded"] } },
+            select: { seats: true, isCharter: true },
+          },
         },
       });
       if (!current || !current.train?.active || !["scheduled", "locked"].includes(current.status)) return null;
 
-      const hasCharter = current.bookings.some((booking) => booking.isCharter);
-      const occupiedSeats = hasCharter ? current.capacity : current.bookings.reduce((sum, booking) => sum + booking.seats, 0);
-      if (params.charter ? current.bookings.length > 0 : hasCharter || occupiedSeats + params.seats > current.capacity) return null;
+      const activeBookings = [...current.bookings, ...current.reservedBookings];
+      const hasCharter = activeBookings.some((booking) => booking.isCharter);
+      const occupiedSeats = hasCharter ? current.capacity : activeBookings.reduce((sum, booking) => sum + booking.seats, 0);
+      if (params.charter ? activeBookings.length > 0 : hasCharter || occupiedSeats + params.seats > current.capacity) return null;
 
       const nextOccupiedSeats = params.charter ? current.capacity : occupiedSeats + params.seats;
       const note = params.charter
         ? `Charter — whole cab allocated (${current.direction === "FROM_TERMINUS" ? "from-terminus" : "to-terminus"})`
         : `Auto-allocated to ${current.direction === "FROM_TERMINUS" ? "from-terminus" : "to-terminus"} trip`;
       await tx.trip.update({ where: { id: current.id }, data: { bookedSeats: nextOccupiedSeats } });
-      await tx.booking.update({ where: { id: params.bookingId }, data: { tripId: current.id, allocationNote: note } });
+      await tx.booking.update({ where: { id: params.bookingId }, data: { reservationTripId: current.id, allocationNote: note } });
       return { tripId: current.id, seatsLeft: current.capacity - nextOccupiedSeats };
     });
     if (reservation) {
@@ -381,14 +389,14 @@ export async function allocateBooking(params: {
         await tx.booking.update({
           where: { id: params.bookingId },
           data: {
-            tripId: trip.id,
-            allocationNote: `Auto-created extra departure with ${driver.name} (${driver.plate})${params.charter ? " — charter" : ""}`,
+            reservationTripId: trip.id,
+            allocationNote: "Departure held for payment. Driver and vehicle will be assigned after payment.",
           },
         });
         return trip.id;
       });
       if (extraTripId) {
-        return { tripId: extraTripId, note: `Extra departure created with ${driver.name}${params.charter ? " — charter" : ""}` };
+        return { tripId: extraTripId, note: "Departure held for payment. Driver and vehicle will be assigned after payment." };
       }
     }
   }

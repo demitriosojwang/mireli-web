@@ -131,6 +131,7 @@ export default function Home() {
   const [timetableStatus, setTimetableStatus] = useState<CatalogueStatus>("loading");
   const [catalogueRetry, setCatalogueRetry] = useState(0);
   const [myBookings, setMyBookings] = useState<BookingRow[]>([]);
+  const [myBookingsLoadError, setMyBookingsLoadError] = useState(false);
   const [isRefreshing, setLoading] = useState(false);
   const [loadedQuery, setLoadedQuery] = useState<string | null>(null);
   const [tripRefreshKey, setTripRefreshKey] = useState(0);
@@ -198,8 +199,9 @@ export default function Home() {
     try {
       const res = await api<{ bookings: BookingRow[] }>("/api/bookings");
       setMyBookings(res.bookings.filter((b) => ["awaiting_payment", "confirmed", "boarded"].includes(b.status)));
+      setMyBookingsLoadError(false);
     } catch {
-      setMyBookings([]);
+      setMyBookingsLoadError(true);
     }
   }, []);
 
@@ -307,8 +309,12 @@ export default function Home() {
     if (!isAuthed) return;
     let active = true;
     api<{ bookings: BookingRow[] }>("/api/bookings")
-      .then((res) => { if (active) setMyBookings(res.bookings.filter((b) => ["awaiting_payment", "confirmed", "boarded"].includes(b.status))); })
-      .catch(() => { if (active) setMyBookings([]); });
+      .then((res) => {
+        if (!active) return;
+        setMyBookings(res.bookings.filter((b) => ["awaiting_payment", "confirmed", "boarded"].includes(b.status)));
+        setMyBookingsLoadError(false);
+      })
+      .catch(() => { if (active) setMyBookingsLoadError(true); });
     return () => { active = false; };
   }, [isAuthed]);
 
@@ -1032,6 +1038,18 @@ export default function Home() {
             </details>}
 
             {/* My bookings */}
+            {myBookingsLoadError && (
+              <Card role="alert">
+                <CardContent className="flex items-center justify-between gap-3 p-3 text-sm">
+                  <span className="text-muted-foreground">
+                    We couldn&apos;t refresh your bookings. Any ride already shown may be out of date.
+                  </span>
+                  <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={() => void loadMyBookings()}>
+                    Try again
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
             {myBookings.length > 0 && (
               <div className="space-y-2 pt-2">
                 <h3 className="flex items-center gap-1.5 text-sm font-medium">
@@ -1172,9 +1190,6 @@ function CabCard({
                   ? `${ksh(platformFee)} fee in the 10% share`
                   : `${ksh(trip.platformFeeAmount)} × ${seats} Mireli fee`}
               </div>
-            )}
-            {!charter && (trip.capacity === 10 || trip.capacity === 11) && hasPoint && (
-              <div className="text-[10px] text-muted-foreground">KSh 50 off each seat for this cab size</div>
             )}
           </div>
         </div>

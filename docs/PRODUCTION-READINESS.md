@@ -14,8 +14,10 @@ accept payment until the end-to-end gates below pass.
 
 Fresh public HTTPS probes from this workstation on 26 October 2026 to
 `/api/health`, `/api/routes`, `/api/trains`, `/api/driver-supply`, and
-`/sitemap.xml` each timed out after eight seconds with HTTP 000. The current
-host data and customer endpoints are therefore unreachable and unverified.
+`/sitemap.xml` failed DNS resolution (`curl` exit 6, HTTP 000) for
+`mirelisgr.duckdns.org`. The hostname does not currently resolve from this
+workstation, so the VM health, route/timetable/driver data, and public sitemap
+are unreachable and unverified.
 
 ## Current source validation (26 October 2026)
 
@@ -25,12 +27,17 @@ host data and customer endpoints are therefore unreachable and unverified.
   [40235042758](https://github.com/demitriosojwang/mireli-web/actions/runs/40235042758)
   and
   [40235047529](https://github.com/demitriosojwang/mireli-web/actions/runs/40235047529).
-- [x] Full Vitest suite: 245 tests passed across 47 files. TypeScript
-  (`tsc --noEmit`) and ESLint also passed on the current branch. The latest
+- [x] Full Vitest suite: 251 tests passed across 50 files after the unpaid
+  reservation/paid assignment split. TypeScript (`tsc --noEmit`) and ESLint on
+  all changed application/test files passed. Prisma schema validation passed.
+  A fresh Next.js production build also passed, generating 55 static pages and
+  the API/site-map route table; database migrations were disabled during this
+  build, so it does not prove a live database upgrade or runtime booking. The latest
   owner pricing clarification is covered: every shared seat pays the listed
   stage fare plus KSh 50, independent of vehicle capacity; the full listed
-  fare goes to the driver. The pickup/drop-off choice controls were shortened
-  to reduce vertical scrolling.
+  fare goes to the driver. Tests also pin the approved cancellation contact
+  and keep unpaid passenger rows out of driver manifests. The pickup/drop-off
+  choice controls were shortened to reduce vertical scrolling.
 - [x] New passenger national ID/passport values are AES-256-GCM encrypted in
   profile and booking snapshot fields. The passenger profile API decrypts only
   for that passenger; strict production writes fail closed without the separate
@@ -51,6 +58,23 @@ host data and customer endpoints are therefore unreachable and unverified.
   identity, and the pre-payment trip card and checkout sheet cannot render a
   driver name or plate. Paid booking responses remain the source of driver
   details; the availability API test asserts this boundary.
+- [x] Keep unpaid passenger records out of the driver manifest. The backend
+  query and DTO both filter for confirmed/boarded/completed/no-show bookings;
+  `tests/driver-trips.test.ts` verifies an awaiting-payment booking stays
+  hidden even if a row is accidentally included in the query result.
+- [x] Separate unpaid capacity holds from paid driver assignments. New
+  awaiting-payment rows use `Booking.reservationTripId`; `Booking.tripId` stays
+  null, the driver manifest excludes the hold, and the payment transaction
+  promotes it to `tripId` only after confirming the fare. Availability and
+  expiry count/release both relations under the trip lock. Migration
+  `20261026_post_payment_driver_assignment` moves existing unpaid rows without
+  changing their held capacity. A captured payment that cannot be assigned is
+  not marked confirmed or offered another charge; it appears in the admin
+  exceptions inbox and passenger support guidance. PostgreSQL race testing and
+  a real driver manifest check remain launch gates.
+- [x] Treat booking-history API failures as load errors instead of an empty
+  booking history. The home-page summary and My rides page keep any loaded data
+  and offer a retry action.
 - [ ] Enable shared off-stage pickup/drop-off only after the exact passenger
   location can be matched to an approved stage and a server-side routing
   provider can calculate road distance. The agreed surcharge is KSh 50 per
@@ -62,22 +86,15 @@ host data and customer endpoints are therefore unreachable and unverified.
   unapproved, the customer flow has no location/geocoding step, and the
   configured `VALHALLA_URL`/token are empty. The shared door-to-door choice
   remains disabled and booking API rejects it until all three are resolved.
-- [x] A prior `MIRELI_NEXT_DIST_DIR=.docker-build node scripts/deployment-build.mjs`
-  completed successfully using an isolated Next.js output directory. It
-  compiled with Next.js 16.3.4, passed
-  the build TypeScript phase, generated all 55 static pages, and included the
-  stage, trip, booking, driver-supply, sitemap, and robots routes in the
-  production route table. This verifies bundle generation and route inclusion;
-  it does not verify live database contents, payment credentials, driver
-  matching, public DNS/TLS, or customer booking completion.
-- [ ] That earlier build does not include the latest timetable, train-choice,
-  or pre-payment driver-identity changes. Fresh runs of
-  `scripts/deployment-build.mjs` failed with Windows `EPERM` while Next created
-  generated route types/assets in new build folders inside this OneDrive
-  workspace (`.next-codex-verify-20261025/types/...` and
-  `.next-build/static/...`). No TypeScript or application compile diagnostic
-  was reported before the filesystem failure. Re-run the build in CI or a
-  non-synced checkout.
+- [x] Fresh production build on 26 October compiled with Next.js 16.3.4,
+  passed the build TypeScript phase, generated all 55 static pages, and
+  included the booking, driver, payment, sitemap, and robots routes in the
+  production route table. The ordinary sandbox attempt hit Windows `EPERM`
+  under OneDrive; the isolated retry succeeded with elevated file access and
+  `MIRELI_APPLY_DATABASE_MIGRATIONS=false`. Its temporary output was removed
+  and the generated `tsconfig.json` entries were restored. This verifies the
+  current source bundle, but not live database contents, provider credentials,
+  driver matching, public DNS/TLS, or a customer booking.
 - [x] A later read-only local runtime check (25 October 2026, 22:55 EAT)
   reached Docker Desktop's one-container stack: `mireli-app-1` is healthy on
   `mireli-web:latest`, an image created six days earlier. The home page and
@@ -423,12 +440,12 @@ host data and customer endpoints are therefore unreachable and unverified.
   all-or-nothing coverage, and seat recount. A two-transaction PostgreSQL
   integration test remains a launch check because the unit mocks do not
   simulate real database lock contention.
-- [ ] Define and enforce the payment-hold expiry for abandoned
-  `awaiting_payment` bookings. Those bookings count against vehicle capacity,
-  and no automatic age-based release was found in the operational or payment
-  reconciliation paths. Keep a seat held while an M-Pesa result is ambiguous;
-  release it only after a safe terminal outcome and an owner-approved hold
-  duration.
+- [x] Define and enforce the payment-hold expiry for abandoned
+  `awaiting_payment` bookings: 15-minute default, configurable duration, and
+  automatic release only when no ambiguous/pending M-Pesa result, Paybill
+  receipt, or ledger entry exists. The expiry recounts both paid assignments
+  and private reservations. PostgreSQL lock-contention testing remains a launch
+  gate.
 - [x] The AWS VM release smoke check now validates that `/sitemap.xml` is
   parseable XML with at least one URL and that `/api/pay/options` returns either
   a real STK option or the documented `PAYMENT_OPTIONS_UNAVAILABLE` fail-closed
@@ -456,20 +473,21 @@ host data and customer endpoints are therefore unreachable and unverified.
   unapproved stop/fare list, fixed timetable, or live M-Pesa/ledger promise is
   presented. The preview used a dummy database URL and intentionally did not
   verify API availability or payment.
-- [ ] A database-backed local preview remains blocked. Docker CLI 29.8.1 is
-  installed, but Docker Desktop is absent/unregistered and the Linux engine
-  pipe is unavailable. Starting Desktop fails because its registry entry is
-  missing. Windows reports firmware virtualization and SLAT unavailable, and
-  the WSL optional component needs Windows administrator action. No sample
-  records were inserted. Repair Docker Desktop and enable the Windows/firmware
-  prerequisites before attempting the local end-to-end journey.
+- [ ] A database-backed local preview remains blocked. On 26 October,
+  `docker version` and `docker compose ps` failed with permission denied for
+  `dockerDesktopLinuxEngine`; `docker desktop start` failed because the
+  `SOFTWARE\\Docker Inc.\\Docker Desktop` registry key is missing, and
+  `localhost:3000` refused connections. No sample records were inserted and no
+  containers or volumes were changed. Repair Docker Desktop registration and
+  engine access before the local end-to-end journey.
 - [ ] GitHub PR #4 includes commit `c6fddd8`, and its push and PR checks passed.
   The Vercel GitHub App still posts a `Vercel Preview Comments` check and a
   deployment status; no Vercel workflow exists in this repository. Remove
   `mireli-web` from the Vercel GitHub App installation to stop Vercel previews.
   This workspace does not have authenticated GitHub App settings access, so
   the external integration remains connected. The local AWS-only follow-up
-  `f8cfebe` removes the Vercel API rewrite; it is not pushed until the app
+  `f8cfebe` removes the Vercel API rewrite, and the current readiness notes
+  record the latest reachability check. Both are unpushed until the app
   connection is removed.
 - [ ] Real passenger/driver authentication, M-Pesa callbacks and reconciliation,
   Brevo ticket delivery, and post-trip payouts are not configured on the VM.

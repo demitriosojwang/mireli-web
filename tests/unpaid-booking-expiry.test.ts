@@ -29,7 +29,7 @@ const oldBooking = {
   id: "booking-1",
   code: "MR-ABC123",
   passengerId: "passenger-1",
-  tripId: "trip-1",
+  reservationTripId: "trip-1",
   createdAt: new Date(now.getTime() - 16 * 60_000),
   status: "awaiting_payment",
   creditApplied: 150,
@@ -40,7 +40,7 @@ const oldBooking = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.configFindUnique.mockResolvedValue({ unpaidBookingHoldMinutes: 15, creditValidityDays: 30 });
-  mocks.bookingFindMany.mockResolvedValue([{ id: "booking-1", tripId: "trip-1" }]);
+  mocks.bookingFindMany.mockResolvedValue([{ id: "booking-1", reservationTripId: "trip-1" }]);
   mocks.bookingFindUnique.mockResolvedValue(oldBooking);
   mocks.bookingUpdateMany.mockResolvedValue({ count: 1 });
   mocks.activeBookingFindMany.mockResolvedValue([{ seats: 2, isCharter: false }]);

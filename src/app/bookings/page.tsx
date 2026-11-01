@@ -84,6 +84,8 @@ export default function BookingsPage() {
   const { me, loading: meLoading, error: identityError, refresh: retryIdentity } = useMe();
   const { toast } = useToast();
   const [loadedBookings, setBookings] = useState<BookingRow[] | null>(null);
+  const [bookingsLoadError, setBookingsLoadError] = useState(false);
+  const [refreshingBookings, setRefreshingBookings] = useState(false);
   const bookings = me?.session ? loadedBookings : meLoading ? null : [];
   const [payFor, setPayFor] = useState<BookingRow | null>(null);
   const [cancelFor, setCancelFor] = useState<BookingRow | null>(null);
@@ -92,11 +94,15 @@ export default function BookingsPage() {
   const [checkingIn, setCheckingIn] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setRefreshingBookings(true);
     try {
       const res = await api<{ bookings: BookingRow[] }>("/api/bookings");
       setBookings(res.bookings);
+      setBookingsLoadError(false);
     } catch {
-      setBookings([]);
+      setBookingsLoadError(true);
+    } finally {
+      setRefreshingBookings(false);
     }
   }, []);
 
@@ -104,8 +110,12 @@ export default function BookingsPage() {
     if (!me?.session) return;
     let active = true;
     api<{ bookings: BookingRow[] }>("/api/bookings")
-      .then((res) => { if (active) setBookings(res.bookings); })
-      .catch(() => { if (active) setBookings([]); });
+      .then((res) => {
+        if (!active) return;
+        setBookings(res.bookings);
+        setBookingsLoadError(false);
+      })
+      .catch(() => { if (active) setBookingsLoadError(true); });
     return () => { active = false; };
   }, [me?.session?.id]);
 
@@ -198,9 +208,33 @@ export default function BookingsPage() {
 
         {bookings === null && (
           <div className="grid gap-3">
-            <Skeleton className="h-32 w-full" />
-            <Skeleton className="h-32 w-full" />
+            {bookingsLoadError ? (
+              <Card role="alert">
+                <CardContent className="flex flex-col items-center gap-3 p-6 text-center">
+                  <TicketX className="h-8 w-8 text-muted-foreground" />
+                  <p className="font-medium">Your rides couldn&apos;t load</p>
+                  <p className="text-sm text-muted-foreground">Your bookings may still be active. Retry to check their latest status.</p>
+                  <Button onClick={() => void load()} disabled={refreshingBookings}>
+                    {refreshingBookings ? <Loader2 className="h-4 w-4 animate-spin" /> : "Try again"}
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <>
+                <Skeleton className="h-32 w-full" />
+                <Skeleton className="h-32 w-full" />
+              </>
+            )}
           </div>
+        )}
+
+        {bookings !== null && bookingsLoadError && (
+          <p role="alert" className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+            We couldn&apos;t refresh your rides. The details shown may be out of date. {" "}
+            <button type="button" className="font-semibold underline" onClick={() => void load()} disabled={refreshingBookings}>
+              {refreshingBookings ? "Retrying…" : "Try again"}
+            </button>
+          </p>
         )}
 
         {bookings !== null && bookings.length === 0 && (

@@ -16,10 +16,18 @@ const readyBooking = {
 };
 
 describe("passenger payment eligibility", () => {
-  it.each(["scheduled", "locked"])("allows a future %s trip with an active assigned driver", (status) => {
+  it.each(["scheduled", "locked"])("allows payment on a future %s departure held for an active driver", (status) => {
     expect(isBookingReadyForPayment({
       ...readyBooking,
       trip: { ...readyBooking.trip, status },
+    }, now)).toBe(true);
+  });
+
+  it("allows payment against a private departure hold without exposing an assignment", () => {
+    expect(isBookingReadyForPayment({
+      ...readyBooking,
+      trip: null,
+      reservationTrip: readyBooking.trip,
     }, now)).toBe(true);
   });
 
@@ -32,6 +40,7 @@ describe("passenger payment eligibility", () => {
     ["past departure", { trip: { ...readyBooking.trip, departureAt: now } }],
     ["already confirmed booking", { status: "confirmed" }],
     ["no cash due", { cashDue: 0 }],
+    ["payment already recorded for assignment review", { ledgerEntry: { id: "ledger-1" } }],
   ] as const)("rejects payment when %s", (_reason, override) => {
     expect(isBookingReadyForPayment({ ...readyBooking, ...override }, now)).toBe(false);
   });

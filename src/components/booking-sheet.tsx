@@ -25,7 +25,7 @@ import { PaySheet } from "@/components/pay-sheet";
 import { AuthSheet } from "@/components/auth-sheet";
 import { api, useMe, detailsComplete, type PassengerDetails } from "@/lib/client";
 import { ksh, fmtTime } from "@/lib/format";
-import { MIRELI_SUPPORT_PHONE_LOCAL } from "@/lib/support";
+import { MIRELI_SUPPORT_PHONE_LOCAL, MIRELI_SUPPORT_WHATSAPP_NUMBER } from "@/lib/support";
 import { DEFAULT_FULL_REFUND_CUTOFF_MINUTES, describeCancellationCutoff } from "@/lib/cancellation-policy";
 import { NATIONALITIES, DEFAULT_NATIONALITY } from "@/lib/nationalities";
 import { calculateBookingFeeAmount, calculateSharedFare, calculateSharedSeatFare, DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
@@ -97,6 +97,7 @@ interface CreateResponse {
     cashDue: number;
     stageName: string;
     allocationNote: string | null;
+    paymentNeedsReview?: boolean;
     passengerName: string | null;
     passengerPhone: string | null;
     trip: {
@@ -256,7 +257,7 @@ function BookingSheetContent({
       setCreated(res.booking);
       await refresh();
       onBooked();
-      if (res.booking.cashDue > 0) {
+      if (res.booking.cashDue > 0 && !res.booking.paymentNeedsReview) {
         setPayOpen(true);
       }
     } catch (e) {
@@ -323,15 +324,19 @@ function BookingSheetContent({
           {created ? (
             <div className="space-y-4 px-4 pb-2">
               <div className="flex flex-col items-center gap-2 py-4 text-center">
-                <div className={`flex h-12 w-12 items-center justify-center rounded-full ${created.cashDue > 0 ? "bg-amber-100" : "bg-emerald-100"}`}>
-                  <TicketIcon className={`h-7 w-7 ${created.cashDue > 0 ? "text-amber-700" : "text-emerald-600"}`} />
+                <div className={`flex h-12 w-12 items-center justify-center rounded-full ${created.cashDue > 0 || created.paymentNeedsReview ? "bg-amber-100" : "bg-emerald-100"}`}>
+                  <TicketIcon className={`h-7 w-7 ${created.cashDue > 0 || created.paymentNeedsReview ? "text-amber-700" : "text-emerald-600"}`} />
                 </div>
                 <h3 className="text-lg font-semibold">
-                  {created.cashDue > 0 ? `Cab held · ${created.code}` : `Booking ${created.code} confirmed`}
+                  {created.paymentNeedsReview
+                    ? `Payment received · ${created.code}`
+                    : created.cashDue > 0 ? `Departure held · ${created.code}` : `Booking ${created.code} confirmed`}
                 </h3>
                 <p className="max-w-xs text-sm text-muted-foreground">
-                  {created.cashDue > 0
-                    ? `Karibu ${created.passengerName?.split(" ")[0] || ""} — complete the M-Pesa payment to confirm. Your ticket and driver details follow after payment.`
+                  {created.paymentNeedsReview
+                    ? "We received payment but need to confirm your driver assignment. Contact Mireli support using the details below; please do not pay again."
+                    : created.cashDue > 0
+                    ? `Karibu ${created.passengerName?.split(" ")[0] || ""} — complete the M-Pesa payment to confirm. We assign your driver and vehicle after payment, then send your ticket.`
                     : `Karibu ${created.passengerName?.split(" ")[0] || ""} — fully covered by your travel credit, your seat is confirmed.`}
                 </p>
               </div>
@@ -358,7 +363,16 @@ function BookingSheetContent({
                   <p className="mt-2 text-xs text-muted-foreground">{created.allocationNote}</p>
                 )}
               </div>
-              {created.cashDue > 0 ? (
+              {created.paymentNeedsReview ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <a className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-center text-sm font-medium text-amber-950" href={`tel:${MIRELI_SUPPORT_PHONE_LOCAL}`}>
+                    Call support
+                  </a>
+                  <a className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-center text-sm font-medium text-amber-950" href={`https://wa.me/${MIRELI_SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(`Payment assignment review for booking ${created.code}; please help. I will not pay again.`)}`} target="_blank" rel="noreferrer">
+                    WhatsApp support
+                  </a>
+                </div>
+              ) : created.cashDue > 0 ? (
                 <Button className="w-full" onClick={() => setPayOpen(true)}>
                   Complete booking · {ksh(created.cashDue)} with M-Pesa
                 </Button>
@@ -368,7 +382,7 @@ function BookingSheetContent({
                 </div>
               )}
               <Button variant="outline" className="w-full" onClick={onClose}>
-                {created.cashDue > 0 ? "Pay later from My rides" : "Done"}
+                {created.paymentNeedsReview ? "Close" : created.cashDue > 0 ? "Pay later from My rides" : "Done"}
               </Button>
             </div>
           ) : identity.error || !me?.session ? (

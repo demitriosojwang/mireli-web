@@ -80,7 +80,8 @@ describe("customer trip availability", () => {
       },
       driver: { name: "Approved Driver", plate: "KAA 123A", cabType: "Van", rating: 4.8 },
       train: { id: "train-1", name: "Night Train", direction: "NBO_TO_MBA", originTime: "22:00", destTime: "03:55" },
-      bookings: [{ seats: 1 }],
+      bookings: [{ seats: 1, isCharter: false }],
+      reservedBookings: [],
     }]);
 
     const response = await GET(request("date=2026-10-11&routeId=route-1&trainId=train-1"));

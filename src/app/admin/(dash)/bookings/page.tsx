@@ -36,6 +36,7 @@ interface AdminBooking {
   creditApplied: number;
   cashDue: number;
   status: string;
+  assignmentStatus: "payment_review" | "held_for_payment" | "assigned" | "unallocated";
   cancelTier: string | null;
   cancellationRequestedAt: string | null;
   createdAt: string;
@@ -196,7 +197,8 @@ export default function AdminBookings() {
                     </p>
                   )}
                   <p className="text-xs text-muted-foreground">
-                    Departure {fmtDateTime(b.departureAt)} · trip {b.tripStatus || "unallocated"}
+                    Departure {fmtDateTime(b.departureAt)} · {b.assignmentStatus.replaceAll("_", " ")}
+                    {b.tripStatus ? ` · trip ${b.tripStatus}` : ""}
                     {b.driver ? ` · ${b.driver.name} (${b.driver.plate})` : ""}
                   </p>
                   {b.cancellationRequestedAt && (

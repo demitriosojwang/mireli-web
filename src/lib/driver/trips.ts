@@ -16,13 +16,16 @@ export function boardingCounts(b:{status:string;seats:number;boardedSeats:number
 }
 function tripDto(t:TripRecord,driverId:string,eligible:boolean) {
   const progress=t.driverProgress.find(p=>p.driverId===driverId);
+  // Keep pre-payment capacity reservations out of every driver-facing
+  // passenger surface, even if a query or fixture accidentally includes one.
+  const visibleBookings=t.bookings.filter(b=>visibleStatuses.includes(b.status));
   const phase=t.status==="completed"?"completed":t.status==="cancelled"?"cancelled":t.status==="departed"?"in_progress":progress?.phase??"assigned";
   const active=t.status!=="completed" && t.status!=="cancelled";
   const contact=active && eligible && ["accepted","at_pickup","in_progress"].includes(phase);
   return {id:t.id,version:progress?.version??0,phase,status:t.status,routeName:t.route.name,direction:t.direction,
-    departureAt:t.departureAt,capacity:t.capacity,serviceType:t.bookings.some(b=>b.isCharter)?"charter":"shared",
+    departureAt:t.departureAt,capacity:t.capacity,serviceType:visibleBookings.some(b=>b.isCharter)?"charter":"shared",
     stages:t.route.stages.map(s=>({id:s.id,order:s.order,name:s.name,latitude:s.lat,longitude:s.lng})),
-    passengers:active&&eligible?t.bookings.map(b=>({id:b.id,name:b.passengerName||b.passenger.name||"Passenger",seats:b.seats,status:b.status,
+    passengers:active&&eligible?visibleBookings.map(b=>({id:b.id,name:b.passengerName||b.passenger.name||"Passenger",seats:b.seats,status:b.status,
       ...boardingCounts(b),stageId:b.stageId,stageName:b.stageName,homePickup:b.homePickup,homeAddress:contact?b.homeAddress:null,
       phone:contact?(b.passengerPhone||b.passenger.phone):null})):[],
     // Boarding codes are supplied by passengers, never returned on the manifest.

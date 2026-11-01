@@ -13,6 +13,7 @@ import { calculateBookingFeeAmount, calculateSharedFare } from "@/lib/pricing";
 import { getApprovedStageFare } from "@/lib/fare-catalogue";
 import { expireUnpaidBookingReservations } from "@/lib/unpaid-booking-expiry";
 import { assertPassengerPiiEncryptionReady, encryptPassengerIdNumber } from "@/lib/passenger-pii";
+import { MIRELI_SUPPORT_PHONE_E164 } from "@/lib/support";
 
 /** Statuses that count towards the guest booking limit — a cancelled booking
  *  frees the guest to rebook their single no-login seat. */
@@ -44,17 +45,21 @@ export async function GET() {
     where: { passengerId: session.id },
     orderBy: { createdAt: "desc" },
     include: {
+      route: true,
       trip: { include: { route: true, driver: true } },
+      reservationTrip: { include: { route: true, driver: true } },
       ledgerEntry: true,
       refunds: true,
     },
   });
   const now = new Date();
   return NextResponse.json({
-    bookings: bookings.map((b) => ({
+    bookings: bookings.map((b) => {
+      const timelineTrip = b.trip ?? b.reservationTrip;
+      return ({
       id: b.id,
       code: b.code,
-      routeName: b.trip?.route.name || null,
+      routeName: timelineTrip?.route.name || b.route.name,
       direction: b.direction,
       stageName: b.stageName,
       homePickup: b.homePickup,
@@ -70,8 +75,8 @@ export async function GET() {
       cancelTier: b.cancelTier,
       cancellationRequestedAt: b.cancellationRequestedAt?.toISOString() || null,
       createdAt: b.createdAt,
-      departureAt: b.trip?.departureAt || null,
-      tripStatus: b.trip?.status || null,
+      departureAt: timelineTrip?.departureAt || null,
+      tripStatus: timelineTrip?.status || null,
       // Keep driver identity and vehicle registration private until payment is
       // settled (paid or fully covered by travel credit).
       driver:
@@ -83,9 +88,12 @@ export async function GET() {
               phone: ["confirmed", "boarded", "completed"].includes(b.status) ? b.trip.driver.phone : null,
             }
           : null,
-      allocationNote: ["confirmed", "boarded", "completed"].includes(b.status)
+      allocationNote: b.status === "awaiting_payment" && b.ledgerEntry
+        ? `Payment received; your driver assignment needs review. Call or WhatsApp Mireli support at ${MIRELI_SUPPORT_PHONE_E164} with booking ${b.code}.`
+        : ["confirmed", "boarded", "completed"].includes(b.status)
         ? b.allocationNote
-        : b.status === "awaiting_payment" ? "Your cab is held while payment is pending." : b.allocationNote,
+        : b.status === "awaiting_payment" ? "Your departure is held while payment is pending. Driver and vehicle will be assigned after payment." : b.allocationNote,
+      paymentNeedsReview: b.status === "awaiting_payment" && !!b.ledgerEntry,
       passengerName: b.passengerName,
       passengerPhone: b.passengerPhone,
       checkedInAt: b.checkedInAt,
@@ -93,10 +101,11 @@ export async function GET() {
         ? { status: b.ledgerEntry.status, cash: b.ledgerEntry.cashAmount, credit: b.ledgerEntry.creditApplied, receipt: b.ledgerEntry.mpesaReceipt }
         : null,
       canPay: isBookingReadyForPayment(b, now),
-      canCancel: ["awaiting_payment", "confirmed", "boarded"].includes(b.status) && b.trip?.status !== "departed" && b.trip?.status !== "completed",
+      canCancel: ["awaiting_payment", "confirmed", "boarded"].includes(b.status) && timelineTrip?.status !== "departed" && timelineTrip?.status !== "completed",
       canCheckIn: b.status === "confirmed" && b.trip && ["scheduled", "locked"].includes(b.trip.status),
       refund: b.refunds.length ? { amount: b.refunds[0].amount, status: b.refunds[0].status, reason: b.refunds[0].reason } : null,
-    })),
+    });
+    }),
     now: now.toISOString(),
   });
 }
@@ -357,8 +366,8 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // Secure a driver and cab before applying credit or allowing payment. An
-  // unmatched request must never look like a confirmed booking to a passenger.
+  // Hold seats on an eligible departure before applying credit or allowing
+  // payment. Attach the booking to the driver's manifest only after payment.
   let allocation: Awaited<ReturnType<typeof allocateBooking>>;
   try {
     allocation = await allocateBooking({
@@ -444,10 +453,8 @@ export async function POST(req: NextRequest) {
 
   // Fully covered by credit? Confirm immediately — no cash ever moves.
   if (cashDue <= 0) {
-    await db.booking.update({ where: { id: booking.id }, data: { status: "confirmed" } });
-    await recordCollection({
+    const collection = await recordCollection({
       bookingId: booking.id,
-      tripId: allocation.tripId,
       totalAmount: total,
       cashAmount: 0,
       creditApplied,
@@ -459,18 +466,24 @@ export async function POST(req: NextRequest) {
       actorId: session.id,
       actorName: session.name,
       actorRole: "passenger",
-      action: "payment.credit_full",
+      action: collection.tripId ? "payment.credit_full" : "payment.credit_full_assignment_review",
       entity: "booking",
       entityId: booking.id,
-      metadata: { code: booking.code, creditApplied },
+      metadata: { code: booking.code, creditApplied, assignmentReviewRequired: !collection.tripId },
     });
     await attemptBookingTicketEmail(booking.id);
   }
 
   const fresh = await db.booking.findUnique({
     where: { id: booking.id },
-    include: { trip: { include: { driver: true, route: true } } },
+    include: {
+      route: true,
+      trip: { include: { driver: true, route: true } },
+      reservationTrip: { include: { driver: true, route: true } },
+      ledgerEntry: true,
+    },
   });
+  const timelineTrip = fresh!.trip ?? fresh!.reservationTrip;
 
   return NextResponse.json({
     ok: true,
@@ -488,13 +501,14 @@ export async function POST(req: NextRequest) {
       isCharter: fresh!.isCharter,
       passengerName: fresh!.passengerName,
       passengerPhone: fresh!.passengerPhone,
-      trip: fresh!.trip
+      paymentNeedsReview: fresh!.status === "awaiting_payment" && !!fresh!.ledgerEntry,
+      trip: timelineTrip
         ? {
-            id: fresh!.trip.id,
-            departureAt: fresh!.trip.departureAt,
-            status: fresh!.trip.status,
-            routeName: fresh!.trip.route.name,
-            driver: ["confirmed", "boarded", "completed"].includes(fresh!.status) && fresh!.trip.driver
+            ...(fresh!.trip ? { id: fresh!.trip.id } : {}),
+            departureAt: timelineTrip.departureAt,
+            status: timelineTrip.status,
+            routeName: timelineTrip.route.name,
+            driver: ["confirmed", "boarded", "completed"].includes(fresh!.status) && fresh!.trip?.driver
               ? {
                   name: fresh!.trip.driver.name,
                   plate: fresh!.trip.driver.plate,
@@ -506,9 +520,11 @@ export async function POST(req: NextRequest) {
               : null,
           }
         : null,
-      allocationNote: ["confirmed", "boarded", "completed"].includes(fresh!.status)
+      allocationNote: fresh!.status === "awaiting_payment" && fresh!.ledgerEntry
+        ? `Payment received; your driver assignment needs review. Call or WhatsApp Mireli support at ${MIRELI_SUPPORT_PHONE_E164} with booking ${fresh!.code}.`
+        : ["confirmed", "boarded", "completed"].includes(fresh!.status)
         ? fresh!.allocationNote
-        : fresh!.status === "awaiting_payment" ? "Your cab is held while payment is pending." : fresh!.allocationNote,
+        : fresh!.status === "awaiting_payment" ? "Your departure is held while payment is pending. Driver and vehicle will be assigned after payment." : fresh!.allocationNote,
     },
     bookingWindowMinutes: cfg.bookingWindowMinutes,
   });

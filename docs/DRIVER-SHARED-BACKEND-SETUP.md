@@ -51,6 +51,12 @@ Expected production mode: `simulation` is `false`. Sign-in flags may be false
 until the owner configures provider credentials; a false flag is a deliberate
 fail-closed state, not an Android networking bug.
 
+Booking assignment contract: unpaid checkout capacity is held through
+`Booking.reservationTripId`; it is not a passenger assignment and must not be
+shown in the driver manifest. Once payment is confirmed, the web backend moves
+that booking to `Booking.tripId` and the existing driver manifest can return
+it. Do not make Android infer a passenger assignment from a scheduled trip.
+
 ## Build flavors and service URL
 
 Set the API origin using the driver's existing Gradle configuration
