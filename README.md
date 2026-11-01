@@ -23,7 +23,9 @@ AWS site stays online when a developer's computer is off.
 See [AWS migration and launch gates](docs/AWS-MIGRATION.md),
 [the production checklist](docs/PRODUCTION-READINESS.md), and the
 [VM/driver handoff](docs/VM-AGENT-HANDOFF.md) or the focused
-[Mireli Driver agent VM handoff](docs/DRIVER-AGENT-VM-HANDOFF.md).
+[Mireli Driver agent VM handoff](docs/DRIVER-AGENT-VM-HANDOFF.md). A dated
+consolidated handoff for the Android agent is
+[docs/DRIVER-AGENT-HANDOFF-2026-11-01.md](docs/DRIVER-AGENT-HANDOFF-2026-11-01.md).
 
 ## Local Docker test environment
 

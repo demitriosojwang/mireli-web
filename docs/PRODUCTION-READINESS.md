@@ -664,6 +664,36 @@ AWS EC2 is the intended web/API host; the local Docker stack is for testing only
   is unreachable, and AWS CLI reports the `mireli` session expired. No DNS,
   VM, or AWS configuration was changed.
 
+## Fresh runtime verification (1 November 2026)
+
+- [x] AWS authentication is restored today (`aws login`, profile `default`):
+  `sts get-caller-identity` succeeds against project `036834403673`. Prior
+  25 October connection failures were transient.
+- [x] SSM reports `i-097df027e02b0708f` **Online** (agent `3.3.5390.0`); EC2
+  status checks pass. The 25/19 October `Managed: false` state is resolved.
+- [x] Read-only SSM sweep: Docker, Caddy, and `mireli-app` active; one healthy
+  container, still on image `794fb87`. `/api/health` 200; `/api/routes` 200
+  (`pointCount: 0`, KSh 50 fee); `/api/trains` empty; stage search empty;
+  `/api/driver-supply` **404**; `/api/pay/options` **500**; `/sitemap.xml`
+  **404**; `/api/v1/driver/status` 200 strict (`simulation:false`,
+  phone/email sign-in, registration, and navigation closed).
+- [x] ECR inventory: only 16 October images exist (`794fb87` latest); the
+  CI-verified newer commits were never published. A current `main` ARM64
+  image (`841e731…-nov01main`) is being built and pushed today for release.
+- [x] Source checks re-run today on merged `main`: Prisma validate, `tsc`,
+  ESLint, Vitest **251/251**, and the Next.js production build all pass.
+- [x] GitHub push succeeded for the feature branch and `main` (local `9e83215`
+  + `2aae89a` + domain commits `841e731`, `a5221bd`); CI runs on push.
+- [x] Hosting is AWS-only: legacy `.vercelignore` removed; the metadata origin
+  fallbacks now target `https://mireli.online` (see
+  [DOMAIN-CUTOVER.md](DOMAIN-CUTOVER.md)). Cloudflare nameservers
+  (`kara`/`michael.ns.cloudflare.com`) were assigned to `mireli.online`; NS
+  delegation at Namecheap and the Cloudflare A/CNAME records remain owner
+  actions; the DuckDNS hostname is retired.
+- [ ] Public HTTPS still not serving: `mireli.online` is parked
+  (`parkingpage.namecheap.com`) because DNS is not delegated yet; the old
+  `mirelisgr.duckdns.org` record still points at `105.161.112.67` (timeout).
+
 ## Must complete before opening bookings
 
 ### Approved route catalogue
