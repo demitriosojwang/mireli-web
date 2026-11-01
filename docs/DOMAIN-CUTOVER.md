@@ -1,9 +1,9 @@
 # Mireli.online domain cutover
 
 Updated 1 November 2026. The production origin changes from the legacy
-`mirelisgr.duckdns.org` to the owner-registered `mireli.online` (Namecheap).
-The legacy DuckDNS hostname is retired; its token was previously exposed and
-must not be reused.
+`mirelisgr.duckdns.org` to the owner-registered `mireli.online` (registered at
+Namecheap, DNS hosted in Cloudflare). The legacy DuckDNS hostname is retired;
+its token was previously exposed and must not be reused.
 
 - VM (unchanged): `i-097df027e02b0708f`, Elastic IP `13.53.183.149`, `eu-north-1`.
 - Public target: `https://mireli.online` with `https://www.mireli.online`
@@ -11,17 +11,44 @@ must not be reused.
 - TLS: Caddy on the VM issues and automatically renews Let's Encrypt
   certificates per hostname once public DNS resolves to the EIP. No manual
   certificate handling is required.
+- Cloudflare zone: `mireli.online` was added to Cloudflare; Cloudflare assigned
+  the nameservers `kara.ns.cloudflare.com` and
+  `michael.ns.cloudflare.com`.
 
-## 1. Namecheap DNS records (owner action)
+## 1. Delegate the domain to Cloudflare nameservers (owner action at Namecheap)
 
-In the Namecheap dashboard → Domain List → `mireli.online` → **Advanced DNS**:
+In the Namecheap dashboard → Domain List → `mireli.online` → **Nameservers**
+→ set **Custom DNS** (not Namecheap BasicDNS) to exactly:
 
-| Type | Host | Value | TTL |
-| ---- | ---- | ----- | --- |
-| A Record | `@` | `13.53.183.149` | Automatic (or 5 min) |
-| CNAME Record | `www` | `mireli.online.` | Automatic (or 5 min) |
+```
+kara.ns.cloudflare.com
+michael.ns.cloudflare.com
+```
 
-Delete the Namecheap parking/parkingpage records for `@` and `www` first.
+Namecheap no longer serves records for this domain after this change; all
+records are managed in the Cloudflare dashboard. Store the Namecheap account
+details safely outside this repository.
+
+Verify delegation (may take minutes to hours for the old NS TTL to expire):
+
+```powershell
+Resolve-DnsName mireli.online -Server 1.1.1.1 -Type NS   # expect kara/michael.ns.cloudflare.com
+```
+
+## 2. Cloudflare DNS records (owner action in the Cloudflare dashboard, or via the configured cloudflare-api MCP)
+
+In the Cloudflare dashboard → `mireli.online` → **DNS**:
+
+| Type | Name | Content | Proxy |
+| -------- | ---- | ------------------ | -------------------------- |
+| A | `@` | `13.53.183.149` | **DNS only (grey cloud)** |
+| CNAME | `www` | `mireli.online` | **DNS only (grey cloud)** |
+
+Use DNS-only (grey cloud) for the launch so Let's Encrypt HTTP-01 validation
+and origin health checks reach the VM directly. Cloudflare proxy (orange) can
+be enabled later as an optional edge layer after Let's Encrypt certificates
+and DNSSEC-safe operation are verified.
+
 Verify from a workstation:
 
 ```powershell
