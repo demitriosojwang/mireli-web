@@ -1,6 +1,13 @@
 # Mireli booking launch checklist
 
-**Status: not ready to accept customer bookings.** Current source checks passed
+**Status: not ready to accept customer bookings.**
+**6 November 2026 update:** public HTTPS at `https://mireli.online` is live
+through the hardened Cloudflare edge, the latest release `75cd809-nov06pwa`
+passes all readiness gates, and the PWA/sitemap work is verified live — but
+bookings stay closed: the production catalogue is empty, driver supply is
+unverified, and live payment/email credentials are unconfigured. Details in the
+"Domain, HTTPS, PWA and search-visibility verification (6 November 2026)"
+section below. Current source checks passed
 on 26 October 2026, but the AWS VM and public hostname were not reachable for a
 fresh runtime check. The last confirmed EC2 state (19 October, 22:53 EAT) was
 Running with 3/3 status checks and `Managed: false`; SSM Connect was disabled
@@ -724,6 +731,14 @@ the Cloudflare edge) unless marked `[ ]`.
   cloudflare`):** `/api/health` 200 `{"status":"ok"}`; `/robots.txt` 200 with
   `/admin`, `/api`, `/bookings`, `/credits`, `/login` disallowed;
   `https://www.mireli.online/*` 301 → apex.
+- [x] **Release `75cd809-nov06pwa` deployed and healthy (6 Nov):** built
+  natively on the VM from a `git archive` of `main`, pushed to ECR, swapped in
+  via the readiness gate with rollback protection; all 7 gate checks pass
+  (health, routes, trains, stages, driver-supply, sitemap, pay/options).
+  Build-resource notes: the VM instance role's S3 grant is scoped to
+  `mireli-sgr-pilot/database/*`, so release source zips must be staged under
+  `database/build/` (not `build/`); a 2 GB build swap was created and removed
+  again after the build; staged zips deleted from S3 after the release.
 - [x] **Sitemap ready for Google Search Console:** `/sitemap.xml` is served at
   `https://mireli.online/sitemap.xml` and lists exactly the public homepage
   origin `https://mireli.online` with `lastModified`. Booking/admin/account
@@ -748,15 +763,22 @@ the Cloudflare edge) unless marked `[ ]`.
     fallback. No booking/auth data is served from cache.
   - `public/sw-register.js` registers the worker only on HTTPS and from the
     layout; the CSP allows same-origin scripts, so no nonce change was needed.
+- [x] **PWA artifacts verified live after the release (6 Nov, via the
+  Cloudflare edge):** homepage HTML includes `<link rel="manifest"
+  href="/manifest.webmanifest">`, the apple-touch-icon link, and the
+  `/sw-register.js` loader; `/manifest.webmanifest` returns
+  `application/manifest+json` with `standalone`, both 192/512 icons and both
+  maskable variants; all five PNG icons, `/sw.js`, and `/sw-register.js`
+  return 200.
 - [x] **Driver handoff refreshed for the cutover:** see
   [DRIVER-APP-HANDOFF-2026-11-06.md](DRIVER-APP-HANDOFF-2026-11-06.md)
   (supersedes the 1 November document). It includes the live-verified strict
   status response and the now-passing cutover checks.
-- [ ] **PWA not yet verified on-viewport:** confirm on a real Android device or
-  Chrome DevTools installability check after deploy: no console installability
-  warnings, the home screen shortcut opens standalone, the offline shell
-  fallback loads, and re-install after an update re-registers correctly. This
-  is a gate check, not guaranteed until a device test.
+- [ ] **PWA installation not yet verified on a real device / DevTools:** open
+  `https://mireli.online` in mobile Chrome (or Chrome DevTools installability
+  check): no console installability warnings, "Install app" from the menu,
+  standalone launch, and the offline shell fallback. This is the remaining PWA
+  gate; it needs a device or browser session the agent does not have.
 - [ ] Android-side (Mireli Driver) production builds are still gated on the
   flag-opens listed in the handoff above — SMS/email credentials plus vetted
   driver supply; web PWA does not change those gates.

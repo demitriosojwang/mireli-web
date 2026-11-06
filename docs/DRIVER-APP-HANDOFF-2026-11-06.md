@@ -36,13 +36,14 @@ domain cutover it was waiting on is now complete.
   owner configures `AT_USERNAME`, `AT_API_KEY`, `BREVO_API_KEY`/
   `BREVO_SENDER_EMAIL`, and vetted drivers exist. Do not build against the
   emulator flag set or assume any open default.
-- Web release on VM: image `841e7313f73833128ecabe647ba0feaf5fc28996-nov01main`,
-  plus the 6 November source changes (PWA install manifest/icons/service worker
-  and a GSC-ready sitemap) deployed right after this re-release. Readiness gate
-  checks all pass (health, routes, trains, stages, driver-supply, sitemap,
-  pay/options fail-closed). Passenger bookings remain **closed** until the
-  end-to-end launch gates in [PRODUCTION-READINESS.md](PRODUCTION-READINESS.md)
-  pass.
+- Web release on VM: `75cd809-nov06pwa` (deployed 6 November from a `git archive`
+  of `main`, built natively on the VM, pushed to ECR, and swapped in through the
+  readiness gate with automatic rollback). The gate's 7 checks — health, routes,
+  trains, stages, driver-supply, sitemap, pay/options fail-closed — all pass, and
+  the web PWA additions (install manifest/icons/service worker, GSC-ready
+  sitemap) are verified live at `https://mireli.online`. Passenger bookings
+  remain **closed** until the end-to-end launch gates in
+  [PRODUCTION-READINESS.md](PRODUCTION-READINESS.md) pass.
 
 ## Exact setup instructions (unchanged from 1 November, validated by the cut-over)
 
