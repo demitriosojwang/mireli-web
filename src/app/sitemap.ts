@@ -9,7 +9,8 @@ const SITE_ORIGIN = process.env.MIRELI_PUBLIC_ORIGIN?.replace(/\/$/, "") || "htt
 
 export default function sitemap(): MetadataRoute.Sitemap {
   // Customer, booking and operations screens are private workflows. Only the
-  // public homepage is currently intended for search indexing.
+  // public homepage is currently intended for search indexing. Keep this list
+  // aligned with robots.ts: Disallow'd pages must never appear here.
   if (isLocalDemoEnabled()) return [];
-  return [{ url: SITE_ORIGIN, changeFrequency: "weekly", priority: 1 }];
+  return [{ url: SITE_ORIGIN, lastModified: new Date(), changeFrequency: "weekly", priority: 1 }];
 }

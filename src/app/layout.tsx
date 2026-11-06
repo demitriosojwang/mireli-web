@@ -12,6 +12,7 @@ export const metadata: Metadata = {
   keywords: ["Mi-Reli", "Mombasa", "SGR", "Madaraka Express", "Mombasa Terminus", "shared rides", "private cab"],
   icons: {
     icon: "/mireli-logo.jpeg",
+    apple: "/icons/apple-touch-icon.png",
   },
 };
 
@@ -34,6 +35,7 @@ export default async function RootLayout({
         {isLocalDemoEnabled() && <div role="status" className="bg-amber-100 px-4 py-2 text-center text-xs font-medium text-amber-950">LOCAL PREVIEW · Sample bookings and simulated payments · No transport service is booked</div>}
         {children}
         <Toaster />
+        <script src="/sw-register.js" defer />
       </body>
     </html>
   );

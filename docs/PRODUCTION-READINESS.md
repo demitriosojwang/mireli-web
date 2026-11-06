@@ -694,6 +694,72 @@ AWS EC2 is the intended web/API host; the local Docker stack is for testing only
   must replace them in the Cloudflare dashboard with
   `A @ → 13.53.183.149` and `CNAME www → mireli.online`, both DNS-only, then
   Caddy will issue the Let's Encrypt certificate automatically.
+  *(Resolved 6 November — see below.)*
+
+## Domain, HTTPS, PWA and search-visibility verification (6 November 2026)
+
+The 1 November "not ready" status above reflects stale runtime probes; the
+following checks are fresh and all pass from outside AWS (this workstation and
+the Cloudflare edge) unless marked `[ ]`.
+
+- [x] **Cloudflare records corrected:** owner replaced the parked records with
+  `A @ → 13.53.183.149` and `CNAME www → mireli.online` (ids
+  `5364584d1f59f825cfb26268acdb34f8` apex A,
+  `bb4474a1105b18865b45e2c20cbba248` www CNAME).
+- [x] **Let's Encrypt issued:** certificates for `mireli.online` and
+  `www.mireli.online` obtained through Caddy ACME (HTTP-01 during a DNS-only
+  window); stored under Caddy's standard certificate directory on the VM.
+  Caddyfile backup: `/etc/caddy/Caddyfile.bak-pre-mireli`.
+- [x] **Edge hardened in this order:** both records verified DNS-only while
+  certificates issued, then flipped to **proxied** with SSL mode **Full
+  (strict)** and **Always Use HTTPS on**. `http://mireli.online` 308-redirects
+  to HTTPS at the edge; `www` 301s to the apex at the origin.
+- [x] **Origin configuration durable:** `PUBLIC_HOSTNAME='mireli.online'` is set
+  in `/etc/mireli/bootstrap.env`. Note: `mireli-start` regenerates
+  `/etc/mireli/runtime.env` (including `MIRELI_PUBLIC_ORIGIN`) from
+  `bootstrap.env` on every start, so permanent origin changes must go in
+  `bootstrap.env` (editing `runtime.env` alone was overwritten on restart).
+  Container env verified: `MIRELI_PUBLIC_ORIGIN=https://mireli.online`.
+- [x] **Public endpoints live (through the Cloudflare edge, `Server:
+  cloudflare`):** `/api/health` 200 `{"status":"ok"}`; `/robots.txt` 200 with
+  `/admin`, `/api`, `/bookings`, `/credits`, `/login` disallowed;
+  `https://www.mireli.online/*` 301 → apex.
+- [x] **Sitemap ready for Google Search Console:** `/sitemap.xml` is served at
+  `https://mireli.online/sitemap.xml` and lists exactly the public homepage
+  origin `https://mireli.online` with `lastModified`. Booking/admin/account
+  pages are intentionally excluded (they are private workflows and robots
+  disallows them). A demo/empty sitemap is still returned when local demo
+  mode is enabled, so never submit a local or edge-cached demo variant. The
+  owner can now submit the production URL in Google Search Console; page
+  experience (title/description/canonical) comes from the existing metadata.
+- [x] **PWA install support for Android (Chrome installability criteria):**
+  - `app/manifest.ts` emits `manifest.webmanifest` served at the app root with
+    `start_url: "/"`, `scope: "/"`, `display: "standalone"`,
+    `theme_color: "#26304a"` (matches the viewport `themeColor`),
+    `background_color: "#1d2438"`, and maskable icons.
+  - Icons generated from `public/mireli-logo.svg` with `sharp`: `icon-192.png`,
+    `icon-512.png` (any purpose), `icon-maskable-192.png`,
+    `icon-maskable-512.png` (maskable, full-bleed background so Android's
+    crop-safe zone loses no content), and `apple-touch-icon.png` for iOS
+    bookmark icons. Files in `public/icons/`.
+  - `public/sw.js` is a deliberately minimal service worker: it never touches
+    `/api/`, only same-origin GETs are cached; build assets use cache-first;
+    navigations are network-first with the cached home shell as the offline
+    fallback. No booking/auth data is served from cache.
+  - `public/sw-register.js` registers the worker only on HTTPS and from the
+    layout; the CSP allows same-origin scripts, so no nonce change was needed.
+- [x] **Driver handoff refreshed for the cutover:** see
+  [DRIVER-APP-HANDOFF-2026-11-06.md](DRIVER-APP-HANDOFF-2026-11-06.md)
+  (supersedes the 1 November document). It includes the live-verified strict
+  status response and the now-passing cutover checks.
+- [ ] **PWA not yet verified on-viewport:** confirm on a real Android device or
+  Chrome DevTools installability check after deploy: no console installability
+  warnings, the home screen shortcut opens standalone, the offline shell
+  fallback loads, and re-install after an update re-registers correctly. This
+  is a gate check, not guaranteed until a device test.
+- [ ] Android-side (Mireli Driver) production builds are still gated on the
+  flag-opens listed in the handoff above — SMS/email credentials plus vetted
+  driver supply; web PWA does not change those gates.
 
 ## Must complete before opening bookings
 
@@ -834,9 +900,10 @@ AWS EC2 is the intended web/API host; the local Docker stack is for testing only
   before opening driver registration.
 - [x] Add `/sitemap.xml` for the public booking homepage and `robots.txt` that
   blocks indexing of admin, API, account, and local-demo routes.
-- [ ] After DNS/TLS cutover, verify `/sitemap.xml`, `/robots.txt`, canonical
-  metadata, and the favicon from the public hostname; do not submit a sitemap
-  while the production hostname points elsewhere.
+- [x] After DNS/TLS cutover, `/sitemap.xml`, `/robots.txt`, canonical metadata,
+  and the favicon were verified from the public hostname `https://mireli.online`
+  on 6 November (see the 6 November section above). The production sitemap is
+  now safe to submit in Google Search Console.
 - [ ] Configure the Brevo sender and runtime secret on the AWS VM, authenticate
   the owned mail domain with SPF/DKIM/DMARC, and verify a paid test booking
   reaches a real passenger inbox. Confirm a duplicate callback does not resend

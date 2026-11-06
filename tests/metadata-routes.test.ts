@@ -37,7 +37,12 @@ describe("public crawler metadata", () => {
     ]);
 
     expect(sitemap()).toEqual([
-      { url: "https://mirelisgr.duckdns.org", changeFrequency: "weekly", priority: 1 },
+      {
+        url: "https://mirelisgr.duckdns.org",
+        lastModified: expect.any(Date),
+        changeFrequency: "weekly",
+        priority: 1,
+      },
     ]);
     expect(robots()).toEqual({
       rules: {

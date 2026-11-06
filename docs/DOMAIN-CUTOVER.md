@@ -1,9 +1,9 @@
 # Mireli.online domain cutover
 
-Updated 1 November 2026. The production origin changes from the legacy
-`mirelisgr.duckdns.org` to the owner-registered `mireli.online` (registered at
-Namecheap, DNS hosted in Cloudflare). The legacy DuckDNS hostname is retired;
-its token was previously exposed and must not be reused.
+Updated 6 November 2026 — **cutover complete.** The production origin is live at
+`https://mireli.online`; the legacy `mirelisgr.duckdns.org` is retired (its
+token was previously exposed and must not be reused). Sections 1–3 were
+executed on 4–6 November as documented below; the runbook is kept for reference.
 
 - VM (unchanged): `i-097df027e02b0708f`, Elastic IP `13.53.183.149`, `eu-north-1`.
 - Public target: `https://mireli.online` with `https://www.mireli.online`
@@ -114,3 +114,30 @@ never print `bootstrap.env`/`runtime.env` values):
 - Update any parked bookmarks/copy that still references the Vercel URL or
   DuckDNS hostname; Vercel is retired as a hosting target — AWS EC2 is the
   only runtime (see `docs/AWS-MIGRATION.md`).
+
+## 5. Completion record (6 November 2026)
+
+All steps above were executed and verified:
+
+| Step | State |
+| --- | --- |
+| Namecheap → Cloudflare NS delegation | Done 4 Nov (`kara`/`michael.ns.cloudflare.com`), zone *active* in Cloudflare. |
+| Cloudflare records | `A @ → 13.53.183.149`, `CNAME www → mireli.online` (record ids `5364584d1f59f825cfb26268acdb34f8`, `bb4474a1105b18865b45e2c20cbba248`). Registrar-parked MX/TXT (Namecheap eforward + SPF) remain — email forwarding only, harmless. |
+| Caddy host blocks | `mireli.online` (proxy → 127.0.0.1:3000 + security headers) and `www` (301 → apex) added 6 Nov; DuckDNS block deleted after public checks passed. Backup: `/etc/caddy/Caddyfile.bak-pre-mireli`. |
+| Certificates | Let's Encrypt issued 6 Nov for both hostnames (via a DNS-only window, as planned in step 2). |
+| DuckDNS | Retired: block removed from Caddyfile; hostname never re-pointed. |
+| Origin | `PUBLIC_HOSTNAME='mireli.online'` set in `/etc/mireli/bootstrap.env` 6 Nov. `mireli-start` regenerates `runtime.env` from it on every start, so `MIRELI_PUBLIC_ORIGIN=https://mireli.online` survives restarts. |
+| Edge hardening | Both records **proxied**, SSL mode **Full (strict)**, **Always Use HTTPS on** — final state. |
+| Public verification | `/api/health` 200 `{"status":"ok"}` through the edge (`Server: cloudflare`); `/robots.txt` and `/sitemap.xml` 200; `www` 301 → apex; `http` 308 → https. |
+| Search Console | `https://mireli.online/sitemap.xml` verified; owner may now submit (step 4). |
+
+Operational notes for future changes:
+
+- Certificate renewals: Caddy re-issues automatically. If the records are ever
+  moved off the proxy again, renewals keep working via HTTP-01 against the VM
+  as long as `A @` still resolves to `13.53.183.149`.
+- Any new origin change must go through `/etc/mireli/bootstrap.env`
+  (`PUBLIC_HOSTNAME`), not just `runtime.env`, or the next restart reverts it.
+- The Cloudflare edge serves the TLS visitors see; the origin certificate is
+  validated strictly on every request (Full strict), so an expired origin cert
+  will not silently downgrade security — it will surface as 526 errors.
