@@ -615,7 +615,7 @@ function BookingSheetContent({
                   Fill in your details, then login or sign up to complete this booking.
                 </p>
               ) : (
-                <Button className="h-11 w-full" disabled={busy || !draft.stageId || !detailsOk} onClick={confirm}>
+                <Button variant="accent" className="h-11 w-full" disabled={busy || !draft.stageId || !detailsOk} onClick={confirm}>
                   {busy ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : isCharter ? (

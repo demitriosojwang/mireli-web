@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { motion } from "framer-motion";
 import Link from "next/link";
 import { SiteFooter, SiteHeader, SiteNav } from "@/components/site-chrome";
 import { PaySheet } from "@/components/pay-sheet";
@@ -254,15 +255,22 @@ export default function BookingsPage() {
           <section>
             <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Upcoming</h2>
             <div className="grid gap-2">
-              {upcoming.map((b) => (
-                <BookingCard
+              {upcoming.map((b, i) => (
+                <motion.div
                   key={b.id}
-                  b={b}
-                  onPay={() => setPayFor(b)}
-                  onCancel={() => openCancel(b)}
-                  onCheckIn={() => checkIn(b)}
-                  checkingIn={checkingIn === b.id}
-                />
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.97 }}
+                  transition={{ duration: 0.22, delay: i * 0.03, ease: "easeOut" }}
+                >
+                  <BookingCard
+                    b={b}
+                    onPay={() => setPayFor(b)}
+                    onCancel={() => openCancel(b)}
+                    onCheckIn={() => checkIn(b)}
+                    checkingIn={checkingIn === b.id}
+                  />
+                </motion.div>
               ))}
             </div>
           </section>
@@ -272,8 +280,15 @@ export default function BookingsPage() {
           <section className="mt-6">
             <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">History</h2>
             <div className="grid gap-2">
-              {past.map((b) => (
-                <PastCard key={b.id} b={b} />
+              {past.map((b, i) => (
+                <motion.div
+                  key={b.id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.22, delay: i * 0.03, ease: "easeOut" }}
+                >
+                  <PastCard b={b} />
+                </motion.div>
               ))}
             </div>
           </section>
@@ -420,7 +435,7 @@ function BookingCard({
               </p>
             )}
           </div>
-          <div className="text-right text-sm">
+          <div className="text-right text-sm [font-variant-numeric:tabular-nums]">
             <p className="font-semibold">{ksh(b.fareAmount)}</p>
             {b.creditApplied > 0 && <p className="text-xs text-emerald-700">credit −{ksh(b.creditApplied)}</p>}
             {b.cashDue > 0 && b.status === "awaiting_payment" && (
@@ -445,7 +460,7 @@ function BookingCard({
 
         <div className="flex flex-wrap gap-2">
           {b.canPay && (
-            <Button size="sm" className="h-8" onClick={onPay}>
+            <Button variant="accent" size="sm" className="h-8" onClick={onPay}>
               <CreditCard className="h-3.5 w-3.5" /> Pay {ksh(b.cashDue)} now
             </Button>
           )}
@@ -492,7 +507,7 @@ function PastCard({ b }: { b: BookingRow }) {
               </p>
             )}
           </div>
-          <div className="text-right text-sm">
+          <div className="text-right text-sm [font-variant-numeric:tabular-nums]">
             <p className="font-semibold">{ksh(b.fareAmount)}</p>
             {b.creditApplied > 0 && <p className="text-xs text-emerald-700">credit −{ksh(b.creditApplied)}</p>}
           </div>

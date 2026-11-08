@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
 import Link from "next/link";
 import { SiteFooter, SiteHeader, SiteNav } from "@/components/site-chrome";
 import { Button } from "@/components/ui/button";
@@ -103,9 +104,15 @@ export default function CreditsPage() {
             </Card>
           )}
           <div className="grid gap-2">
-            {(credits || []).map((c) => (
-              <Card key={c.id}>
-                <CardContent className="flex items-start justify-between gap-3 p-3">
+            {(credits || []).map((c, i) => (
+              <motion.div
+                key={c.id}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.22, delay: i * 0.03, ease: "easeOut" }}
+              >
+                <Card>
+                  <CardContent className="flex items-start justify-between gap-3 p-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span
@@ -118,7 +125,7 @@ export default function CreditsPage() {
                         {c.status}
                       </span>
                       {c.status === "active" && (
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-xs text-muted-foreground [font-variant-numeric:tabular-nums]">
                           expires in {daysUntil(c.expiresAt)} days ({fmtDate(c.expiresAt)})
                         </span>
                       )}
@@ -126,7 +133,7 @@ export default function CreditsPage() {
                     <p className="mt-1 text-sm">{c.note || "Travel credit"}</p>
                     <p className="text-xs text-muted-foreground">Issued {fmtDate(c.issuedAt)}</p>
                     {c.amount < c.initialAmount && c.status === "active" && (
-                      <p className="mt-1 text-xs text-emerald-800">
+                      <p className="mt-1 text-xs text-emerald-800 [font-variant-numeric:tabular-nums]">
                         {ksh(c.initialAmount - c.amount)} already used · {ksh(c.amount)} remaining
                       </p>
                     )}
@@ -140,7 +147,8 @@ export default function CreditsPage() {
                     {ksh(c.amount)}
                   </p>
                 </CardContent>
-              </Card>
+            </Card>
+              </motion.div>
             ))}
           </div>
         </section>

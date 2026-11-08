@@ -164,7 +164,7 @@ export function DatePicker({ value, onChange }: { value: string; onChange: (v: s
 
   const pill = (active: boolean) =>
     cn(
-      "flex-1 rounded-xl border px-3 py-2 text-sm font-medium transition-all active:scale-[0.97]",
+      "flex-1 rounded-xl border px-3 py-2 text-sm font-medium transition-all active:scale-[0.97] active:duration-75",
       active ? "border-primary bg-primary shadow-sm text-primary-foreground" : "border-border bg-card hover:bg-accent hover:text-accent-foreground",
     );
 
@@ -219,7 +219,7 @@ export function SeatStepper({ value, min = 1, max = 14, onChange }: {
           disabled={!canDec}
           className={cn(
             "flex h-9 w-9 items-center justify-center rounded-full border transition-all",
-            canDec ? "border-border bg-background hover:bg-accent active:scale-[0.97] hover:text-accent-foreground" : "cursor-not-allowed border-muted bg-muted opacity-40",
+            canDec ? "border-border bg-background hover:bg-accent active:scale-[0.97] active:duration-75 hover:text-accent-foreground" : "cursor-not-allowed border-muted bg-muted opacity-40",
           )}
           aria-label="Decrease"
         >
@@ -234,7 +234,7 @@ export function SeatStepper({ value, min = 1, max = 14, onChange }: {
           disabled={!canInc}
           className={cn(
             "flex h-9 w-9 items-center justify-center rounded-full border transition-all",
-            canInc ? "border-primary bg-primary text-primary-foreground hover:bg-primary/90 active:scale-[0.97]" : "cursor-not-allowed border-muted bg-muted opacity-40",
+            canInc ? "border-primary bg-primary text-primary-foreground hover:bg-primary/90 active:scale-[0.97] active:duration-75" : "cursor-not-allowed border-muted bg-muted opacity-40",
           )}
           aria-label="Increase"
         >

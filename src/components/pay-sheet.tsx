@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -259,7 +260,7 @@ function PaySheetContent({ open, onClose, booking, onPaid }: PaySheetProps) {
                 <span className="pointer-events-none absolute inset-0 animate-ping rounded-full bg-accent/20" />
               </span>
               {error && <p className="text-sm text-destructive">{error}</p>}
-              <Button className="h-11 w-full" onClick={verify}>
+              <Button variant="accent" className="h-11 w-full" onClick={verify}>
                 {paymentPending ? "Check payment status" : "I've paid — verify"}
               </Button>
               {!paymentPending && (
@@ -292,7 +293,7 @@ function PaySheetContent({ open, onClose, booking, onPaid }: PaySheetProps) {
                       <p className="font-mono text-base font-semibold">{paybill}</p>
                     </div>
                     <Button variant="ghost" size="sm" className="h-8 gap-1" onClick={() => copy("paybill", paybill || "")}>
-                      {copied === "paybill" ? <Check className="h-3.5 w-3.5 text-primary" /> : <Copy className="h-3.5 w-3.5" />}
+                      <CopyFeedback copied={copied === "paybill"} />
                       {copied === "paybill" ? "Copied" : "Copy"}
                     </Button>
                   </div>
@@ -303,7 +304,7 @@ function PaySheetContent({ open, onClose, booking, onPaid }: PaySheetProps) {
                       <p className="font-mono text-base font-semibold">{booking.code}</p>
                     </div>
                     <Button variant="ghost" size="sm" className="h-8 gap-1" onClick={() => copy("account", booking.code)}>
-                      {copied === "account" ? <Check className="h-3.5 w-3.5 text-primary" /> : <Copy className="h-3.5 w-3.5" />}
+                      <CopyFeedback copied={copied === "account"} />
                       {copied === "account" ? "Copied" : "Copy"}
                     </Button>
                   </div>
@@ -320,7 +321,7 @@ function PaySheetContent({ open, onClose, booking, onPaid }: PaySheetProps) {
                 <li>Enter the exact amount and your PIN.</li>
               </ol>
               {error && <p className="text-sm text-destructive">{error}</p>}
-              <Button className="h-11 w-full" onClick={verify}>
+              <Button variant="accent" className="h-11 w-full" onClick={verify}>
                 I&apos;ve paid — verify
               </Button>
               <p className="text-center text-[10px] text-muted-foreground">
@@ -403,5 +404,39 @@ function PaySheetContent({ open, onClose, booking, onPaid }: PaySheetProps) {
         )}
       </SheetContent>
     </Sheet>
+  );
+}
+
+/**
+ * Copy→Check icon swap with a short blur crossfade (icon crossfade + no
+ * bounce). 150 ms, ease-in-out, symmetric so it reads as a swap in place.
+ */
+function CopyFeedback({ copied }: { copied: boolean }) {
+  return (
+    <AnimatePresence mode="popLayout" initial={false}>
+      {copied ? (
+        <motion.span
+          key="copied"
+          className="inline-flex"
+          initial={{ opacity: 0, filter: "blur(4px)", scale: 0.9 }}
+          animate={{ opacity: 1, filter: "blur(0px)", scale: 1 }}
+          exit={{ opacity: 0, filter: "blur(4px)", scale: 0.9 }}
+          transition={{ duration: 0.15, ease: "easeInOut" }}
+        >
+          <Check className="h-3.5 w-3.5 text-primary" />
+        </motion.span>
+      ) : (
+        <motion.span
+          key="idle"
+          className="inline-flex"
+          initial={{ opacity: 0, filter: "blur(4px)", scale: 0.9 }}
+          animate={{ opacity: 1, filter: "blur(0px)", scale: 1 }}
+          exit={{ opacity: 0, filter: "blur(4px)", scale: 0.9 }}
+          transition={{ duration: 0.15, ease: "easeInOut" }}
+        >
+          <Copy className="h-3.5 w-3.5" />
+        </motion.span>
+      )}
+    </AnimatePresence>
   );
 }

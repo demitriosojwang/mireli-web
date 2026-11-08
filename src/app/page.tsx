@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useAnimationControls } from "framer-motion";
 import { SiteFooter, SiteHeader, SiteNav } from "@/components/site-chrome";
 import { BookingSheet, BookableTrip, BookingDraft } from "@/components/booking-sheet";
 import { PaySheet } from "@/components/pay-sheet";
@@ -519,25 +519,13 @@ export default function Home() {
         <Tabs value={direction} onValueChange={(v) => changeDirection(v as "FROM_TERMINUS" | "TO_TERMINUS")}>
           <TabsList className="relative grid w-full grid-cols-2">
             <TabsTrigger value="FROM_TERMINUS" className="relative flex items-center gap-1.5 data-[state=active]:bg-transparent! data-[state=active]:shadow-none">
-              {direction === "FROM_TERMINUS" && (
-                <motion.span
-                  layoutId="direction-pill"
-                  className="absolute inset-0 rounded-md bg-background shadow-sm"
-                  transition={{ layout: { duration: 0.24, ease: "easeInOut" } }}
-                />
-              )}
+              {direction === "FROM_TERMINUS" && <DirectionPill />}
               <span className="relative z-10 flex items-center gap-1.5">
                 <Anchor className="h-3.5 w-3.5" /> From Terminus
               </span>
             </TabsTrigger>
             <TabsTrigger value="TO_TERMINUS" className="relative flex items-center gap-1.5 data-[state=active]:bg-transparent! data-[state=active]:shadow-none">
-              {direction === "TO_TERMINUS" && (
-                <motion.span
-                  layoutId="direction-pill"
-                  className="absolute inset-0 rounded-md bg-background shadow-sm"
-                  transition={{ layout: { duration: 0.24, ease: "easeInOut" } }}
-                />
-              )}
+              {direction === "TO_TERMINUS" && <DirectionPill />}
               <span className="relative z-10 flex items-center gap-1.5">
                 <Navigation className="h-3.5 w-3.5" /> To Terminus
               </span>
@@ -861,7 +849,7 @@ export default function Home() {
                   type="button"
                   aria-pressed={!charter}
                   onClick={() => { setCharter(false); setHomePickup(false); }}
-                  className={cn("rounded-xl border bg-card p-3 text-left transition-all active:scale-[0.97]", !charter ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
+                  className={cn("rounded-xl border bg-card p-3 text-left transition-all active:scale-[0.97] active:duration-75", !charter ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
                 >
                   <span className="flex items-center gap-2">
                     <Users className="h-4 w-4 shrink-0 text-primary" />
@@ -875,7 +863,7 @@ export default function Home() {
                   type="button"
                   aria-pressed={charter}
                   onClick={() => setCharter(true)}
-                  className={cn("rounded-xl border bg-card p-3 text-left transition-all active:scale-[0.97]", charter ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
+                  className={cn("rounded-xl border bg-card p-3 text-left transition-all active:scale-[0.97] active:duration-75", charter ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
                 >
                   <span className="flex items-center gap-2">
                     <Crown className="h-4 w-4 shrink-0 text-violet-600" />
@@ -896,7 +884,7 @@ export default function Home() {
                     type="button"
                     aria-pressed={!homePickup}
                     onClick={() => setHomePickup(false)}
-                    className={cn("min-h-[60px] rounded-xl border bg-card px-2.5 py-2 text-left transition-all active:scale-[0.97]", !homePickup ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
+                    className={cn("min-h-[60px] rounded-xl border bg-card px-2.5 py-2 text-left transition-all active:scale-[0.97] active:duration-75", !homePickup ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
                   >
                     <span className="flex items-center gap-1.5 text-xs font-semibold">
                       <MapPin className="h-3.5 w-3.5 shrink-0 text-primary" /> At the SGR stage
@@ -910,7 +898,7 @@ export default function Home() {
                     aria-pressed={homePickup}
                     disabled={!selectedPoint || !charter}
                     onClick={() => setHomePickup(true)}
-                    className={cn("min-h-[60px] rounded-xl border bg-card px-2.5 py-2 text-left transition-all active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-55 disabled:active:scale-100", homePickup ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
+                    className={cn("min-h-[60px] rounded-xl border bg-card px-2.5 py-2 text-left transition-all active:scale-[0.97] active:duration-75 disabled:cursor-not-allowed disabled:opacity-55 disabled:active:scale-100", homePickup ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
                   >
                     <span className="flex items-center gap-1.5 text-xs font-semibold">
                       <HomeIcon className="h-3.5 w-3.5 shrink-0 text-primary" /> At my address
@@ -1248,5 +1236,28 @@ function CabCard({
         </Button>
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * The moving knob behind the active direction tab. Shares one layoutId so the
+ * pill glides between triggers; while it moves it stretches 12% wide and
+ * settles back (no bounce, ease-in-out, same duration as the layout move).
+ */
+function DirectionPill() {
+  const stretch = useAnimationControls();
+  return (
+    <motion.span
+      layoutId="direction-pill"
+      className="absolute inset-0 rounded-md bg-background shadow-sm"
+      transition={{ layout: { duration: 0.24, ease: "easeInOut" } }}
+      animate={stretch}
+      onLayoutAnimationStart={() => {
+        void stretch.start({
+          scaleX: [1, 1.12, 1],
+          transition: { duration: 0.24, ease: "easeInOut" },
+        });
+      }}
+    />
   );
 }

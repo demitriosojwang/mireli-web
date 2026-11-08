@@ -100,7 +100,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.4 }}
+          transition={{ duration: 0.4, ease: "easeOut" }}
         >
           <LogoTile size="lg" />
         </motion.div>
@@ -202,7 +202,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
                 type="button"
                 onClick={handleSendOtp}
                 disabled={busy || resendSeconds > 0}
-                className="w-full text-center text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full text-center text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-60 [font-variant-numeric:tabular-nums]"
               >
                 {resendSeconds > 0 ? `Resend code in ${resendSeconds}s` : "Resend code"}
               </button>
