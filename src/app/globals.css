@@ -62,7 +62,7 @@
   --secondary: oklch(0.94 0.018 75);
   --secondary-foreground: oklch(0.28 0.07 258);
   --muted: oklch(0.95 0.015 75);
-  --muted-foreground: oklch(0.48 0.025 258);
+  --muted-foreground: oklch(0.44 0.028 258);
   /* Sunset orange — vibrant but not neon */
   --accent: oklch(0.67 0.19 42);
   --accent-foreground: oklch(0.99 0.005 75);
@@ -181,6 +181,16 @@
   }
   .mireli-live-dot {
     animation: mireli-pulse 2s ease-in-out infinite;
+  }
+
+  /* One-shot confirm pulse: used exactly once, on success states only. */
+  @keyframes mireli-confirm {
+    0% { transform: scale(1); }
+    35% { transform: scale(1.02); }
+    100% { transform: scale(1); }
+  }
+  .mireli-confirm-pulse {
+    animation: mireli-confirm 0.45s cubic-bezier(0.33, 1, 0.68, 1) 1;
   }
 
   /* Splash screen animations */

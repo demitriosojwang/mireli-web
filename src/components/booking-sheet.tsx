@@ -340,7 +340,7 @@ function BookingSheetContent({
                     : `Karibu ${created.passengerName?.split(" ")[0] || ""} — fully covered by your travel credit, your seat is confirmed.`}
                 </p>
               </div>
-              <div className="rounded-lg border bg-muted/40 p-3 text-sm">
+              <div className="rounded-lg border bg-muted/40 p-3 text-sm [font-variant-numeric:tabular-nums]">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Total fare</span>
                   <span className="font-medium">{ksh(created.fareAmount)}</span>

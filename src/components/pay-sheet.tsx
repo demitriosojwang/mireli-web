@@ -341,7 +341,7 @@ function PaySheetContent({ open, onClose, booking, onPaid }: PaySheetProps) {
           <>
             <SheetHeader>
               <SheetTitle className="flex items-center gap-2 text-primary">
-                <ShieldCheck className="h-5 w-5" /> Payment received
+                <span className="mireli-confirm-pulse inline-flex"><ShieldCheck className="h-5 w-5" /></span> Payment received
               </SheetTitle>
               <SheetDescription id="pay-desc">
                 Your seat is confirmed. Mireli settles the driver after the trip; you do not pay
