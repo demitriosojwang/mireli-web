@@ -23,7 +23,7 @@ import { api, useMe } from "@/lib/client";
 import { getBookingCatalogueView, getCabAvailabilityCountLabel, hasPublishedCustomerPoints, shouldLoadTrainTimetable, type CatalogueStatus } from "@/lib/booking-catalogue";
 import { fmtTime, ksh } from "@/lib/format";
 import { calculateBookingFeeAmount, calculateSharedFare, DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
-import { addNairobiDays, nairobiWeekday } from "@/lib/nairobi-time";
+import { addNairobiDays, nairobiNowMinutes, nairobiWeekday } from "@/lib/nairobi-time";
 import { calculateCharterFare } from "@/lib/charter-pricing";
 import { getBookingPaymentPreflight } from "@/lib/booking-payment-preflight";
 import { MAX_STAGE_SEARCH_LENGTH, MIN_STAGE_SEARCH_LENGTH, isStageSearchReady, shouldSearchStagePoints } from "@/lib/stage-search";
@@ -53,6 +53,7 @@ import {
   Ticket as TicketIcon,
   Train as TrainIcon,
   Users,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -120,6 +121,9 @@ export default function Home() {
 
   const [direction, setDirection] = useState<"FROM_TERMINUS" | "TO_TERMINUS">("FROM_TERMINUS");
   const [date, setDate] = useState(() => todayStr());
+  // Pickup mode: "now" pins the date to today and auto-picks the next train
+  // still catchable today; "later" is the classic schedule flow. Uber-style.
+  const [pickupMode, setPickupMode] = useState<"now" | "later">("later");
   const [pointCount, setPointCount] = useState(0);
   const [bookingFeeAmount, setBookingFeeAmount] = useState(DEFAULT_BOOKING_FEE_AMOUNT);
   const [routesStatus, setRoutesStatus] = useState<CatalogueStatus>("loading");
@@ -436,6 +440,31 @@ export default function Home() {
   const selectedTrain = trainKey ? trainOptions.find((option) => option.key === trainKey) ?? null : null;
   const journeyStepDone = Boolean(selectedPoint && journeyCollapsed);
 
+  // "Pick up now": the next train at MTM today whose time has not passed yet.
+  // TO_TERMINUS passengers must board before departure (30-minute buffer);
+  // FROM_TERMINUS passengers just need the arrival to still be ahead.
+  const nextTrainKey = useMemo(() => {
+    if (date !== todayStr()) return null;
+    const nowMin = nairobiNowMinutes();
+    const buffer = direction === "TO_TERMINUS" ? 30 : 0;
+    const upcoming = trainOptions.filter((t) => !t.gone && (() => {
+      const [h, m] = t.time.split(":").map(Number);
+      return h * 60 + m >= nowMin + buffer;
+    })());
+    return upcoming.length ? upcoming[0].key : null;
+  }, [trainOptions, date, direction]);
+
+  // Auto-select the next train when the passenger taps "Pick up now", and
+  // keep the date pinned to today while the mode is active.
+  useEffect(() => {
+    if (pickupMode !== "now") return;
+    if (date !== todayStr()) setDate(todayStr());
+    if (nextTrainKey && trainKey !== nextTrainKey) {
+      setTrainKey(nextTrainKey);
+      if (selectedPoint) setJourneyCollapsed(true);
+    }
+  }, [pickupMode, nextTrainKey, date, trainKey, selectedPoint]);
+
   const pointLabelCap = direction === "FROM_TERMINUS" ? "Drop-off" : "Pickup";
 
   // The search response is already bounded; group only the small matching set.
@@ -629,13 +658,59 @@ export default function Home() {
               </section>
             ) : (
             <div className="space-y-4" hidden={journeyStepDone}>
+            {/* Pickup mode: now vs. schedule later */}
+            <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Pickup timing">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={pickupMode === "now"}
+                onClick={() => { setPickupMode("now"); setBookingStartError(null); }}
+                className={cn(
+                  "flex items-center gap-2 rounded-2xl border px-3.5 py-3 text-left transition-all duration-200",
+                  pickupMode === "now"
+                    ? "mireli-pill-active"
+                    : "border-border bg-card hover:border-accent/30 hover:bg-accent/10 hover:shadow-sm",
+                )}
+              >
+                <Zap className={cn("h-4 w-4 shrink-0", pickupMode === "now" ? "opacity-90" : "text-muted-foreground")} />
+                <span>
+                  <span className="block text-sm font-semibold">Pick up now</span>
+                  <span className="block text-[10px] text-muted-foreground">Next train today</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={pickupMode === "later"}
+                onClick={() => { setPickupMode("later"); setBookingStartError(null); }}
+                className={cn(
+                  "flex items-center gap-2 rounded-2xl border px-3.5 py-3 text-left transition-all duration-200",
+                  pickupMode === "later"
+                    ? "mireli-pill-active"
+                    : "border-border bg-card hover:border-accent/30 hover:bg-accent/10 hover:shadow-sm",
+                )}
+              >
+                <CalendarDays className={cn("h-4 w-4 shrink-0", pickupMode === "later" ? "opacity-90" : "text-muted-foreground")} />
+                <span>
+                  <span className="block text-sm font-semibold">Schedule later</span>
+                  <span className="block text-[10px] text-muted-foreground">Pick a date &amp; train</span>
+                </span>
+              </button>
+            </div>
+
             {/* Date */}
             <div>
               <div className="mb-2 flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
                 <CalendarDays className="h-3.5 w-3.5" />
                 {direction === "FROM_TERMINUS" ? "Travelling on which date?" : "Catching the train on which date?"}
               </div>
-              <DatePicker value={date} onChange={(nextDate) => { setDate(nextDate); setTrainKey(null); setBookingStartError(null); }} />
+              {pickupMode === "now" ? (
+                <p className="rounded-lg border bg-accent/5 px-3 py-2 text-xs text-muted-foreground" role="status">
+                  Today &middot; {fmtDateShort(todayStr())} &mdash; we&rsquo;ll assign the next train still catchable.
+                </p>
+              ) : (
+                <DatePicker value={date} onChange={(nextDate) => { setDate(nextDate); setTrainKey(null); setBookingStartError(null); }} />
+              )}
             </div>
 
             {/* Train selector */}
@@ -644,6 +719,16 @@ export default function Home() {
                 <TrainIcon className="h-3.5 w-3.5" />
                 {direction === "FROM_TERMINUS" ? "Arriving on which train?" : "Catching which train?"}
               </div>
+              {pickupMode === "now" && nextTrainKey && (
+                <p className="mb-2 rounded-lg border bg-accent/5 px-3 py-2 text-xs text-muted-foreground" role="status">
+                  Auto-picked the next train at Mombasa Terminus &mdash; switch below if you prefer another.
+                </p>
+              )}
+              {pickupMode === "now" && !nextTrainKey && (
+                <p className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950" role="status">
+                  No more trains are catchable today. Switch to &ldquo;Schedule later&rdquo; to book for another day.
+                </p>
+              )}
               {timetableStatus === "loading" && <p className="text-xs text-muted-foreground">Loading train timesâ€¦</p>}
               {timetableStatus === "error" && (
                 <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs text-muted-foreground">
