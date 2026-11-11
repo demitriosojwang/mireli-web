@@ -1,4 +1,5 @@
 import {DriverError} from "./errors";
+import {mireliCodeBlock, mireliEmailHeader, mireliEmailShell, mireliSupportLine} from "@/lib/emails/brand";
 
 export function emailAddress(value:unknown):string {
   if(typeof value!=="string" || /[\r\n]/.test(value))throw new DriverError(400,"INVALID_EMAIL","Enter a valid email address.");
@@ -81,12 +82,21 @@ export async function sendTransactionalEmail(message: {
 
 export async function sendEmailCode(email:string,code:string):Promise<void> {
   if(!/^[0-9]{6}$/.test(code))throw new DriverError(400,"INVALID_CODE","Invalid verification code.");
+  const supportEmail = process.env.MIRELI_SUPPORT_EMAIL?.trim() || "mirelisgr001@gmail.com";
   try {
     await sendTransactionalEmail({
       to: email,
       senderName: "Mireli Driver",
       subject: "Your Mireli Driver verification code",
       textContent: `Your Mireli Driver verification code is ${code}.\n\nIt expires in 5 minutes. Do not share this code.\nIf you did not request it, you can ignore this email.`,
+      htmlContent: mireliEmailShell({
+        headerHtml: mireliEmailHeader("Your driver sign-in code"),
+        bodyHtml:
+          "<p>Enter this 6-digit code in the Mireli Driver app to finish signing in. It expires in 5 minutes and works only once.</p>" +
+          mireliCodeBlock("Verification code", code) +
+          `<p style="margin:0;color:#64748b;font-size:13px">${mireliSupportLine(supportEmail)}</p>`,
+        footerNote: "Mireli Driver · part of the Mi-Reli network",
+      }),
       tags: ["driver-verification"],
     });
   } catch {

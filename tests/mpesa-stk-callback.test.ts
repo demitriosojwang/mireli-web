@@ -70,8 +70,10 @@ describe("STK callback correlation", () => {
       where: expect.objectContaining({ id: "tx-1", status: { in: ["pending", "ambiguous"] } }),
       data: expect.objectContaining({ checkoutRequestId: "ws_CO_123", merchantRequestId: "merchant-1" }),
     }));
-    expect(mocks.mpesaTransactionUpdate).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: "tx-1" },
+    // The confirm write is now a CAS transition: same where/data shape, with
+    // the machine's from-states folded into the where clause.
+    expect(mocks.mpesaTransactionUpdateMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: "tx-1", status: { in: ["pending", "stk_push_sent", "ambiguous"] } }),
       data: expect.objectContaining({ status: "confirmed", mpesaReceipt: "QWE1234567" }),
     }));
     expect(mocks.confirmBookingPayment).toHaveBeenCalledWith("booking-1", expect.objectContaining({ receipt: "QWE1234567" }));

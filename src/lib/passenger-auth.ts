@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { DriverError, text } from "@/lib/driver/errors";
 import { emailAddress, emailSignInConfigured } from "@/lib/driver/email";
+import { mireliCodeBlock, mireliEmailHeader, mireliEmailShell, mireliSupportLine } from "@/lib/emails/brand";
 import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 
 type PassengerChallengeChannel = "passenger_sms" | "passenger_email";
@@ -102,6 +103,7 @@ async function sendSms(phone: string, code: string) {
 }
 
 async function sendEmail(email: string, code: string) {
+  const supportEmail = process.env.MIRELI_SUPPORT_EMAIL?.trim() || "mirelisgr001@gmail.com";
   const response = await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
     headers: { "api-key": process.env.BREVO_API_KEY!, Accept: "application/json", "Content-Type": "application/json" },
@@ -110,6 +112,14 @@ async function sendEmail(email: string, code: string) {
       to: [{ email }],
       subject: "Your Mi-Reli verification code",
       textContent: `Your Mi-Reli verification code is ${code}.\n\nIt expires in 5 minutes. Do not share it. If you did not request it, you can ignore this email.`,
+      htmlContent: mireliEmailShell({
+        headerHtml: mireliEmailHeader("Your sign-in code"),
+        bodyHtml:
+          "<p>Enter this 6-digit code to finish signing in. It expires in 5 minutes and works only once.</p>" +
+          mireliCodeBlock("Verification code", code) +
+          `<p style="margin:0;color:#64748b;font-size:13px">${mireliSupportLine(supportEmail)}</p>`,
+        footerNote: "Mi-Reli · SGR connections made simpler",
+      }),
       tags: ["passenger-verification"],
     }),
     signal: AbortSignal.timeout(10000),

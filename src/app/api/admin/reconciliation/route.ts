@@ -8,6 +8,7 @@ import {
   setRefundFailureInjection,
 } from "@/lib/daraja";
 import { isLocalDemoEnabled } from "@/lib/runtime-mode";
+import { casUpdateMany, MPESA_MACHINE } from "@/lib/state-machines";
 
 /**
  * Reconciliation — the admin's spot-check surface for the nightly sweep:
@@ -138,10 +139,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No unverified M-Pesa prompts right now. Ask a passenger to start a payment first." }, { status: 400 });
     }
     const booking = await db.booking.findUnique({ where: { id: tx.bookingId } });
-    await db.mpesaTransaction.update({
-      where: { id: tx.id },
-      data: { status: "ambiguous" },
-    });
+    const marked = await casUpdateMany(
+      "mpesaTransaction",
+      { id: tx.id },
+      MPESA_MACHINE,
+      "stk_push_sent",
+      "ambiguous",
+    );
+    if (marked === 0) {
+      return NextResponse.json({ error: "That prompt already settled — refresh and pick another." }, { status: 409 });
+    }
     await audit({
       actorId: actor.id,
       actorName: actor.name,

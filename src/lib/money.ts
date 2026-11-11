@@ -7,6 +7,7 @@ import {DriverError} from "@/lib/driver/errors";
 import { attemptBookingTicketEmail } from "@/lib/booking-ticket-email";
 import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 import { submitRefund } from "@/lib/refund-settlement";
+import { ACTIVE_BOOKING_STATUSES, BOOKING_MACHINE, casUpdateMany } from "@/lib/state-machines";
 import {
   calculateLateCancellationCredit,
   describeCancellationCutoff,
@@ -320,12 +321,17 @@ export async function executeCancellation(params: {
   if (!booking) throw new Error("Booking not found");
   const entry = booking.ledgerEntry;
 
-  // Nothing collected yet → just void the booking
+  // Nothing collected yet → just void the booking (CAS: only if still active)
   if (!entry) {
-    await db.booking.update({
-      where: { id: booking.id },
-      data: { status: "cancelled", cancelledAt: new Date(), cancelTier: "early" },
-    });
+    const voided = await casUpdateMany(
+      "booking",
+      { id: booking.id },
+      BOOKING_MACHINE,
+      ACTIVE_BOOKING_STATUSES,
+      "cancelled",
+      { cancelledAt: new Date(), cancelTier: "early" },
+    );
+    if (voided === 0) throw new DriverError(409, "BOOKING_NOT_ACTIVE", "Booking already moved on — refresh and retry.");
     await audit({
       actorId: params.actor.id,
       actorName: params.actor.name,
@@ -398,10 +404,15 @@ export async function executeCancellation(params: {
       note: `Credit restored — refund on ${booking.code}`,
     });
 
-    await db.booking.update({
-      where: { id: booking.id },
-      data: { status: "cancelled", cancelledAt: now, cancelTier: tier },
-    });
+    const cancelled = await casUpdateMany(
+      "booking",
+      { id: booking.id },
+      BOOKING_MACHINE,
+      ACTIVE_BOOKING_STATUSES,
+      "cancelled",
+      { cancelledAt: now, cancelTier: tier },
+    );
+    if (cancelled === 0) throw new DriverError(409, "BOOKING_NOT_ACTIVE", "Booking already moved on — refund flow aborted.");
     await audit({
       actorId: params.actor.id,
       actorName: params.actor.name,
@@ -453,10 +464,15 @@ export async function executeCancellation(params: {
         },
       });
       const refundStatus = await submitRefund(refund.id);
-      await db.booking.update({
-        where: { id: booking.id },
-        data: { status: "cancelled", cancelledAt: now, cancelTier: "late" },
-      });
+      const cancelledAdmin = await casUpdateMany(
+        "booking",
+        { id: booking.id },
+        BOOKING_MACHINE,
+        ACTIVE_BOOKING_STATUSES,
+        "cancelled",
+        { cancelledAt: now, cancelTier: "late" },
+      );
+      if (cancelledAdmin === 0) throw new DriverError(409, "BOOKING_NOT_ACTIVE", "Booking already moved on — admin refund flow aborted.");
       await audit({
         actorId: params.actor.id,
         actorName: params.actor.name,
@@ -489,10 +505,15 @@ export async function executeCancellation(params: {
         statusChangedAt: new Date(),
       },
     });
-    await db.booking.update({
-      where: { id: booking.id },
-      data: { status: "cancelled", cancelledAt: now, cancelTier: "late" },
-    });
+    const cancelledLate = await casUpdateMany(
+      "booking",
+      { id: booking.id },
+      BOOKING_MACHINE,
+      ACTIVE_BOOKING_STATUSES,
+      "cancelled",
+      { cancelledAt: now, cancelTier: "late" },
+    );
+    if (cancelledLate === 0) throw new DriverError(409, "BOOKING_NOT_ACTIVE", "Booking already moved on — late-cancel flow aborted.");
     await audit({
       actorId: params.actor.id,
       actorName: params.actor.name,

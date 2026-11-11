@@ -159,7 +159,7 @@ describe("booking payment route assignment guard", () => {
     expect(mocks.stkPush).toHaveBeenCalledWith("+254712345678", 500, "MR-ABC123", "tx-1");
     expect(mocks.mpesaTransactionCreate).toHaveBeenCalledOnce();
     expect(mocks.mpesaTransactionUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ id: "tx-1", status: "pending" }),
+      where: expect.objectContaining({ id: "tx-1", status: { in: ["pending"] } }),
       data: expect.objectContaining({ checkoutRequestId: "checkout-1", status: "stk_push_sent" }),
     }));
     expect(mocks.mpesaTransactionCreate.mock.invocationCallOrder[0]).toBeLessThan(

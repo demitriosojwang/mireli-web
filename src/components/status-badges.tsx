@@ -40,23 +40,27 @@ export function LedgerStatusBadge({ status }: { status: string }) {
 
 const TRIP_STYLES: Record<string, string> = {
   scheduled: "bg-emerald-100 text-emerald-900 border-emerald-200",
+  filling: "bg-emerald-100 text-emerald-900 border-emerald-200",
   locked: "bg-amber-100 text-amber-900 border-amber-200",
   departed: "bg-teal-100 text-teal-900 border-teal-200",
   completed: "bg-green-100 text-green-900 border-green-200",
   cancelled: "bg-red-100 text-red-900 border-red-200",
 };
 
+/** Single source of truth for trip status labels — shared.tsx imports this. */
+export const TRIP_STATUS_LABELS: Record<string, string> = {
+  scheduled: "Scheduled",
+  filling: "Filling",
+  locked: "Locked",
+  departed: "On the road",
+  completed: "Completed",
+  cancelled: "Cancelled",
+};
+
 export function TripStatusBadge({ status }: { status: string }) {
-  const labels: Record<string, string> = {
-    scheduled: "Scheduled",
-    locked: "Locked",
-    departed: "On the road",
-    completed: "Completed",
-    cancelled: "Cancelled",
-  };
   return (
     <Badge variant="outline" className={cn("font-medium", TRIP_STYLES[status] || "")}>
-      {labels[status] || status}
+      {TRIP_STATUS_LABELS[status] || status}
     </Badge>
   );
 }

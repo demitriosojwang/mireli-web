@@ -97,8 +97,13 @@ function ticketContent(booking: {
   const htmlContent = `<!doctype html><html><body style="margin:0;background:#f6f5f1;color:#172b49;font-family:Arial,sans-serif">
   <div style="max-width:600px;margin:24px auto;padding:24px">
     <div style="background:#102b4e;border-radius:16px 16px 0 0;padding:24px;color:#fff">
-      <p style="margin:0;color:#51c7ad;font-size:12px;letter-spacing:2px;font-weight:bold">MI-RELI SGR</p>
-      <h1 style="margin:10px 0 0;font-size:24px">Your journey is confirmed</h1>
+      <table role="presentation" style="border-collapse:collapse"><tr>
+        <td style="padding-right:14px"><img src="https://mireli.online/mireli-logo.jpeg" width="48" height="48" alt="Mi-Reli logo" style="display:block;border-radius:12px;border:2px solid rgba(255,255,255,.35)"></td>
+        <td>
+          <p style="margin:4px 0 0;color:#51c7ad;font-size:11px;letter-spacing:2px;font-weight:bold">MI-RELI SGR</p>
+          <h1 style="margin:2px 0 0;font-size:22px;line-height:1.25">Your journey is confirmed</h1>
+        </td>
+      </tr></table>
     </div>
     <div style="background:#fff;border:1px solid #e6e1d8;border-top:0;border-radius:0 0 16px 16px;padding:24px">
       <p>Hello ${escapeHtml(name)},</p>

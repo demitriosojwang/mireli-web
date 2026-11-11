@@ -94,12 +94,15 @@ export async function driverTripCommand(driverId:string,tripId:string,body:Recor
         }
       }
       if(action==="start") {
+        if(trip.status!=="locked")throw new DriverError(409,"TRIP_NOT_LOCKED","Dispatch must lock the manifest before departure.");
         if(trip.bookings.some(b=>boardingCounts(b).remaining>0))throw new DriverError(409,"UNRESOLVED_MANIFEST","Resolve every confirmed passenger seat before starting.");
         const boarded=trip.bookings.reduce((total,b)=>total+boardingCounts(b).boarded,0);
         if(boarded===0 || boarded>trip.capacity)throw new DriverError(409,"INVALID_MANIFEST","Check the boarding count and vehicle capacity with dispatch.");
         if(trip.departureAt.getTime()>Date.now()+15*60000)throw new DriverError(409,"TOO_EARLY","Start is available within 15 minutes of the scheduled departure.");
         if(await tx.trip.count({where:{driverId,status:"departed",id:{not:tripId}}}))throw new DriverError(409,"OTHER_TRIP_ACTIVE","Finish your current journey before starting another.");
-        next="in_progress";await tx.trip.update({where:{id:tripId},data:{status:"departed",departedAt:new Date()}});
+        next="in_progress";
+        const departed=await tx.trip.updateMany({where:{id:tripId,driverId,status:"locked"},data:{status:"departed",departedAt:new Date()}});
+        if(departed.count!==1)throw conflict();
       }
       if(action==="complete") {
         const cfg=await tx.platformConfig.findUnique({where:{id:"main"}});

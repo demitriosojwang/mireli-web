@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { isPaymentIntentId, verifyCallbackToken } from "@/lib/daraja";
+import { casUpdateMany, MPESA_MACHINE } from "@/lib/state-machines";
 
 /**
  * Safaricom Daraja → STK Push queue-timeout webhook (QueueTimeOutURL).
@@ -37,10 +38,15 @@ export async function POST(req: NextRequest) {
       }
     }
     if (tx && ["pending", "stk_push_sent"].includes(tx.status)) {
-      await db.mpesaTransaction.update({
-        where: { id: tx.id },
-        data: { status: "ambiguous", resultDesc: "Queue timeout — awaiting Transaction Status sweep" },
-      });
+      const marked = await casUpdateMany(
+        "mpesaTransaction",
+        { id: tx.id },
+        MPESA_MACHINE,
+        ["pending", "stk_push_sent"],
+        "ambiguous",
+        { resultDesc: "Queue timeout — awaiting Transaction Status sweep" },
+      );
+      if (marked === 0) return accepted; // raced with a callback — leave it be
       await audit({
         actorId: "system",
         actorName: "Daraja Webhook",

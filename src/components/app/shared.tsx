@@ -5,9 +5,10 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar as CalendarIcon, ChevronDown, Minus, Plus, Users } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { TRIP_STATUS_LABELS } from "@/components/status-badges";
 import { nairobiToday } from "@/lib/nairobi-time";
 
-/* ─── Date helpers ─────────────────────────────────────────────────────────── */
+/* â”€â”€â”€ Date helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export function todayStr(offset = 0): string {
   return nairobiToday(offset);
@@ -30,15 +31,15 @@ export function fmtDateShort(v: string): string {
   });
 }
 
-/* ─── Status badge with the pulsing dot ────────────────────────────────────── */
+/* â”€â”€â”€ Status badge with the pulsing dot â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 const BADGE_STYLES: Record<string, { label: string; cls: string; dotCls: string }> = {
-  scheduled: { label: "Scheduled", cls: "bg-accent/15 text-accent border-accent/30", dotCls: "bg-accent mireli-live-dot" },
-  filling: { label: "Filling", cls: "bg-accent/15 text-accent border-accent/30", dotCls: "bg-accent mireli-live-dot" },
-  locked: { label: "Locked", cls: "bg-emerald-100 text-emerald-800 border-emerald-200", dotCls: "bg-emerald-500" },
-  departed: { label: "On the road", cls: "bg-sky-100 text-sky-800 border-sky-200", dotCls: "bg-sky-500" },
-  completed: { label: "Completed", cls: "bg-violet-100 text-violet-800 border-violet-200", dotCls: "bg-violet-500" },
-  cancelled: { label: "Cancelled", cls: "bg-stone-100 text-stone-700 border-stone-200", dotCls: "bg-stone-400" },
+  scheduled: { label: TRIP_STATUS_LABELS.scheduled, cls: "bg-accent/15 text-accent border-accent/30", dotCls: "bg-accent mireli-live-dot" },
+  filling: { label: TRIP_STATUS_LABELS.filling, cls: "bg-accent/15 text-accent border-accent/30", dotCls: "bg-accent mireli-live-dot" },
+  locked: { label: TRIP_STATUS_LABELS.locked, cls: "bg-emerald-100 text-emerald-800 border-emerald-200", dotCls: "bg-emerald-500" },
+  departed: { label: TRIP_STATUS_LABELS.departed, cls: "bg-sky-100 text-sky-800 border-sky-200", dotCls: "bg-sky-500" },
+  completed: { label: TRIP_STATUS_LABELS.completed, cls: "bg-violet-100 text-violet-800 border-violet-200", dotCls: "bg-violet-500" },
+  cancelled: { label: TRIP_STATUS_LABELS.cancelled, cls: "bg-stone-100 text-stone-700 border-stone-200", dotCls: "bg-stone-400" },
   awaiting_payment: { label: "Payment due", cls: "bg-amber-100 text-amber-900 border-amber-200", dotCls: "bg-amber-500" },
   confirmed: { label: "Confirmed", cls: "bg-emerald-100 text-emerald-800 border-emerald-200", dotCls: "bg-emerald-500" },
   boarded: { label: "Boarded", cls: "bg-sky-100 text-sky-800 border-sky-200", dotCls: "bg-sky-500" },
@@ -55,7 +56,7 @@ export function DotBadge({ status }: { status: string }) {
   );
 }
 
-/* ─── Seat meter ───────────────────────────────────────────────────────────── */
+/* â”€â”€â”€ Seat meter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export function SeatMeter({ booked, capacity }: { booked: number; capacity: number }) {
   const pct = Math.min(100, Math.round((booked / capacity) * 100));
@@ -77,18 +78,18 @@ export function SeatMeter({ booked, capacity }: { booked: number; capacity: numb
   );
 }
 
-/* ─── Stars ────────────────────────────────────────────────────────────────── */
+/* â”€â”€â”€ Stars â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export function Stars({ rating }: { rating: number }) {
   return (
     <span className="inline-flex items-center gap-0.5 text-[11px] text-amber-700">
-      <span aria-hidden>★</span>
+      <span aria-hidden>â˜…</span>
       <span className="font-medium tabular-nums">{rating.toFixed(1)}</span>
     </span>
   );
 }
 
-/* ─── Train pill — big time, service name (train selector) ─────────────────── */
+/* â”€â”€â”€ Train pill â€” big time, service name (train selector) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export function TrainPill({ time, label, name, active, gone, onClick }: {
   time: string;
@@ -131,7 +132,7 @@ export function TrainPill({ time, label, name, active, gone, onClick }: {
   );
 }
 
-/* ─── Charter badge ────────────────────────────────────────────────────────── */
+/* â”€â”€â”€ Charter badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export function CharterBadge() {
   return (
@@ -142,7 +143,7 @@ export function CharterBadge() {
   );
 }
 
-/* ─── Date picker — Today / Tomorrow / pick (original pills) ───────────────── */
+/* â”€â”€â”€ Date picker â€” Today / Tomorrow / pick (original pills) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export function DatePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
@@ -171,10 +172,10 @@ export function DatePicker({ value, onChange }: { value: string; onChange: (v: s
   return (
     <div className="flex gap-2">
       <button onClick={() => onChange(todayStr())} className={pill(isToday(value))}>
-        Today<span className="text-[10px] font-medium opacity-80"> · {fmtDateShort(todayStr())}</span>
+        Today<span className="text-[10px] font-medium opacity-80"> Â· {fmtDateShort(todayStr())}</span>
       </button>
       <button onClick={() => onChange(todayStr(1))} className={pill(isTomorrow(value))}>
-        Tomorrow<span className="text-[10px] font-medium opacity-80"> · {fmtDateShort(todayStr(1))}</span>
+        Tomorrow<span className="text-[10px] font-medium opacity-80"> Â· {fmtDateShort(todayStr(1))}</span>
       </button>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
@@ -192,7 +193,7 @@ export function DatePicker({ value, onChange }: { value: string; onChange: (v: s
   );
 }
 
-/* ─── Seat stepper (original style) ────────────────────────────────────────── */
+/* â”€â”€â”€ Seat stepper (original style) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export function SeatStepper({ value, min = 1, max = 14, onChange }: {
   value: number;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -65,6 +65,8 @@ function PaySheetContent({ open, onClose, booking, onPaid }: PaySheetProps) {
   const [receipt, setReceipt] = useState<{ receipt: string; amount: number } | null>(null);
   const [driver, setDriver] = useState<DriverContact | null>(booking.driver ?? null);
   const [copied, setCopied] = useState<string | null>(null);
+  /** The method the live prompt was sent with — verify failures return here. */
+  const sentMethodRef = useRef<PayMethod>("stk");
 
   useEffect(() => {
     if (!open) return;
@@ -110,6 +112,7 @@ function PaySheetContent({ open, onClose, booking, onPaid }: PaySheetProps) {
       setPaymentPending(Boolean(result.paymentPending));
       setPaymentMessage(result.message || null);
       if (result.phone) setPhone(result.phone);
+      sentMethodRef.current = "stk";
       setStep("stk");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to send prompt");
@@ -128,13 +131,17 @@ function PaySheetContent({ open, onClose, booking, onPaid }: PaySheetProps) {
         `/api/bookings/${booking.id}`,
         { body: { action: "verify" } },
       );
+      // Atomic in practice: receipt is committed before step flips to "done",
+      // so no render can observe a done-screen without its receipt.
       setReceipt({ receipt: res.receipt, amount: res.amount });
       if (res.driver) setDriver(res.driver);
       setStep("done");
       onPaid();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Verification failed");
-      setStep(method === "stk" ? "stk" : "paybill");
+      // Return to the screen of the method the pending prompt was actually
+      // sent with, not whichever toggle happens to be selected now.
+      setStep(sentMethodRef.current === "paybill" ? "paybill" : "stk");
     }
   }
 

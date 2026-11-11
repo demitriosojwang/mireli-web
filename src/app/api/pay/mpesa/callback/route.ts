@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { confirmBookingPayment } from "@/lib/money";
 import { isPaymentIntentId, RESULT_CODES, verifyCallbackToken } from "@/lib/daraja";
+import { casUpdateMany, MPESA_MACHINE } from "@/lib/state-machines";
 
 /**
  * Safaricom Daraja → STK Push result webhook (CallBackURL).
@@ -73,16 +74,22 @@ export async function POST(req: NextRequest) {
     const code = String(cb.ResultCode ?? "");
     if (code === RESULT_CODES.SUCCESS) {
       const receipt = meta(cb.CallbackMetadata?.Item, "MpesaReceiptNumber");
-      await db.mpesaTransaction.update({
-        where: { id: tx.id },
-        data: {
-          status: "confirmed",
+      // CAS: only a non-terminal transaction may move to confirmed. A late
+      // duplicate/failed callback can never overwrite a confirmed payment.
+      const won = await casUpdateMany(
+        "mpesaTransaction",
+        { id: tx.id },
+        MPESA_MACHINE,
+        ["pending", "stk_push_sent", "ambiguous"],
+        "confirmed",
+        {
           resultCode: code,
           resultDesc: cb.ResultDesc || "The service request is processed successfully.",
           mpesaReceipt: receipt || tx.mpesaReceipt,
           confirmedAt: new Date(),
         },
-      });
+      );
+      if (won === 0) return accepted; // raced: another callback already settled it
       await confirmBookingPayment(tx.bookingId, {
         receipt: receipt || tx.mpesaReceipt || tx.checkoutRequestId,
         checkoutRequestId: tx.checkoutRequestId,
@@ -97,14 +104,19 @@ export async function POST(req: NextRequest) {
         metadata: { checkoutRequestId: tx.checkoutRequestId, receipt, amount: tx.amount },
       });
     } else {
-      await db.mpesaTransaction.update({
-        where: { id: tx.id },
-        data: {
-          status: "failed",
+      // CAS: same guard on the failure path — never clobber a confirmation.
+      const won = await casUpdateMany(
+        "mpesaTransaction",
+        { id: tx.id },
+        MPESA_MACHINE,
+        ["pending", "stk_push_sent", "ambiguous"],
+        "failed",
+        {
           resultCode: code,
           resultDesc: cb.ResultDesc || "Payment not completed",
         },
-      });
+      );
+      if (won === 0) return accepted; // raced: it was confirmed meanwhile
       await audit({
         actorId: "system",
         actorName: "Daraja Webhook",
