@@ -64,6 +64,11 @@ export async function sendTransactionalEmail(message: {
   }
 
   if (!response.ok) {
+    // The provider's own reason (unverified sender, revoked key, exhausted
+    // credits, IP restriction) is the only thing that makes this diagnosable.
+    // Log the status and body; never the API key or the code itself.
+    const detail = await response.text().catch(() => "");
+    console.error("brevo.send.rejected", { status: response.status, detail: detail.slice(0, 500) });
     const uncertain = response.status >= 500;
     throw new EmailProviderError(
       "Email provider did not accept the message.",
@@ -79,17 +84,20 @@ export async function sendTransactionalEmail(message: {
   return result.messageId;
 }
 
-export async function sendEmailCode(email:string,code:string):Promise<void> {
+export async function sendEmailCode(email:string,code:string,purpose:"driver"|"staff"="driver"):Promise<void> {
   if(!/^[0-9]{6}$/.test(code))throw new DriverError(400,"INVALID_CODE","Invalid verification code.");
   try {
     await sendTransactionalEmail({
       to: email,
-      senderName: "Mireli Driver",
-      subject: "Your Mireli Driver verification code",
-      textContent: `Your Mireli Driver verification code is ${code}.\n\nIt expires in 5 minutes. Do not share this code.\nIf you did not request it, you can ignore this email.`,
-      tags: ["driver-verification"],
+      senderName: purpose === "staff" ? "Mireli Staff" : "Mireli Driver",
+      subject: `Your Mireli ${purpose === "staff" ? "staff sign-in" : "Driver verification"} code`,
+      textContent: `Your Mireli ${purpose === "staff" ? "staff sign-in" : "Driver verification"} code is ${code}.\n\nIt expires in 5 minutes. Do not share this code.\nIf you did not request it, you can ignore this email.`,
+      tags: [`${purpose}-verification`],
     });
-  } catch {
+  } catch (error) {
+    console.error("driver.email_code.failed", {
+      reason: error instanceof EmailProviderError ? error.code : "UNEXPECTED",
+    });
     throw new DriverError(503,"EMAIL_UNAVAILABLE","The verification email could not be sent. Please try again later.");
   }
 }
