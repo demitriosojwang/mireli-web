@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Anchor, Info, User, Wallet, X } from "lucide-react";
+import { Anchor, Info, User, Wallet } from "lucide-react";
 import { useMe } from "@/lib/client";
 import { cn } from "@/lib/utils";
 
@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 export function LogoTile({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
   const dims = size === "lg" ? "h-20 w-20 rounded-2xl" : size === "sm" ? "h-8 w-8 rounded-lg" : "h-10 w-10 rounded-xl";
   return (
-    <div className={cn(dims, "relative shrink-0 select-none overflow-hidden bg-white shadow-sm transition-transform hover:scale-105")}>
+    <div className={cn(dims, "relative shrink-0 select-none overflow-hidden bg-white shadow-sm")}>
       <img
         src="/mireli-logo.jpeg"
         alt="Mi-Reli logo"
@@ -101,7 +101,11 @@ export function SiteFooter() {
     <footer className="mt-auto border-t bg-background/95 backdrop-blur">
       <div className="mx-auto max-w-md px-4 py-2 text-center text-[10px] text-muted-foreground">
         Mi-Reli · Mombasa Terminus · availability is confirmed before checkout
-        <div className="mt-1"><a href="mailto:mirelisgr001@gmail.com" className="underline underline-offset-2">mirelisgr001@gmail.com</a></div>
+        <div className="mt-1 flex items-center justify-center gap-3">
+          <a href="mailto:mirelisgr001@gmail.com" className="underline underline-offset-2">mirelisgr001@gmail.com</a>
+          <Link href="/terms" className="underline underline-offset-2">Terms</Link>
+          <Link href="/privacy" className="underline underline-offset-2">Privacy</Link>
+        </div>
       </div>
     </footer>
   );
@@ -148,7 +152,7 @@ function AboutSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: b
           </section>
 
           <Button className="w-full" onClick={() => onOpenChange(false)}>
-            <X className="mr-1 h-4 w-4" /> Close
+            Close
           </Button>
         </div>
       </SheetContent>

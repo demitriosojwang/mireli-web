@@ -38,6 +38,12 @@ export function nairobiEventAt(base: Date, dayOffset: number, hhmm: string): Dat
   return new Date(start.getTime() + dayOffset * DAY + (hour * 60 + minute) * 60000);
 }
 
+/** Minutes since midnight in Kenya right now (0–1439), independent of host timezone. */
+export function nairobiNowMinutes(now: Date = new Date()): number {
+  const shifted = new Date(now.getTime() + OFFSET);
+  return shifted.getUTCHours() * 60 + shifted.getUTCMinutes();
+}
+
 /** Resolve an arrival from a service date plus the train's destination-day offset. */
 export function nairobiTrainArrivalAt(
   base: Date,

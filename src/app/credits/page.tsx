@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
+import { rowVariants, STAGGER_MS } from "@/lib/motion";
 import Link from "next/link";
 import { SiteFooter, SiteHeader, SiteNav } from "@/components/site-chrome";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, useMe } from "@/lib/client";
+import { useFetch } from "@/lib/use-fetch";
 import { daysUntil, fmtDate, ksh } from "@/lib/format";
 import { Ticket, Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -23,18 +26,11 @@ interface CreditRow {
 
 export default function CreditsPage() {
   const { me, loading: meLoading, error: identityError, refresh: retryIdentity } = useMe();
-  const [credits, setCredits] = useState<CreditRow[] | null>(null);
-  const [balance, setBalance] = useState(0);
-
-  useEffect(() => {
-    if (!me?.session) return;
-    api<{ balance: number; credits: CreditRow[] }>("/api/credits")
-      .then((res) => {
-        setBalance(res.balance);
-        setCredits(res.credits);
-      })
-      .catch(() => setCredits([]));
-  }, [me]);
+  const creditsFetch = useFetch<{ balance: number; credits: CreditRow[] }>(
+    me?.session ? "/api/credits" : null,
+  );
+  const credits = creditsFetch.data?.credits ?? null;
+  const balance = creditsFetch.data?.balance ?? 0;
 
   if (meLoading) return null;
 
@@ -90,8 +86,20 @@ export default function CreditsPage() {
 
         <section className="mt-6">
           <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Credit history</h2>
-          {credits === null && <Skeleton className="h-24 w-full" />}
-          {credits && credits.length === 0 && (
+          {creditsFetch.status === "error" && (
+            <Card>
+              <CardContent className="flex flex-col items-center gap-2 p-8 text-center">
+                <Ticket className="h-7 w-7 text-muted-foreground" />
+                <p className="text-sm font-medium">Couldn&apos;t load your credits</p>
+                <p className="text-xs text-muted-foreground">{creditsFetch.error || "Please try again."}</p>
+                <Button variant="outline" size="sm" onClick={() => void creditsFetch.refresh()} disabled={creditsFetch.refreshing}>
+                  {creditsFetch.refreshing ? "Retrying…" : "Retry"}
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+          {creditsFetch.status === "loading" && <Skeleton className="h-24 w-full" />}
+          {credits && credits.length === 0 && creditsFetch.status === "ready" && (
             <Card>
               <CardContent className="flex flex-col items-center gap-2 p-8 text-center">
                 <Ticket className="h-7 w-7 text-muted-foreground" />
@@ -103,9 +111,16 @@ export default function CreditsPage() {
             </Card>
           )}
           <div className="grid gap-2">
-            {(credits || []).map((c) => (
-              <Card key={c.id}>
-                <CardContent className="flex items-start justify-between gap-3 p-3">
+            {(credits || []).map((c, i) => (
+              <motion.div
+                key={c.id}
+                variants={rowVariants}
+                initial="hidden"
+                animate="show"
+                transition={{ delay: i * STAGGER_MS }}
+              >
+                <Card>
+                  <CardContent className="flex items-start justify-between gap-3 p-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span
@@ -118,7 +133,7 @@ export default function CreditsPage() {
                         {c.status}
                       </span>
                       {c.status === "active" && (
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-xs text-muted-foreground [font-variant-numeric:tabular-nums]">
                           expires in {daysUntil(c.expiresAt)} days ({fmtDate(c.expiresAt)})
                         </span>
                       )}
@@ -126,7 +141,7 @@ export default function CreditsPage() {
                     <p className="mt-1 text-sm">{c.note || "Travel credit"}</p>
                     <p className="text-xs text-muted-foreground">Issued {fmtDate(c.issuedAt)}</p>
                     {c.amount < c.initialAmount && c.status === "active" && (
-                      <p className="mt-1 text-xs text-emerald-800">
+                      <p className="mt-1 text-xs text-emerald-800 [font-variant-numeric:tabular-nums]">
                         {ksh(c.initialAmount - c.amount)} already used · {ksh(c.amount)} remaining
                       </p>
                     )}
@@ -140,7 +155,8 @@ export default function CreditsPage() {
                     {ksh(c.amount)}
                   </p>
                 </CardContent>
-              </Card>
+            </Card>
+              </motion.div>
             ))}
           </div>
         </section>

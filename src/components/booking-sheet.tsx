@@ -340,7 +340,7 @@ function BookingSheetContent({
                     : `Karibu ${created.passengerName?.split(" ")[0] || ""} — fully covered by your travel credit, your seat is confirmed.`}
                 </p>
               </div>
-              <div className="rounded-lg border bg-muted/40 p-3 text-sm">
+              <div className="rounded-lg border bg-muted/40 p-3 text-sm [font-variant-numeric:tabular-nums]">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Total fare</span>
                   <span className="font-medium">{ksh(created.fareAmount)}</span>
@@ -615,7 +615,7 @@ function BookingSheetContent({
                   Fill in your details, then login or sign up to complete this booking.
                 </p>
               ) : (
-                <Button className="h-11 w-full" disabled={busy || !draft.stageId || !detailsOk} onClick={confirm}>
+                <Button variant="accent" className="h-11 w-full" disabled={busy || !draft.stageId || !detailsOk} onClick={confirm}>
                   {busy ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : isCharter ? (

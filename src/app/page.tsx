@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useAnimationControls } from "framer-motion";
+import { DURATION, EASE_IN_OUT, KNOB_STRETCH, LAYOUT_ID } from "@/lib/motion";
+import { ACTIVE_BOOKING_STATUSES, INACTIVE_BOOKING_STATUSES } from "@/lib/state-machines";
 import { SiteFooter, SiteHeader, SiteNav } from "@/components/site-chrome";
 import { BookingSheet, BookableTrip, BookingDraft } from "@/components/booking-sheet";
 import { PaySheet } from "@/components/pay-sheet";
@@ -21,7 +23,7 @@ import { api, useMe } from "@/lib/client";
 import { getBookingCatalogueView, getCabAvailabilityCountLabel, hasPublishedCustomerPoints, shouldLoadTrainTimetable, type CatalogueStatus } from "@/lib/booking-catalogue";
 import { fmtTime, ksh } from "@/lib/format";
 import { calculateBookingFeeAmount, calculateSharedFare, DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
-import { addNairobiDays, nairobiWeekday } from "@/lib/nairobi-time";
+import { addNairobiDays, nairobiNowMinutes, nairobiWeekday } from "@/lib/nairobi-time";
 import { calculateCharterFare } from "@/lib/charter-pricing";
 import { getBookingPaymentPreflight } from "@/lib/booking-payment-preflight";
 import { MAX_STAGE_SEARCH_LENGTH, MIN_STAGE_SEARCH_LENGTH, isStageSearchReady, shouldSearchStagePoints } from "@/lib/stage-search";
@@ -51,6 +53,7 @@ import {
   Ticket as TicketIcon,
   Train as TrainIcon,
   Users,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -118,6 +121,9 @@ export default function Home() {
 
   const [direction, setDirection] = useState<"FROM_TERMINUS" | "TO_TERMINUS">("FROM_TERMINUS");
   const [date, setDate] = useState(() => todayStr());
+  // Pickup mode: "now" pins the date to today and auto-picks the next train
+  // still catchable today; "later" is the classic schedule flow. Uber-style.
+  const [pickupMode, setPickupMode] = useState<"now" | "later">("later");
   const [pointCount, setPointCount] = useState(0);
   const [bookingFeeAmount, setBookingFeeAmount] = useState(DEFAULT_BOOKING_FEE_AMOUNT);
   const [routesStatus, setRoutesStatus] = useState<CatalogueStatus>("loading");
@@ -198,7 +204,7 @@ export default function Home() {
   const loadMyBookings = useCallback(async () => {
     try {
       const res = await api<{ bookings: BookingRow[] }>("/api/bookings");
-      setMyBookings(res.bookings.filter((b) => ["awaiting_payment", "confirmed", "boarded"].includes(b.status)));
+      setMyBookings(res.bookings.filter((b) => ACTIVE_BOOKING_STATUSES.includes(b.status)));
       setMyBookingsLoadError(false);
     } catch {
       setMyBookingsLoadError(true);
@@ -311,7 +317,7 @@ export default function Home() {
     api<{ bookings: BookingRow[] }>("/api/bookings")
       .then((res) => {
         if (!active) return;
-        setMyBookings(res.bookings.filter((b) => ["awaiting_payment", "confirmed", "boarded"].includes(b.status)));
+        setMyBookings(res.bookings.filter((b) => ACTIVE_BOOKING_STATUSES.includes(b.status)));
         setMyBookingsLoadError(false);
       })
       .catch(() => { if (active) setMyBookingsLoadError(true); });
@@ -381,8 +387,8 @@ export default function Home() {
       if (!preflight.canProceed) {
         setBookingStartError(
           paymentCheckFailed
-            ? "We couldn’t confirm M-Pesa checkout. No booking was created; please try again later."
-            : "M-Pesa checkout isn’t available yet. No booking was created. You can book when checkout is ready.",
+            ? "We couldnâ€™t confirm M-Pesa checkout. No booking was created; please try again later."
+            : "M-Pesa checkout isnâ€™t available yet. No booking was created. You can book when checkout is ready.",
         );
         return;
       }
@@ -403,7 +409,7 @@ export default function Home() {
     }
   }
 
-  /* ─── Derived data (all hooks run before any early return) ──────────────── */
+  /* â”€â”€â”€ Derived data (all hooks run before any early return) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
   // Show only trains operating on the selected Kenya service date. A train
   // arriving at MTM after midnight belongs to its previous origin date.
@@ -433,6 +439,31 @@ export default function Home() {
   const selectedTrainGone = trainKey ? (trainOptions.find((o) => o.key === trainKey)?.gone ?? false) : false;
   const selectedTrain = trainKey ? trainOptions.find((option) => option.key === trainKey) ?? null : null;
   const journeyStepDone = Boolean(selectedPoint && journeyCollapsed);
+
+  // "Pick up now": the next train at MTM today whose time has not passed yet.
+  // TO_TERMINUS passengers must board before departure (30-minute buffer);
+  // FROM_TERMINUS passengers just need the arrival to still be ahead.
+  const nextTrainKey = useMemo(() => {
+    if (date !== todayStr()) return null;
+    const nowMin = nairobiNowMinutes();
+    const buffer = direction === "TO_TERMINUS" ? 30 : 0;
+    const upcoming = trainOptions.filter((t) => !t.gone && (() => {
+      const [h, m] = t.time.split(":").map(Number);
+      return h * 60 + m >= nowMin + buffer;
+    })());
+    return upcoming.length ? upcoming[0].key : null;
+  }, [trainOptions, date, direction]);
+
+  // Auto-select the next train when the passenger taps "Pick up now", and
+  // keep the date pinned to today while the mode is active.
+  useEffect(() => {
+    if (pickupMode !== "now") return;
+    if (date !== todayStr()) setDate(todayStr());
+    if (nextTrainKey && trainKey !== nextTrainKey) {
+      setTrainKey(nextTrainKey);
+      if (selectedPoint) setJourneyCollapsed(true);
+    }
+  }, [pickupMode, nextTrainKey, date, trainKey, selectedPoint]);
 
   const pointLabelCap = direction === "FROM_TERMINUS" ? "Drop-off" : "Pickup";
 
@@ -504,7 +535,7 @@ export default function Home() {
     };
   })();
 
-  /* ─── Splash (after all hooks) ───────────────────────────────────────────── */
+  /* â”€â”€â”€ Splash (after all hooks) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
   if (showSplash) {
     return <SplashScreen onDone={() => setSplashDone(true)} />;
@@ -514,15 +545,21 @@ export default function Home() {
     <div className="flex min-h-screen flex-col bg-background">
       <SiteHeader />
 
-      {/* Direction switcher — the signature pill row */}
+      {/* Direction switcher â€” the signature pill row */}
       <div className="mx-auto max-w-md w-full px-4 pt-3">
         <Tabs value={direction} onValueChange={(v) => changeDirection(v as "FROM_TERMINUS" | "TO_TERMINUS")}>
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="FROM_TERMINUS" className="flex items-center gap-1.5">
-              <Anchor className="h-3.5 w-3.5" /> From Terminus
+          <TabsList className="relative grid w-full grid-cols-2">
+            <TabsTrigger value="FROM_TERMINUS" className="relative flex items-center gap-1.5 data-[state=active]:bg-transparent! data-[state=active]:shadow-none">
+              {direction === "FROM_TERMINUS" && <DirectionPill />}
+              <span className="relative z-10 flex items-center gap-1.5">
+                <Anchor className="h-3.5 w-3.5" /> From Terminus
+              </span>
             </TabsTrigger>
-            <TabsTrigger value="TO_TERMINUS" className="flex items-center gap-1.5">
-              <Navigation className="h-3.5 w-3.5" /> To Terminus
+            <TabsTrigger value="TO_TERMINUS" className="relative flex items-center gap-1.5 data-[state=active]:bg-transparent! data-[state=active]:shadow-none">
+              {direction === "TO_TERMINUS" && <DirectionPill />}
+              <span className="relative z-10 flex items-center gap-1.5">
+                <Navigation className="h-3.5 w-3.5" /> To Terminus
+              </span>
             </TabsTrigger>
           </TabsList>
         </Tabs>
@@ -530,13 +567,13 @@ export default function Home() {
       <SiteNav />
 
       <main className="mx-auto w-full max-w-md flex-1 px-4 pb-6">
-        <AnimatePresence mode="wait">
+        <AnimatePresence mode="popLayout">
           <motion.div
             key={direction}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.18 }}
+            exit={{ opacity: 0, y: -8, transition: { duration: 0.16, ease: "easeInOut" } }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
             className="space-y-4"
           >
             {bookingCatalogueView === "booking" && <ol aria-label="Booking steps" className="flex items-center gap-2 text-[11px]">
@@ -558,10 +595,10 @@ export default function Home() {
                 <div className="min-w-0">
                   <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-700">Journey selected</p>
                   <p className="truncate text-sm font-semibold">
-                    {direction === "FROM_TERMINUS" ? "Mombasa Terminus →" : "→ Mombasa Terminus"} {selectedPoint.point.name}
+                    {direction === "FROM_TERMINUS" ? "Mombasa Terminus â†’" : "â†’ Mombasa Terminus"} {selectedPoint.point.name}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {fmtDateShort(date)}{selectedTrain ? ` · ${selectedTrain.name} ${selectedTrain.time}` : ""}
+                    {fmtDateShort(date)}{selectedTrain ? ` Â· ${selectedTrain.name} ${selectedTrain.time}` : ""}
                   </p>
                 </div>
                 <Button type="button" size="sm" variant="outline" className="h-9 shrink-0" onClick={() => setJourneyCollapsed(false)}>
@@ -572,7 +609,7 @@ export default function Home() {
 
             {bookingCatalogueView === "checking" ? (
               <div role="status" className="flex items-center gap-2 rounded-xl border bg-card px-4 py-3 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" /> Checking approved stops…
+                <Loader2 className="h-4 w-4 animate-spin" /> Checking approved stopsâ€¦
               </div>
             ) : bookingCatalogueView === "closed" ? (
               <section className="rounded-2xl border bg-card p-4" aria-labelledby="catalogue-empty-title">
@@ -581,24 +618,24 @@ export default function Home() {
                     <MapPin className="h-5 w-5" />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <h2 id="catalogue-empty-title" className="text-sm font-semibold">Bookings aren’t open yet</h2>
+                    <h2 id="catalogue-empty-title" className="text-balance text-sm font-semibold">Bookings arenâ€™t open yet</h2>
                     <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                      Approved {pointLabelCap.toLowerCase()} stops haven’t been published for this direction. We’ll open bookings when the route is ready.
+                      Approved {pointLabelCap.toLowerCase()} stops havenâ€™t been published for this direction. Weâ€™ll open bookings when the route is ready.
                     </p>
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                   <Button type="button" size="sm" variant="outline" onClick={retryCatalogues}>Refresh availability</Button>
                   {hasEligibleDrivers === false && (
-                    <p className="text-xs text-muted-foreground"><span className="font-semibold text-foreground">0 pooled cabs</span> · no eligible drivers are available right now</p>
+                    <p className="text-xs text-muted-foreground"><span className="font-semibold text-foreground">0 pooled cabs</span> Â· no eligible drivers are available right now</p>
                   )}
                 </div>
                 <div className="mt-4 border-t pt-3" aria-label="Madaraka Express timetable">
                   <h3 className="text-sm font-semibold">Madaraka Express times</h3>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {direction === "FROM_TERMINUS" ? "Arrival at Mombasa Terminus" : "Departure from Mombasa Terminus"} · Kenya time
+                    {direction === "FROM_TERMINUS" ? "Arrival at Mombasa Terminus" : "Departure from Mombasa Terminus"} Â· Kenya time
                   </p>
-                  {timetableStatus === "loading" && <p role="status" className="mt-2 text-xs text-muted-foreground">Loading train times…</p>}
+                  {timetableStatus === "loading" && <p role="status" className="mt-2 text-xs text-muted-foreground">Loading train timesâ€¦</p>}
                   {timetableStatus === "error" && (
                     <p role="alert" className="mt-2 text-xs text-muted-foreground">
                       Train times could not load. <button type="button" className="font-medium text-primary underline underline-offset-2" onClick={retryCatalogues}>Try again</button>
@@ -621,16 +658,59 @@ export default function Home() {
               </section>
             ) : (
             <div className="space-y-4" hidden={journeyStepDone}>
+            {/* Pickup mode: now vs. schedule later */}
+            <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Pickup timing">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={pickupMode === "now"}
+                onClick={() => { setPickupMode("now"); setBookingStartError(null); }}
+                className={cn(
+                  "flex items-center gap-2 rounded-2xl border px-3.5 py-3 text-left transition-all duration-200",
+                  pickupMode === "now"
+                    ? "mireli-pill-active"
+                    : "border-border bg-card hover:border-accent/30 hover:bg-accent/10 hover:shadow-sm",
+                )}
+              >
+                <Zap className={cn("h-4 w-4 shrink-0", pickupMode === "now" ? "opacity-90" : "text-muted-foreground")} />
+                <span>
+                  <span className="block text-sm font-semibold">Pick up now</span>
+                  <span className="block text-[10px] text-muted-foreground">Next train today</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={pickupMode === "later"}
+                onClick={() => { setPickupMode("later"); setBookingStartError(null); }}
+                className={cn(
+                  "flex items-center gap-2 rounded-2xl border px-3.5 py-3 text-left transition-all duration-200",
+                  pickupMode === "later"
+                    ? "mireli-pill-active"
+                    : "border-border bg-card hover:border-accent/30 hover:bg-accent/10 hover:shadow-sm",
+                )}
+              >
+                <CalendarDays className={cn("h-4 w-4 shrink-0", pickupMode === "later" ? "opacity-90" : "text-muted-foreground")} />
+                <span>
+                  <span className="block text-sm font-semibold">Schedule later</span>
+                  <span className="block text-[10px] text-muted-foreground">Pick a date &amp; train</span>
+                </span>
+              </button>
+            </div>
+
             {/* Date */}
             <div>
               <div className="mb-2 flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
                 <CalendarDays className="h-3.5 w-3.5" />
                 {direction === "FROM_TERMINUS" ? "Travelling on which date?" : "Catching the train on which date?"}
               </div>
-              <DatePicker value={date} onChange={(nextDate) => { setDate(nextDate); setTrainKey(null); setBookingStartError(null); }} />
-              <div className="mt-1.5 text-xs text-muted-foreground">
-                Selected: <span className="font-medium text-foreground">{fmtDateShort(date)}</span>
-              </div>
+              {pickupMode === "now" ? (
+                <p className="rounded-lg border bg-accent/5 px-3 py-2 text-xs text-muted-foreground" role="status">
+                  Today &middot; {fmtDateShort(todayStr())} &mdash; we&rsquo;ll assign the next train still catchable.
+                </p>
+              ) : (
+                <DatePicker value={date} onChange={(nextDate) => { setDate(nextDate); setTrainKey(null); setBookingStartError(null); }} />
+              )}
             </div>
 
             {/* Train selector */}
@@ -639,7 +719,17 @@ export default function Home() {
                 <TrainIcon className="h-3.5 w-3.5" />
                 {direction === "FROM_TERMINUS" ? "Arriving on which train?" : "Catching which train?"}
               </div>
-              {timetableStatus === "loading" && <p className="text-xs text-muted-foreground">Loading train times…</p>}
+              {pickupMode === "now" && nextTrainKey && (
+                <p className="mb-2 rounded-lg border bg-accent/5 px-3 py-2 text-xs text-muted-foreground" role="status">
+                  Auto-picked the next train at Mombasa Terminus &mdash; switch below if you prefer another.
+                </p>
+              )}
+              {pickupMode === "now" && !nextTrainKey && (
+                <p className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950" role="status">
+                  No more trains are catchable today. Switch to &ldquo;Schedule later&rdquo; to book for another day.
+                </p>
+              )}
+              {timetableStatus === "loading" && <p className="text-xs text-muted-foreground">Loading train timesâ€¦</p>}
               {timetableStatus === "error" && (
                 <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs text-muted-foreground">
                   Train times could not load. <button type="button" className="font-medium text-primary underline underline-offset-2" onClick={retryCatalogues}>Try again</button>
@@ -693,7 +783,7 @@ export default function Home() {
               <div className="space-y-1.5">
                 {routesStatus === "error" && (
                   <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950" role="status">
-                    <span>We couldn’t check the full point list. Search to see whether your stop is available.</span>
+                    <span>We couldnâ€™t check the full point list. Search to see whether your stop is available.</span>
                     <button type="button" className="shrink-0 font-medium underline underline-offset-2" onClick={retryCatalogues}>Retry</button>
                   </div>
                 )}
@@ -765,7 +855,7 @@ export default function Home() {
                             </p>
                           )}
                           {!(routesStatus === "ready" && pointCount === 0) && pointSearchStatus === "loading" && pointSearch.trim().length >= MIN_STAGE_SEARCH_LENGTH && (
-                            <p className="px-3 py-5 text-center text-sm text-muted-foreground">Searching points…</p>
+                            <p className="px-3 py-5 text-center text-sm text-muted-foreground">Searching pointsâ€¦</p>
                           )}
                           {!(routesStatus === "ready" && pointCount === 0) && pointSearchStatus === "error" && (
                             <p className="px-3 py-5 text-center text-sm text-muted-foreground" role="alert">
@@ -780,7 +870,7 @@ export default function Home() {
                           {pointGroups.map(({ route, coast, points }) => (
                             <CommandGroup
                               key={route.id}
-                              heading={`${coast === "south" ? "South Coast" : "North Coast"} · ${route.name.replace("Mombasa Terminus ↔ ", "").replace(" (Mtwapa · Malindi)", "")}`}
+                              heading={`${coast === "south" ? "South Coast" : "North Coast"} Â· ${route.name.replace("Mombasa Terminus â†” ", "").replace(" (Mtwapa Â· Malindi)", "")}`}
                             >
                               {points.map((point) => (
                                 <CommandItem
@@ -825,7 +915,7 @@ export default function Home() {
                 </Popover>
                 {selectedPoint && (
                   <p className="px-1 text-[11px] text-muted-foreground">
-                    {selectedPoint.coast === "south" ? "South Coast" : "North Coast"} · fare shown with your ride options
+                    {selectedPoint.coast === "south" ? "South Coast" : "North Coast"} Â· fare shown with your ride options
                   </p>
                 )}
                 {!selectedPoint && routesStatus === "ready" && pointCount > 0 && (
@@ -840,16 +930,13 @@ export default function Home() {
 
             {/* Ride type and door service: compact choices with explicit states. */}
             {bookingCatalogueView === "booking" && selectedPoint && <section className="space-y-2.5" aria-labelledby="ride-options-title">
-              <div className="flex items-baseline justify-between">
-                <h2 id="ride-options-title" className="text-sm font-semibold">Choose your ride</h2>
-                <span className="text-[11px] text-muted-foreground">You can review the fare next</span>
-              </div>
+              <h2 id="ride-options-title" className="text-sm font-semibold">Choose your ride</h2>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   aria-pressed={!charter}
                   onClick={() => { setCharter(false); setHomePickup(false); }}
-                  className={cn("rounded-xl border bg-card p-3 text-left transition-colors", !charter ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
+                  className={cn("rounded-xl border bg-card p-3 text-left transition-all active:scale-[0.97] active:duration-75", !charter ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
                 >
                   <span className="flex items-center gap-2">
                     <Users className="h-4 w-4 shrink-0 text-primary" />
@@ -863,13 +950,13 @@ export default function Home() {
                   type="button"
                   aria-pressed={charter}
                   onClick={() => setCharter(true)}
-                  className={cn("rounded-xl border bg-card p-3 text-left transition-colors", charter ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
+                  className={cn("rounded-xl border bg-card p-3 text-left transition-all active:scale-[0.97] active:duration-75", charter ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
                 >
                   <span className="flex items-center gap-2">
                     <Crown className="h-4 w-4 shrink-0 text-violet-600" />
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-medium">Charter the whole cab</span>
-                      <span className="block text-[11px] text-muted-foreground">Your group · no distance fee</span>
+                      <span className="block text-[11px] text-muted-foreground">Your group Â· no distance fee</span>
                     </span>
                   </span>
                 </button>
@@ -884,7 +971,7 @@ export default function Home() {
                     type="button"
                     aria-pressed={!homePickup}
                     onClick={() => setHomePickup(false)}
-                    className={cn("min-h-[60px] rounded-xl border bg-card px-2.5 py-2 text-left transition-colors", !homePickup ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
+                    className={cn("min-h-[60px] rounded-xl border bg-card px-2.5 py-2 text-left transition-all active:scale-[0.97] active:duration-75", !homePickup ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
                   >
                     <span className="flex items-center gap-1.5 text-xs font-semibold">
                       <MapPin className="h-3.5 w-3.5 shrink-0 text-primary" /> At the SGR stage
@@ -898,7 +985,7 @@ export default function Home() {
                     aria-pressed={homePickup}
                     disabled={!selectedPoint || !charter}
                     onClick={() => setHomePickup(true)}
-                    className={cn("min-h-[60px] rounded-xl border bg-card px-2.5 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-55", homePickup ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
+                    className={cn("min-h-[60px] rounded-xl border bg-card px-2.5 py-2 text-left transition-all active:scale-[0.97] active:duration-75 disabled:cursor-not-allowed disabled:opacity-55 disabled:active:scale-100", homePickup ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
                   >
                     <span className="flex items-center gap-1.5 text-xs font-semibold">
                       <HomeIcon className="h-3.5 w-3.5 shrink-0 text-primary" /> At my address
@@ -907,7 +994,7 @@ export default function Home() {
                       {!selectedPoint
                         ? "Choose a designated stage first"
                         : charter
-                          ? "Charter · no extra distance fee"
+                          ? "Charter Â· no extra distance fee"
                           : "Shared ride distance pricing is not ready yet"}
                     </span>
                   </button>
@@ -916,12 +1003,12 @@ export default function Home() {
 
               <div className="flex items-center justify-between rounded-xl border bg-card px-3.5 py-3">
                 <span>
-                  <span className="block text-xs text-muted-foreground">Estimated total{charter ? " · whole cab" : seats > 1 ? ` · ${seats} seats` : ""}</span>
+                  <span className="block text-xs text-muted-foreground">Estimated total{charter ? " Â· whole cab" : seats > 1 ? ` Â· ${seats} seats` : ""}</span>
                   <span className="block text-[11px] text-muted-foreground">
                     {selectedPoint
                       ? charter
                       ? `${ksh(bookingFeeAmount)} fee included in Mireli's 10% share`
-                        : `${ksh(bookingFeeAmount)} × ${seats} seat${seats === 1 ? "" : "s"} = ${ksh(farePreview.platformFee)} Mireli fee`
+                        : `${ksh(bookingFeeAmount)} Ã— ${seats} seat${seats === 1 ? "" : "s"} = ${ksh(farePreview.platformFee)} Mireli fee`
                       : "Final amount shown before payment"}
                   </span>
                 </span>
@@ -982,7 +1069,7 @@ export default function Home() {
 
               {loading && (
                 <div role="status" className="flex items-center gap-2 rounded-xl border bg-card px-4 py-3 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" /> Checking available cabs…
+                  <Loader2 className="h-4 w-4 animate-spin" /> Checking available cabsâ€¦
                 </div>
               )}
 
@@ -1012,8 +1099,16 @@ export default function Home() {
               )}
 
               {!loading &&
-                visibleTrips.map((trip) => (
-                  <motion.div key={trip.id} layout whileTap={{ scale: 0.99 }}>
+                visibleTrips.map((trip, index) => (
+                  <motion.div
+                    key={trip.id}
+                    layout
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.97 }}
+                    transition={{ duration: 0.22, delay: index * 0.03, ease: "easeOut" }}
+                    whileTap={{ scale: 0.97, transition: { duration: 0.08 } }}
+                  >
                     <CabCard
                       trip={trip}
                       pointName={selectedPoint?.point.name}
@@ -1066,9 +1161,9 @@ export default function Home() {
                         </div>
                         <div className="mt-0.5 text-xs text-muted-foreground">
                           {b.departureAt ? fmtTime(b.departureAt) : "awaiting allocation"}
-                          {b.driver ? ` · ${b.driver.name} · ${b.driver.plate}` : ""}
+                          {b.driver ? ` Â· ${b.driver.name} Â· ${b.driver.plate}` : ""}
                         </div>
-                        <div className="mt-0.5 text-xs font-medium">
+                        <div className="mt-0.5 text-xs font-medium tabular-nums">
                           {ksh(b.cashDue)}
                           {b.status === "awaiting_payment" && <span className="font-normal text-muted-foreground"> by M-Pesa</span>}
                         </div>
@@ -1175,7 +1270,7 @@ function CabCard({
             <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
               <Clock className="h-3 w-3" />
               {trip.direction === "TO_TERMINUS"
-                ? `Leaves the stage ${fmtTime(trip.departureAt)} · be there by then`
+                ? `Leaves the stage ${fmtTime(trip.departureAt)} Â· be there by then`
                 : `Cab departs ${fmtTime(trip.departureAt)}`}
             </div>
           </div>
@@ -1188,7 +1283,7 @@ function CabCard({
               <div className="text-[10px] text-muted-foreground">
                 {charter
                   ? `${ksh(platformFee)} fee in the 10% share`
-                  : `${ksh(trip.platformFeeAmount)} × ${seats} Mireli fee`}
+                  : `${ksh(trip.platformFeeAmount)} Ã— ${seats} Mireli fee`}
               </div>
             )}
           </div>
@@ -1200,8 +1295,8 @@ function CabCard({
               <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">
                 <TrainIcon className="h-3 w-3" />
                 {trip.direction === "FROM_TERMINUS"
-                  ? `Meets the ${trip.train.name} · MTM ${trip.train.mtmTime}`
-                  : `Catches the ${trip.train.name} · MTM ${trip.train.mtmTime}`}
+                  ? `Meets the ${trip.train.name} Â· MTM ${trip.train.mtmTime}`
+                  : `Catches the ${trip.train.name} Â· MTM ${trip.train.mtmTime}`}
               </span>
             )}
             {trip.direction === "TO_TERMINUS" && (
@@ -1213,9 +1308,9 @@ function CabCard({
           <SeatMeter booked={booked} capacity={trip.capacity} />
         </div>
 
-        <Button className="h-9 w-full" size="sm" disabled={full || !hasPoint || paymentChecking} onClick={onBook}>
+        <Button variant="accent" className="h-10 w-full" size="sm" disabled={full || !hasPoint || paymentChecking} onClick={onBook}>
           {paymentChecking
-            ? "Checking checkout…"
+            ? "Checking checkoutâ€¦"
             : !hasPoint
             ? `Choose a ${trip.pointsLabel} point first`
             : full
@@ -1223,10 +1318,33 @@ function CabCard({
               ? "Not enough seats"
               : "Unavailable"
             : charter
-              ? `Book charter · ${ksh(fare)}`
-              : `Reserve ${seats > 1 ? `${seats} seats` : "seat"} · ${ksh(fare)}`}
+              ? `Book charter Â· ${ksh(fare)}`
+              : `Reserve ${seats > 1 ? `${seats} seats` : "seat"} Â· ${ksh(fare)}`}
         </Button>
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * The moving knob behind the active direction tab. Shares one layoutId so the
+ * pill glides between triggers; while it moves it stretches 12% wide and
+ * settles back (no bounce, ease-in-out, same duration as the layout move).
+ */
+function DirectionPill() {
+  const stretch = useAnimationControls();
+  return (
+    <motion.span
+      layoutId={LAYOUT_ID.directionPill}
+      className="absolute inset-0 rounded-md bg-background shadow-sm"
+      transition={{ layout: { duration: DURATION.move, ease: EASE_IN_OUT } }}
+      animate={stretch}
+      onLayoutAnimationStart={() => {
+        void stretch.start({
+          scaleX: [1, KNOB_STRETCH, 1],
+          transition: { duration: DURATION.move, ease: EASE_IN_OUT },
+        });
+      }}
+    />
   );
 }

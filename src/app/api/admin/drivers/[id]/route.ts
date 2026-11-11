@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getAdminSession } from "@/lib/session";
 import { audit } from "@/lib/audit";
+import { casUpdateMany, DRIVER_MACHINE } from "@/lib/state-machines";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -43,7 +44,16 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const { id } = await params;
   const tripCount = await db.trip.count({ where: { driverId: id } });
   if (tripCount > 0) {
-    await db.driver.update({ where: { id }, data: { status: "inactive" } });
+    const deactivated = await casUpdateMany(
+      "driver",
+      { id },
+      DRIVER_MACHINE,
+      ["active", "suspended"],
+      "inactive",
+    );
+    if (deactivated === 0) {
+      return NextResponse.json({ ok: true, deactivated: false, message: "Driver already inactive." });
+    }
     await audit({
       actorId: session.id,
       actorName: session.name,

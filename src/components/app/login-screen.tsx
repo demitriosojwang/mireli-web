@@ -11,7 +11,7 @@ import { LogoTile } from "@/components/site-chrome";
 import { cn } from "@/lib/utils";
 
 /**
- * Original-style login: centered logo + wordmark + tagline, identifier → OTP,
+ * Original-style login: centered logo + wordmark + tagline, identifier â†’ OTP,
  * first-time name capture, trust indicators. Wired to the real /api/auth.
  */
 export function LoginScreen({ onDone }: { onDone: () => void }) {
@@ -20,11 +20,15 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
   const [challengeId, setChallengeId] = useState<string | null>(null);
   const [demoCode, setDemoCode] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [needsName, setNeedsName] = useState(false);
-  const [otpSent, setOtpSent] = useState(false);
   const [resendSeconds, setResendSeconds] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /**
+   * The explicit OTP machine (same encoding as auth-sheet.tsx):
+   *  identifier -> otp -> (name capture) -> done.
+   * `nameCapture` is its own state, not a boolean overlapping the OTP screen.
+   */
+  const [step, setStep] = useState<"identifier" | "otp" | "nameCapture">("identifier");
 
   const isEmail = identifier.includes("@");
 
@@ -49,7 +53,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
       setDemoCode(result.simulation ? result.demoCode || null : null);
       setCode("");
       setResendSeconds(result.cooldownSeconds);
-      setOtpSent(true);
+      setStep("otp");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
     } finally {
@@ -69,7 +73,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
         body: { step: "verify", challengeId, code, name },
       });
       if (res.needsName) {
-        setNeedsName(true);
+        setStep("nameCapture");
         setError(null);
         return;
       }
@@ -88,8 +92,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
     setChallengeId(null);
     setDemoCode(null);
     setResendSeconds(0);
-    setNeedsName(false);
-    setOtpSent(false);
+    setStep("identifier");
     setError(null);
   }
 
@@ -100,15 +103,15 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.4 }}
+          transition={{ duration: 0.4, ease: "easeOut" }}
         >
           <LogoTile size="lg" />
         </motion.div>
         <h1 className="mb-1 mt-4 text-2xl font-bold tracking-tight">Mi-Reli</h1>
-        <p className="mb-8 text-sm text-muted-foreground">Ride · Connect · Journey</p>
+        <p className="mb-8 text-sm text-muted-foreground">Ride Â· Connect Â· Journey</p>
 
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm space-y-4">
-          {!otpSent ? (
+          {step === "identifier" ? (
             <>
               <div className="mb-2 text-center">
                 <h2 className="text-lg font-semibold">Welcome</h2>
@@ -158,7 +161,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
                     setCode(e.target.value.replace(/\D/g, ""));
                     setError(null);
                   }}
-                  placeholder="••••••"
+                  placeholder="â€¢â€¢â€¢â€¢â€¢â€¢"
                   className={cn("h-11 text-center text-lg tracking-[0.5em]", error && "border-destructive")}
                   autoFocus
                   onKeyDown={(e) => e.key === "Enter" && handleVerifyOtp()}
@@ -166,7 +169,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
                 />
               </div>
 
-              {needsName && (
+              {step === "nameCapture" && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: "auto" }}
@@ -191,7 +194,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
               <Button
                 className="h-11 w-full"
                 onClick={handleVerifyOtp}
-                disabled={busy || code.length !== 6 || !challengeId || (needsName && name.length < 2)}
+                disabled={busy || code.length !== 6 || !challengeId || (step === "nameCapture" && name.length < 2)}
               >
                 Verify &amp; log in <ArrowRight className="ml-1 h-4 w-4" />
               </Button>
@@ -202,16 +205,16 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
                 type="button"
                 onClick={handleSendOtp}
                 disabled={busy || resendSeconds > 0}
-                className="w-full text-center text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full text-center text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-60 [font-variant-numeric:tabular-nums]"
               >
                 {resendSeconds > 0 ? `Resend code in ${resendSeconds}s` : "Resend code"}
               </button>
             </>
           )}
 
-          {otpSent && (
+          {step !== "identifier" && (
             <button onClick={reset} className="w-full text-center text-xs text-muted-foreground hover:text-foreground">
-              ← Use a different email or phone
+              â† Use a different email or phone
             </button>
           )}
         </motion.div>
@@ -224,7 +227,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
           </div>
           <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
-            <span>Fares are held by the platform — never paid to a driver directly.</span>
+            <span>Fares are held by the platform â€” never paid to a driver directly.</span>
           </div>
           <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
@@ -233,7 +236,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
         </div>
       </div>
 
-      <div className="px-6 py-4 text-center text-[10px] text-muted-foreground">Mi-Reli · Mombasa Terminus · Kenya Coast</div>
+      <div className="px-6 py-4 text-center text-[10px] text-muted-foreground">Mi-Reli Â· Mombasa Terminus Â· Kenya Coast</div>
     </div>
   );
 }

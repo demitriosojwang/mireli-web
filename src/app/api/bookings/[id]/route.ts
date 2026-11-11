@@ -10,6 +10,7 @@ import {
 import * as daraja from "@/lib/daraja";
 import { isBookingReadyForPayment } from "@/lib/booking-payment-eligibility";
 import { MIRELI_SUPPORT_PHONE_E164 } from "@/lib/support";
+import { BOOKING_MACHINE, casUpdateMany, MPESA_MACHINE } from "@/lib/state-machines";
 import { describeCancellationCutoff, LATE_CANCELLATION_CREDIT_VALIDITY_DAYS } from "@/lib/cancellation-policy";
 
 type Params = { params: Promise<{ id: string }> };
@@ -176,14 +177,17 @@ export async function POST(req: NextRequest, { params }: Params) {
     const push = await daraja.stkPush(phone, tx.amount, booking.code, tx.id);
     if (!push.ok || !push.checkoutRequestId) {
       const uncertain = push.responseCode === daraja.RESULT_CODES.TIMEOUT || push.ok;
-      await db.mpesaTransaction.updateMany({
-        where: { id: tx.id, status: "pending" },
-        data: {
-          status: uncertain ? "ambiguous" : "failed",
+      await casUpdateMany(
+        "mpesaTransaction",
+        { id: tx.id },
+        MPESA_MACHINE,
+        "pending",
+        uncertain ? "ambiguous" : "failed",
+        {
           resultCode: push.responseCode,
           resultDesc: push.responseDescription,
         },
-      });
+      );
       if (uncertain) {
         return NextResponse.json({
           ok: true,
@@ -204,14 +208,17 @@ export async function POST(req: NextRequest, { params }: Params) {
       });
       return NextResponse.json({ error: push.responseDescription || "M-Pesa rejected the payment request" }, { status: 400 });
     }
-    await db.mpesaTransaction.updateMany({
-      where: { id: tx.id, checkoutRequestId: tx.checkoutRequestId, status: "pending" },
-      data: {
+    await casUpdateMany(
+      "mpesaTransaction",
+      { id: tx.id, checkoutRequestId: tx.checkoutRequestId },
+      MPESA_MACHINE,
+      "pending",
+      "stk_push_sent",
+      {
         checkoutRequestId: push.checkoutRequestId,
         merchantRequestId: push.merchantRequestId,
-        status: "stk_push_sent",
       },
-    });
+    );
     await audit({
       actorId: session.id,
       actorName: session.name,
@@ -300,26 +307,39 @@ export async function POST(req: NextRequest, { params }: Params) {
       );
     }
     if (result.resultCode !== daraja.RESULT_CODES.SUCCESS || !result.mpesaReceipt) {
-      await db.mpesaTransaction.update({
-        where: { id: tx.id },
-        data: {
-          status: "failed",
+      const lost = await casUpdateMany(
+        "mpesaTransaction",
+        { id: tx.id },
+        MPESA_MACHINE,
+        ["pending", "stk_push_sent", "ambiguous"],
+        "failed",
+        {
           resultCode: result.resultCode || daraja.RESULT_CODES.CANCELLED,
           resultDesc: result.resultDesc,
         },
-      });
+      );
+      if (lost === 0) {
+        // Raced with a confirming callback — treat as paid rather than failing.
+        return NextResponse.json({ ok: true, paymentPending: false, message: "Payment already confirmed." });
+      }
       return NextResponse.json({ error: result.resultDesc || "The M-Pesa prompt was not completed" }, { status: 402 });
     }
-    await db.mpesaTransaction.update({
-      where: { id: tx.id },
-      data: {
-        status: "confirmed",
+    const won = await casUpdateMany(
+      "mpesaTransaction",
+      { id: tx.id },
+      MPESA_MACHINE,
+      ["pending", "stk_push_sent", "ambiguous"],
+      "confirmed",
+      {
         resultCode: result.resultCode,
         resultDesc: result.resultDesc,
         mpesaReceipt: result.mpesaReceipt,
         confirmedAt: new Date(),
       },
-    });
+    );
+    if (won === 0) {
+      return NextResponse.json({ ok: true, paymentPending: false, message: "Payment already confirmed." });
+    }
     await confirmBookingPayment(booking.id, {
       receipt: result.mpesaReceipt,
       checkoutRequestId: tx.checkoutRequestId,
@@ -382,10 +402,17 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (bookingTrip && ["departed", "completed", "cancelled"].includes(bookingTrip.status)) {
       return NextResponse.json({ error: "Trip is no longer boarding" }, { status: 400 });
     }
-    await db.booking.update({
-      where: { id: booking.id },
-      data: { status: "boarded", checkedInAt: new Date() },
-    });
+    const boarded = await casUpdateMany(
+      "booking",
+      { id: booking.id },
+      BOOKING_MACHINE,
+      "confirmed",
+      "boarded",
+      { checkedInAt: new Date() },
+    );
+    if (boarded === 0) {
+      return NextResponse.json({ error: "Booking already moved on — refresh to see its current state" }, { status: 409 });
+    }
     await audit({
       actorId: session.id,
       actorName: session.name,

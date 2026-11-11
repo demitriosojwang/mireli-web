@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { getAdminSession } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import { runFullSweep, runOperationalTick } from "@/lib/engine";
+import { casUpdateMany, TRIP_MACHINE } from "@/lib/state-machines";
 
 /** All trips with manifests + allocation state. */
 export async function GET(req: NextRequest) {
@@ -137,7 +138,18 @@ export async function POST(req: NextRequest) {
       const { onTripCompleted } = await import("@/lib/money");
       await onTripCompleted(trip.id);
     } else {
-      await db.trip.update({ where: { id: trip.id }, data: { status: "cancelled" } });
+      // CAS: only a pre-departure trip can be cancelled — a trip that departed
+      // between the seat scan and now is left alone (it completes normally).
+      const cancelled = await casUpdateMany(
+        "trip",
+        { id: trip.id },
+        TRIP_MACHINE,
+        ["scheduled", "filling", "locked"],
+        "cancelled",
+      );
+      if (cancelled === 0) {
+        return NextResponse.json({ error: "Trip already departed — it completed instead of cancelling." }, { status: 409 });
+      }
     }
     await audit({
       actorId: actor.id,

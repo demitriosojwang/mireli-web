@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addNairobiDays, nairobiDate, nairobiDayRange, nairobiEventAt, nairobiTrainArrivalAt, nairobiWeekday } from "@/lib/nairobi-time";
+import { addNairobiDays, nairobiDate, nairobiDayRange, nairobiEventAt, nairobiNowMinutes, nairobiTrainArrivalAt, nairobiWeekday } from "@/lib/nairobi-time";
 describe("Mombasa scheduling", () => {
   it("queries a Kenya day using UTC instants", () => {
     const day = nairobiDayRange("2026-10-04");
@@ -25,6 +25,27 @@ describe("Mombasa scheduling", () => {
     expect(addNairobiDays("2026-10-31", 1)).toBe("2026-11-01");
     expect(() => nairobiWeekday("2026-02-30")).toThrow();
     expect(() => addNairobiDays("2026-10-18", 0.5)).toThrow();
+  });
+});
+
+describe("nairobiNowMinutes (pickup-now train selection)", () => {
+  it("returns Kenya wall-clock minutes regardless of host timezone", () => {
+    // 09:15 UTC == 12:15 in Kenya (UTC+3)
+    expect(nairobiNowMinutes(new Date("2026-11-11T09:15:00Z"))).toBe(12 * 60 + 15);
+    // 21:30 UTC == 00:30 next day in Kenya
+    expect(nairobiNowMinutes(new Date("2026-11-11T21:30:00Z"))).toBe(30);
+    // 20:59 UTC == 23:59 in Kenya
+    expect(nairobiNowMinutes(new Date("2026-11-11T20:59:00Z"))).toBe(23 * 60 + 59);
+  });
+
+  it("stays inside one Kenya day for the whole UTC day", () => {
+    for (let h = 0; h < 24; h++) {
+      for (const m of [0, 29, 59]) {
+        const minutes = nairobiNowMinutes(new Date(Date.UTC(2026, 10, 11, h, m)));
+        expect(minutes).toBeGreaterThanOrEqual(0);
+        expect(minutes).toBeLessThanOrEqual(23 * 60 + 59);
+      }
+    }
   });
 });
 
