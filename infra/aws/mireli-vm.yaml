@@ -349,7 +349,7 @@ Resources:
 
               for attempt in {1..12}; do
                 # Amazon Linux 2023 ships curl-minimal; installing curl conflicts with it.
-                if dnf update -y && dnf install -y awscli-2 docker tar gzip jq python3; then
+                if dnf update -y && dnf install -y awscli-2 docker tar gzip jq python3 clamav clamav-update; then
                   break
                 fi
                 if [ "$attempt" -eq 12 ]; then exit 1; fi
@@ -358,6 +358,10 @@ Resources:
               systemctl enable --now docker
               install -d -m 0700 /var/lib/mireli/postgres
               install -d -m 0750 -o 1001 -g 1001 /var/lib/mireli/app-state
+              # ClamAV signature database for document scanning. It is refreshed by
+              # the freshclam timer and mounted read-only into the app container.
+              install -d -m 0755 /var/lib/clamav
+              systemctl enable --now clamav-freshclam || true
               install -d -m 0755 /etc/mireli /etc/caddy /var/lib/caddy
               useradd --system --home-dir /var/lib/caddy --shell /sbin/nologin caddy || true
 
@@ -431,8 +435,8 @@ Resources:
               aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_HOST"
               docker pull "$ECR_URI:$IMAGE_TAG"
               umask 077
-              printf 'POSTGRES_USER=mireli\nPOSTGRES_PASSWORD=%s\nPOSTGRES_DB=mireli\nSESSION_SECRET=%s\nNODE_OPTIONS=--max-old-space-size=768\nMIRELI_DATABASE_MODE=embedded\nMIRELI_DEMO_MODE=false\nMIRELI_ALLOW_UNSAFE_DEMO=false\nMIRELI_APPLY_DATABASE_MIGRATIONS=true\nMIRELI_BOOTSTRAP_PLATFORM_CONFIG=true\nMIRELI_PUBLIC_ORIGIN=https://%s\nTZ=Africa/Nairobi\n' "$DB_PASSWORD" "$SESSION_SECRET" "$PUBLIC_HOSTNAME" > /etc/mireli/runtime.env
-              for key in DRIVER_AUTH_SECRET AT_USERNAME AT_API_KEY AT_SENDER_ID BREVO_API_KEY BREVO_SENDER_EMAIL BREVO_SENDER_NAME MIRELI_SUPPORT_EMAIL VALHALLA_URL VALHALLA_API_TOKEN DRIVER_DOCUMENT_BUCKET DRIVER_SCAN_COMMAND DRIVER_COMPLIANCE_REVIEWERS DRIVER_SUPPORT_REVIEWERS DRIVER_FINANCE_REVIEWERS DRIVER_POLICY_VERSION DRIVER_PRIVACY_URL DRIVER_TERMS_URL MPESA_ENVIRONMENT MPESA_CONSUMER_KEY MPESA_CONSUMER_SECRET MPESA_SHORTCODE MPESA_PASSKEY MPESA_CALLBACK_BASE_URL MPESA_B2C_SHORTCODE MPESA_INITIATOR_NAME MPESA_INITIATOR_PASSWORD MPESA_SECURITY_CREDENTIAL MPESA_LIVE_PAYOUTS_ENABLED; do
+              printf 'POSTGRES_USER=mireli\nPOSTGRES_PASSWORD=%s\nPOSTGRES_DB=mireli\nSESSION_SECRET=%s\nAWS_REGION=%s\nNODE_OPTIONS=--max-old-space-size=768\nMIRELI_DATABASE_MODE=embedded\nMIRELI_DEMO_MODE=false\nMIRELI_ALLOW_UNSAFE_DEMO=false\nMIRELI_APPLY_DATABASE_MIGRATIONS=true\nMIRELI_BOOTSTRAP_PLATFORM_CONFIG=true\nMIRELI_PUBLIC_ORIGIN=https://%s\nTZ=Africa/Nairobi\n' "$DB_PASSWORD" "$SESSION_SECRET" "$AWS_REGION" "$PUBLIC_HOSTNAME" > /etc/mireli/runtime.env
+              for key in DRIVER_AUTH_SECRET AT_USERNAME AT_API_KEY AT_SENDER_ID BREVO_API_KEY BREVO_SENDER_EMAIL BREVO_SENDER_NAME MIRELI_SUPPORT_EMAIL VALHALLA_URL VALHALLA_API_TOKEN STAFF_AUTH_SECRET STAFF_MFA_ENCRYPTION_KEY MIRELI_STAFF_EMAILS MIRELI_ADMIN_EMAILS DRIVER_ONBOARDING_ENABLED DRIVER_ONBOARDING_PILOT_EMAILS DRIVER_DOCUMENT_BUCKET DRIVER_SCAN_MODE DRIVER_SCAN_COMMAND DRIVER_COMPLIANCE_REVIEWERS DRIVER_SUPPORT_REVIEWERS DRIVER_FINANCE_REVIEWERS DRIVER_POLICY_VERSION DRIVER_PRIVACY_URL DRIVER_TERMS_URL MPESA_ENVIRONMENT MPESA_CONSUMER_KEY MPESA_CONSUMER_SECRET MPESA_SHORTCODE MPESA_PASSKEY MPESA_CALLBACK_BASE_URL MPESA_B2C_SHORTCODE MPESA_INITIATOR_NAME MPESA_INITIATOR_PASSWORD MPESA_SECURITY_CREDENTIAL MPESA_LIVE_PAYOUTS_ENABLED; do
                 value=$(printf '%s' "$DB_SECRET_JSON" | jq -r --arg name "$key" 'if .[$name] == null then empty elif (.[$name] | type) == "string" then .[$name] else error("optional runtime values must be strings") end')
                 if [[ -n "$value" ]]; then
                   [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]]
@@ -445,6 +449,7 @@ Resources:
                 --env-file /etc/mireli/runtime.env \
                 --volume /var/lib/mireli/postgres:/var/lib/postgresql/data \
                 --volume /var/lib/mireli/app-state:/app/.local \
+              --volume /var/lib/clamav:/var/lib/clamav:ro \
                 --memory 1400m --cpus 1.8 \
                 --log-opt max-size=10m --log-opt max-file=5 \
                 "$ECR_URI:$IMAGE_TAG"

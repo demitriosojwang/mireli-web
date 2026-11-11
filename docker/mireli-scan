@@ -1,0 +1,52 @@
+#!/bin/sh
+# Mireli document malware scanner.
+#
+# Contract required by src/lib/driver/scanner.ts:
+#   exit 0 -> clean
+#   exit 1 -> infected (document is rejected)
+#   other  -> scan unavailable (document stays quarantined)
+#
+# scanner.ts invokes:  <command> --no-summary -- <file>
+# so this wrapper strips the caller's own flags and applies its own, rather than
+# appending a second "--" that would turn the flags into filenames.
+#
+# ClamAV is installed in the image; the signature database is mounted read-only
+# from the host at /var/lib/clamav and refreshed there by the freshclam timer.
+set -u
+
+DB=/var/lib/clamav
+if [ ! -r "$DB/main.cvd" ] && [ ! -r "$DB/main.cld" ]; then
+  echo "mireli-scan: signature database missing at $DB" >&2
+  exit 2
+fi
+
+# Collect real file arguments, discarding the caller's option tokens.
+files=""
+for arg in "$@"; do
+  case "$arg" in
+    --|--no-summary|--infected|--stdout) continue ;;
+    -*) continue ;;
+    *) files="$files $arg" ;;
+  esac
+done
+
+if [ -z "$files" ]; then
+  echo "mireli-scan: no file to scan" >&2
+  exit 2
+fi
+
+# A file that cannot be read must never be reported clean.
+for f in $files; do
+  if [ ! -f "$f" ] || [ ! -r "$f" ]; then
+    echo "mireli-scan: cannot read $f" >&2
+    exit 2
+  fi
+done
+
+# shellcheck disable=SC2086
+exec /usr/bin/clamscan \
+  --database="$DB" \
+  --no-summary \
+  --infected \
+  --stdout \
+  -- $files

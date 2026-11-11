@@ -78,7 +78,7 @@ ENV NODE_ENV=production \
     PGDATA=/var/lib/postgresql/data
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl gosu openssl tini \
+ && apt-get install -y --no-install-recommends ca-certificates curl gosu openssl tini clamav \
  && install -d -m 0755 /usr/share/keyrings \
  && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/keyrings/postgresql.asc \
  && echo "deb [signed-by=/usr/share/keyrings/postgresql.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
@@ -115,6 +115,10 @@ RUN mkdir -p /app/.local /var/lib/postgresql/data \
  && chown postgres:postgres /var/lib/postgresql/data
 
 COPY --chmod=0755 docker/entrypoint.sh /usr/local/bin/mireli-entrypoint.sh
+# Document malware scanner. The signature database is NOT baked into the image;
+# it is mounted read-only from the host at /var/lib/clamav and refreshed there by
+# the freshclam timer, so image builds stay reproducible and the DB stays current.
+COPY --chmod=0755 docker/mireli-scan /usr/local/bin/mireli-scan
 # A Windows checkout can preserve CRLF in shell scripts. Normalize it in the
 # Linux image so the kernel can resolve the entrypoint's shebang.
 RUN sed -i 's/\r$//' /usr/local/bin/mireli-entrypoint.sh
