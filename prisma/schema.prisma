@@ -510,3 +510,38 @@ model AuditLog {
   metadata  String? // JSON
   createdAt DateTime @default(now())
 }
+
+model StaffAccount {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  totpSecret    String?
+  mfaEnrolledAt DateTime?
+  lastTotpStep  Int            @default(-1)
+  disabledAt    DateTime?
+  createdAt     DateTime       @default(now())
+  sessions      StaffSession[]
+}
+
+model StaffSession {
+  id        String       @id @default(cuid())
+  accountId String
+  account   StaffAccount @relation(fields: [accountId], references: [id])
+  tokenHash String       @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime     @default(now())
+
+  @@index([accountId, expiresAt])
+}
+
+model StaffAuthChallenge {
+  id         String    @id
+  email      String
+  codeHash   String
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([email, createdAt])
+}

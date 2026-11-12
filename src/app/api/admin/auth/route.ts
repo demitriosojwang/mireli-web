@@ -3,11 +3,26 @@ import {
   adminCookieOptions,
   encodeSession,
   getAdminSession,
+  getStaffConsoleSession,
   isAdminEmail,
 } from "@/lib/session";
 import { getConfig } from "@/lib/money";
 import { audit } from "@/lib/audit";
 import { isLocalDemoEnabled } from "@/lib/runtime-mode";
+import { staffAuthPost } from "@/lib/staff/http";
+import { publicStaffOrigin, staffAuthConfigured } from "@/lib/staff/config";
+import { staffLandingPage } from "@/lib/staff/routes";
+
+export async function GET() {
+  const headers = { "Cache-Control": "no-store" };
+  try {
+    const session = await getStaffConsoleSession();
+    if (!session) return NextResponse.json({ error: "Sign in to the staff console." }, { status: 401, headers });
+    return NextResponse.json({ authenticated: true, landingPage: staffLandingPage(session.roles) }, { headers });
+  } catch {
+    return NextResponse.json({ error: "Staff sign-in is temporarily unavailable." }, { status: 503, headers });
+  }
+}
 
 /**
  * Admin authentication — completely separate from the passenger site.
@@ -17,11 +32,14 @@ import { isLocalDemoEnabled } from "@/lib/runtime-mode";
  * A wrong email gets a generic rejection — the panel's existence isn't advertised.
  */
 export async function POST(req: NextRequest) {
+  if (!isLocalDemoEnabled()) {
+    if (!publicStaffOrigin() || (!staffAuthConfigured() && !req.headers.get("cookie"))) {
+      return NextResponse.json({ error: "Verified staff sign-in is not configured." }, { status: 503, headers: { "Cache-Control": "no-store" } });
+    }
+    return staffAuthPost(req);
+  }
   const body = await req.json().catch(() => ({}));
   const step = body.step as string;
-  if (step !== "logout" && !isLocalDemoEnabled()) {
-    return NextResponse.json({ error: "Verified administrator authentication is not configured." }, { status: 503 });
-  }
   const cfg = await getConfig();
   const adminEmails = JSON.parse(cfg.adminEmails) as string[];
 
@@ -79,7 +97,7 @@ export async function POST(req: NextRequest) {
       identifier: email,
       exp: Date.now() + 12 * 60 * 60 * 1000,
     };
-    const res = NextResponse.json({ ok: true, session });
+    const res = NextResponse.json({ ok: true, session, landingPage: "/admin" });
     res.cookies.set({ ...adminCookieOptions(), value: encodeSession(session) });
     await audit({
       actorId: email,

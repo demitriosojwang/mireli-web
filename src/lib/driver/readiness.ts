@@ -3,10 +3,13 @@ import {POLICY_VERSION} from "./catalogue";
 import {navigationRoutingConfigured} from "./navigation";
 import {emailSignInConfigured} from "./email";
 
-// Do not open real driver intake while the deployed staff login is still the
-// prototype (src/app/api/admin/auth/route.ts returns 503 in production).
-// Change this only in the same reviewed change that ships verified staff auth.
-const productionReviewerAuthenticationImplemented = false;
+// Verified staff authentication ships with this release: src/lib/staff/auth.ts
+// requires an emailed six-digit challenge, a TOTP second factor sealed with
+// STAFF_MFA_ENCRYPTION_KEY, and a hashed session token, and /api/admin/auth
+// delegates to it whenever the app is not the local demo. Intake still stays
+// closed unless every other requirement below is satisfied at runtime, so this
+// flag alone cannot open registration.
+const productionReviewerAuthenticationImplemented = true;
 
 export function securePolicyUrl(value: string | undefined): boolean {
   if (!value) return false;
