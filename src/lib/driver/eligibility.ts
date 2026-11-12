@@ -28,5 +28,27 @@ export function evaluateDriverApplication(
       )) reasons.push(`${requirement.title} needs current approved evidence.`);
     });
   }
-  return { eligible: reasons.length === 0, reasons };
+  // The blue check is the driver-facing mark of this same evaluation. It is not a
+  // separate approval step: it is true only while every required document is
+  // approved, scanned clean and unexpired, the application is approved and the
+  // account is active. It disappears the moment any of that stops being true,
+  // which is why it is derived here rather than stored as a flag someone could
+  // leave set after a document expired.
+  const verified = reasons.length === 0;
+  const required = app ? applicableRequirements(app.ownsVehicle).filter((r) => r.required) : [];
+  const approvedDocuments = app
+    ? required.filter((requirement) => app.documents.some((document) =>
+        document.type === requirement.id &&
+        document.state === "approved" &&
+        (document.scanState === "clean" || (demo && document.scanState === "clean_demo")) &&
+        (!document.expiresAt || document.expiresAt > now),
+      )).length
+    : 0;
+  return {
+    eligible: verified,
+    verified,
+    verifiedDocuments: approvedDocuments,
+    requiredDocuments: required.length,
+    reasons,
+  };
 }
