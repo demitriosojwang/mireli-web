@@ -80,8 +80,9 @@ describe("untrusted driver API requests do not reach a database",()=>{
     vi.stubEnv("NODE_ENV","production");vi.stubEnv("MIRELI_DEMO_MODE","false");
     Object.entries({DRIVER_AUTH_SECRET:"a".repeat(48),AT_USERNAME:"configured",AT_API_KEY:"configured",AWS_REGION:"eu-west-1",DRIVER_DOCUMENT_BUCKET:"private",DRIVER_POLICY_VERSION:POLICY_VERSION,DRIVER_PRIVACY_URL:`${origin}/privacy`,DRIVER_TERMS_URL:`${origin}/terms`}).forEach(([k,v])=>vi.stubEnv(k,v));
     vi.stubEnv("DRIVER_SCAN_COMMAND","/usr/bin/clamscan");vi.stubEnv("DRIVER_COMPLIANCE_REVIEWERS","compliance@example.com");
-    // Provider keys alone cannot open production intake while staff authentication is still fail-closed.
-    expect(driverRegistrationConfigured()).toBe(false);
+    // Every prerequisite is satisfied here, staff authentication included, so intake opens.
+    // Dropping any single prerequisite must close it again (private storage is checked next).
+    expect(driverRegistrationConfigured()).toBe(true);
     vi.stubEnv("DRIVER_DOCUMENT_BUCKET","");expect(driverRegistrationConfigured()).toBe(false);
     expect(securePolicyUrl("javascript:alert(1)")).toBe(false);expect(securePolicyUrl("https://user:password@example.com")).toBe(false);
   });

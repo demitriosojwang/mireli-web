@@ -112,3 +112,46 @@ export async function sendEmailCode(email:string,code:string,purpose:"driver"|"s
     throw new DriverError(503,"EMAIL_UNAVAILABLE","The verification email could not be sent. Please try again later.");
   }
 }
+
+function escapeText(value:string):string {
+  return value.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]!));
+}
+
+/**
+ * Sent once, when compliance approves an application and the driver becomes active.
+ * Approval has already committed by then, so a provider failure is logged and
+ * swallowed: a missing welcome email must never roll back or block onboarding.
+ */
+export async function sendOnboardingWelcomeEmail(input:{email:string;driverName?:string|null}):Promise<void> {
+  const supportEmail = process.env.MIRELI_SUPPORT_EMAIL?.trim() || "mirelisgr001@gmail.com";
+  const firstName = (input.driverName ?? "").trim().split(/\s+/)[0] || "Driver";
+  try {
+    await sendTransactionalEmail({
+      to: input.email,
+      senderName: "Mireli Driver",
+      subject: "You're approved — welcome to Mireli Driver",
+      textContent:
+        `Hi ${firstName},\n\n` +
+        `Your Mireli driver account has been approved. You can now sign in to the Mireli Driver app and accept Mombasa SGR transfers.\n\n` +
+        `We are genuinely glad to have you with us, and we hope to keep working together for a long time.\n\n` +
+        `If anything about your account, documents or payouts needs attention, reply to this email or write to ${supportEmail}.\n\n` +
+        `— The Mireli Driver team`,
+      htmlContent: mireliEmailShell({
+        headerHtml: mireliEmailHeader("You're approved — welcome aboard"),
+        bodyHtml:
+          `<p style="margin:0 0 12px;font-size:15px">Hi ${escapeText(firstName)},</p>` +
+          `<p style="margin:0 0 12px;font-size:15px;line-height:1.55">Your driver account is approved. You can sign in to the Mireli Driver app and start accepting <strong>Mombasa SGR transfers</strong>.</p>` +
+          mireliCodeBlock("Account status", "APPROVED") +
+          `<p style="margin:0 0 12px;font-size:15px;line-height:1.55">We are genuinely glad to have you with us, and we hope to keep working together for a long time.</p>` +
+          `<p style="margin:0 0 4px;font-size:15px;line-height:1.55">If anything about your account, documents or payouts needs attention, just reply to this email.</p>` +
+          `<p style="margin:16px 0 0;color:#64748b;font-size:13px">${mireliSupportLine(supportEmail)}</p>`,
+        footerNote: "Mireli Driver · part of the Mi-Reli network · Mombasa SGR transfers",
+      }),
+      tags: ["driver-onboarding"],
+    });
+  } catch (error) {
+    console.error("driver.welcome_email.failed", {
+      reason: error instanceof EmailProviderError ? error.code : "UNEXPECTED",
+    });
+  }
+}

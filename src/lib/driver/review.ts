@@ -3,6 +3,7 @@ import {getAdminSession} from "@/lib/session";
 import {isLocalDemoEnabled} from "@/lib/runtime-mode";
 import {applicableRequirements,POLICY_VERSION} from "./catalogue";
 import {DriverError,integer,text} from "./errors";
+import {sendOnboardingWelcomeEmail} from "./email";
 
 export async function requireReviewer(req:Request,role:"compliance"|"finance"="compliance") {
   const session=await getAdminSession();
@@ -19,6 +20,7 @@ export async function requireReviewer(req:Request,role:"compliance"|"finance"="c
 export async function reviewApplication(id:string,body:Record<string,unknown>,actor:{id:string;name:string}) {
   const version=integer(body.expectedVersion,"Version"),action=text(body.action,"Action",3,30);
   const reason=typeof body.reason==="string"?body.reason.trim().slice(0,500):"";
+  let approvedDriverId:string|null=null;
   if(["reject_document","needs_changes","suspend"].includes(action) && reason.length<5)throw new DriverError(400,"REASON_REQUIRED","Give an actionable reason.");
   await db.$transaction(async tx=>{
     const app=await tx.driverApplication.findUnique({where:{id},include:{documents:{where:{state:{not:"replaced"}}}}});
@@ -36,7 +38,7 @@ export async function reviewApplication(id:string,body:Record<string,unknown>,ac
       if(app.policyVersion!==POLICY_VERSION)throw new DriverError(409,"POLICY_UPDATED","The driver must acknowledge the current policy.");
       const missing=applicableRequirements(app.ownsVehicle).filter(r=>r.required && !app.documents.some(d=>d.type===r.id && d.state==="approved" && (!d.expiresAt || d.expiresAt>now) && (d.scanState==="clean" || (isLocalDemoEnabled() && d.scanState==="clean_demo"))));
       if(missing.length)throw new DriverError(409,"OUTSTANDING_DOCUMENTS","Approve all required current documents first.");
-      status="approved";await tx.driver.update({where:{id:app.driverId},data:{status:"active"}});
+      status="approved";approvedDriverId=app.driverId;await tx.driver.update({where:{id:app.driverId},data:{status:"active"}});
     } else if(action==="needs_changes") {status="changes_requested";await tx.driver.update({where:{id:app.driverId},data:{status:"applicant"}});}
     else if(action==="suspend") {status="suspended";await tx.driver.update({where:{id:app.driverId},data:{status:"suspended"}});}
     else throw new DriverError(400,"INVALID_ACTION","Review action is invalid.");
@@ -44,5 +46,10 @@ export async function reviewApplication(id:string,body:Record<string,unknown>,ac
     if(updated.count!==1)throw new DriverError(409,"STALE_APPLICATION","Refresh before reviewing.");
     await tx.auditLog.create({data:{actorId:actor.id,actorName:actor.name,actorRole:"compliance",action:`driver.review.${action}`,entity:"driver_application",entityId:id,metadata:JSON.stringify({documentId:body.documentId??null,reason,version})}});
   });
+  if(approvedDriverId) {
+    // The approval is already committed, so this is best-effort by design.
+    const approved=await db.driver.findUnique({where:{id:approvedDriverId},select:{email:true,name:true}}).catch(()=>null);
+    if(approved?.email) await sendOnboardingWelcomeEmail({email:approved.email,driverName:approved.name});
+  }
   return {ok:true};
 }

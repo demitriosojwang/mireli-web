@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { cookies } from "next/headers";
 import { isLocalDemoEnabled } from "@/lib/runtime-mode";
+import { getVerifiedStaffSession } from "@/lib/staff/session";
 
 /**
  * Lightweight signed-cookie sessions (HMAC-SHA256).
@@ -76,9 +77,15 @@ export async function getPassengerSession(): Promise<Session | null> {
 }
 
 export async function getAdminSession(): Promise<Session | null> {
+  const session = await getStaffConsoleSession();
+  return session?.roles.includes("admin") ? { ...session, role: "admin" } : null;
+}
+
+export async function getStaffConsoleSession() {
+  if (!isLocalDemoEnabled()) return getVerifiedStaffSession();
   const store = await cookies();
   const s = decodeSession(store.get(ADMIN_COOKIE)?.value);
-  return s && s.role === "admin" ? s : null;
+  return s?.role === "admin" ? { ...s, roles: ["admin", "compliance", "finance"] as const } : null;
 }
 
 export function passengerCookieOptions() {
