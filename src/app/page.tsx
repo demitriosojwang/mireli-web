@@ -120,7 +120,7 @@ export default function Home() {
   const showSplash = splashSeen && !splashDone;
 
   const [direction, setDirection] = useState<"FROM_TERMINUS" | "TO_TERMINUS">("FROM_TERMINUS");
-  const [date, setDate] = useState(() => todayStr());
+  const [scheduledDate, setDate] = useState(() => todayStr());
   // Pickup mode: "now" pins the date to today and auto-picks the next train
   // still catchable today; "later" is the classic schedule flow. Uber-style.
   const [pickupMode, setPickupMode] = useState<"now" | "later">("later");
@@ -149,12 +149,31 @@ export default function Home() {
   const [pointSearchRetry, setPointSearchRetry] = useState(0);
   const [journeyCollapsed, setJourneyCollapsed] = useState(false);
   // selection state (original store equivalents)
-  const [trainKey, setTrainKey] = useState<string | null>(null);
+  const [scheduledTrainKey, setTrainKey] = useState<string | null>(null);
   const [selectedPoint, setSelectedPoint] = useState<SelectedPoint | null>(null);
   const [homePickup, setHomePickup] = useState(false);
   const [charter, setCharter] = useState(false);
   const [requestedSeats, setSeats] = useState(1);
   const bookingCatalogueView = getBookingCatalogueView(routesStatus, pointCount);
+  const today = todayStr();
+  const date = pickupMode === "now" ? today : scheduledDate;
+  const nextTrainKey = useMemo(() => {
+    if (pickupMode !== "now") return null;
+    const fromTerminus = direction === "FROM_TERMINUS";
+    const wantDirection = fromTerminus ? "NBO_TO_MBA" : "MBA_TO_NBO";
+    const earliestMinute = nairobiNowMinutes() + (fromTerminus ? 0 : 30);
+    return timetable
+      .filter((train) => train.direction === wantDirection && train.serviceDays.includes(
+        nairobiWeekday(addNairobiDays(today, fromTerminus ? -train.destDayOffset : 0)),
+      ))
+      .map((train) => {
+        const [hours, minutes] = (fromTerminus ? train.destTime : train.originTime).split(":").map(Number);
+        return { id: train.id, minute: hours * 60 + minutes };
+      })
+      .filter(({ minute }) => minute >= earliestMinute)
+      .sort((first, second) => first.minute - second.minute)[0]?.id ?? null;
+  }, [pickupMode, direction, today, timetable]);
+  const trainKey = pickupMode === "now" ? nextTrainKey : scheduledTrainKey;
 
   // Availability is route-specific and is fetched only after a passenger
   // chooses a stop. This keeps the initial booking form free of broad trip
@@ -440,31 +459,6 @@ export default function Home() {
   const selectedTrain = trainKey ? trainOptions.find((option) => option.key === trainKey) ?? null : null;
   const journeyStepDone = Boolean(selectedPoint && journeyCollapsed);
 
-  // "Pick up now": the next train at MTM today whose time has not passed yet.
-  // TO_TERMINUS passengers must board before departure (30-minute buffer);
-  // FROM_TERMINUS passengers just need the arrival to still be ahead.
-  const nextTrainKey = useMemo(() => {
-    if (date !== todayStr()) return null;
-    const nowMin = nairobiNowMinutes();
-    const buffer = direction === "TO_TERMINUS" ? 30 : 0;
-    const upcoming = trainOptions.filter((t) => !t.gone && (() => {
-      const [h, m] = t.time.split(":").map(Number);
-      return h * 60 + m >= nowMin + buffer;
-    })());
-    return upcoming.length ? upcoming[0].key : null;
-  }, [trainOptions, date, direction]);
-
-  // Auto-select the next train when the passenger taps "Pick up now", and
-  // keep the date pinned to today while the mode is active.
-  useEffect(() => {
-    if (pickupMode !== "now") return;
-    if (date !== todayStr()) setDate(todayStr());
-    if (nextTrainKey && trainKey !== nextTrainKey) {
-      setTrainKey(nextTrainKey);
-      if (selectedPoint) setJourneyCollapsed(true);
-    }
-  }, [pickupMode, nextTrainKey, date, trainKey, selectedPoint]);
-
   const pointLabelCap = direction === "FROM_TERMINUS" ? "Drop-off" : "Pickup";
 
   // The search response is already bounded; group only the small matching set.
@@ -682,7 +676,14 @@ export default function Home() {
                 type="button"
                 role="radio"
                 aria-checked={pickupMode === "later"}
-                onClick={() => { setPickupMode("later"); setBookingStartError(null); }}
+                onClick={() => {
+                  if (pickupMode === "now") {
+                    setDate(date);
+                    setTrainKey(trainKey);
+                  }
+                  setPickupMode("later");
+                  setBookingStartError(null);
+                }}
                 className={cn(
                   "flex items-center gap-2 rounded-2xl border px-3.5 py-3 text-left transition-all duration-200",
                   pickupMode === "later"
@@ -753,6 +754,10 @@ export default function Home() {
                     gone={t.gone}
                     active={trainKey === t.key}
                     onClick={() => {
+                      if (pickupMode === "now" && t.key !== trainKey) {
+                        setDate(date);
+                        setPickupMode("later");
+                      }
                       setTrainKey(t.key);
                       if (selectedPoint) setJourneyCollapsed(true);
                     }}
