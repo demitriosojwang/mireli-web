@@ -291,6 +291,18 @@ Resources:
               StringLike:
                 s3:prefix:
                   - !Sub '${AWS::StackName}/database/*'
+          - Sid: SearchDriverDestinations
+            Effect: Allow
+            Action: geo-places:SearchText
+            Resource: !Sub 'arn:${AWS::Partition}:geo-places:${AWS::Region}::provider/default'
+          - Sid: CalculateDriverRoutes
+            Effect: Allow
+            Action: geo-routes:CalculateRoutes
+            Resource: !Sub 'arn:${AWS::Partition}:geo-routes:${AWS::Region}::provider/default'
+          - Sid: GetDriverSatelliteTiles
+            Effect: Allow
+            Action: geo-maps:GetTile
+            Resource: !Sub 'arn:${AWS::Partition}:geo-maps:${AWS::Region}::provider/default'
       Roles:
         - !Ref AppInstanceRole
 

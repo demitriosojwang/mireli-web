@@ -10,7 +10,8 @@ import {requestPayoutDestination} from "@/lib/driver/beneficiary";
 import {after} from "next/server";
 import {dispatchInstantPayouts} from "@/lib/money";
 import {driverServiceStatus} from "@/lib/driver/readiness";
-import {requestDriverRoute} from "@/lib/driver/navigation";
+import {enforceRouteLimit, requestDestinationRoute, requestDriverRoute} from "@/lib/driver/navigation";
+import {amazonLocationConfigured, satelliteTile, searchDriverDestinations} from "@/lib/driver/amazon-location";
 
 export const runtime="nodejs";
 type Context={params:Promise<{path:string[]}>};
@@ -44,6 +45,16 @@ async function handler(req:Request,context:Context) {
     else if(path==="payout-destination" && req.method==="POST")result=await requestPayoutDestination(driverId,await json());
     else if(path==="trips" && req.method==="GET")result=await driverTrips(driverId);
     else if(path==="navigation/route" && req.method==="POST")result=await requestDriverRoute(driverId,await json());
+    else if(path==="navigation/search" && req.method==="POST" && amazonLocationConfigured()) {
+      await enforceRouteLimit(driverId, "search", 10, 120);
+      result=await searchDriverDestinations(await json());
+    }
+    else if(path==="navigation/destination" && req.method==="POST")result=await requestDestinationRoute(driverId,await json());
+    else if(/^navigation\/satellite\/\d{1,2}\/\d{1,6}\/\d{1,6}$/.test(path) && req.method==="GET" && amazonLocationConfigured()) {
+      const [, , z, x, y] = path.split("/");
+      await enforceRouteLimit(driverId, "satellite", 180, 1500);
+      return satelliteTile(z, x, y);
+    }
     else if(/^trips\/[^/]+\/commands$/.test(path) && req.method==="POST"){
       const body=await json(),tripId=path.split("/")[1];result=await driverTripCommand(driverId,tripId,body);
       if(body.action==="complete")after(()=>dispatchInstantPayouts(driverId,tripId));

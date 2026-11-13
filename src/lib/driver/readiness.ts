@@ -2,6 +2,7 @@ import {isLocalDemoEnabled} from "@/lib/runtime-mode";
 import {POLICY_VERSION} from "./catalogue";
 import {navigationRoutingConfigured} from "./navigation";
 import {emailSignInConfigured} from "./email";
+import {amazonLocationConfigured} from "./amazon-location";
 
 // Verified staff authentication ships with this release: src/lib/staff/auth.ts
 // requires an emailed six-digit challenge, a TOTP second factor sealed with
@@ -41,7 +42,7 @@ export function driverServiceStatus() {
   const emailSignInOpen=isLocalDemoEnabled() || emailSignInConfigured();
   const registrationOpen=driverRegistrationConfigured();
   return {apiVersion: "v1", simulation: isLocalDemoEnabled(), phoneSignInOpen,emailSignInOpen, registrationOpen,
-    navigationOpen:navigationRoutingConfigured(),
+    navigationOpen:navigationRoutingConfigured(), destinationSearchOpen:amazonLocationConfigured(), satelliteOpen:amazonLocationConfigured(),
     supportEmail: "mirelisgr001@gmail.com",
     message: !phoneSignInOpen && !emailSignInOpen ? "Driver email sign-in is not configured yet." :
       !registrationOpen ? "Existing drivers can sign in. New driver applications are paused." :

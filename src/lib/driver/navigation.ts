@@ -2,6 +2,7 @@ import {createHmac} from "node:crypto";
 import {isIP} from "node:net";
 import {db} from "@/lib/db";
 import {DriverError} from "./errors";
+import {amazonLocationConfigured, calculateAmazonDriverRoute} from "./amazon-location";
 
 type Coordinate={latitude:number;longitude:number};
 type Maneuver={instruction:string;distanceMeters:number;durationSeconds:number;beginShapeIndex:number;endShapeIndex:number};
@@ -48,14 +49,14 @@ function rateKey(driverId:string) {
   if(!secret||secret.length<32)throw new DriverError(503,"NAVIGATION_NOT_CONFIGURED","In-app routing is temporarily unavailable.");
   return createHmac("sha256",secret).update(driverId).digest("hex");
 }
-async function enforceRouteLimit(driverId:string) {
-  const now=Date.now(),bucket=Math.floor(now/60000),driverKey=`nav:${rateKey(driverId)}:${bucket}`;
-  const globalKey=`nav:global:${bucket}`;
+export async function enforceRouteLimit(driverId:string, kind="route", perDriver=30, globalMax=1200) {
+  const now=Date.now(),bucket=Math.floor(now/60000),driverKey=`nav:${kind}:${rateKey(driverId)}:${bucket}`;
+  const globalKey=`nav:${kind}:global:${bucket}`;
   const [driver,global]=await Promise.all([
     db.driverRateLimit.upsert({where:{key:driverKey},create:{key:driverKey,expiresAt:new Date((bucket+2)*60000)},update:{count:{increment:1}}}),
     db.driverRateLimit.upsert({where:{key:globalKey},create:{key:globalKey,expiresAt:new Date((bucket+2)*60000)},update:{count:{increment:1}}}),
   ]);
-  if(driver.count>30||global.count>1200)throw new DriverError(429,"ROUTE_RATE_LIMITED","Please wait before requesting another route.");
+  if(driver.count>perDriver||global.count>globalMax)throw new DriverError(429,"ROUTE_RATE_LIMITED","Please wait before requesting more map data.");
   // Keep the shared limiter table bounded without adding a cleanup job dependency.
   if(bucket%10===0){
     const cleanupKey=`nav:cleanup:${Math.floor(bucket/10)}`;
@@ -65,6 +66,10 @@ async function enforceRouteLimit(driverId:string) {
 }
 
 export function navigationRoutingConfigured() {
+  return amazonLocationConfigured() || valhallaConfigured();
+}
+
+function valhallaConfigured() {
   const raw=process.env.VALHALLA_URL;
   if(!raw)return false;
   const token=process.env.VALHALLA_API_TOKEN;
@@ -101,6 +106,7 @@ export async function requestDriverRoute(driverId:string,input:Record<string,unk
   const target=coordinate({latitude:targetRow.lat,longitude:targetRow.lng},"Assigned stop");
   if(metersBetween(origin,target)>300000)throw new DriverError(400,"ROUTE_TOO_FAR","This route is outside the supported Mombasa service area.");
   await enforceRouteLimit(driverId);
+  if (!valhallaConfigured()) return calculateAmazonDriverRoute(origin, target);
   const endpoint=process.env.VALHALLA_URL!;
   const headers:Record<string,string>={"content-type":"application/json",accept:"application/json"};
   if(process.env.VALHALLA_API_TOKEN)headers.authorization=`Bearer ${process.env.VALHALLA_API_TOKEN}`;
@@ -117,4 +123,21 @@ export async function requestDriverRoute(driverId:string,input:Record<string,unk
   }
   const route=normalizeValhallaRoute(payload);
   return route;
+}
+
+export async function requestDestinationRoute(driverId: string, input: Record<string, unknown>) {
+  if (!amazonLocationConfigured()) throw new DriverError(503, "NAVIGATION_NOT_CONFIGURED", "In-app routing is unavailable. Open Google Maps to continue.");
+  function kenyaPoint(value: unknown): Coordinate {
+    const point = object(value);
+    const lat = point?.latitude, lon = point?.longitude;
+    if (typeof lat !== "number" || typeof lon !== "number" || !Number.isFinite(lat) || !Number.isFinite(lon) ||
+        lat < -4.9 || lat > 5.2 || lon < 33.8 || lon > 42.1) {
+      throw new DriverError(400, "INVALID_COORDINATE", "Choose a location within the supported Kenya map area.");
+    }
+    return {latitude:lat,longitude:lon};
+  }
+  const origin = kenyaPoint(input.origin), destination = kenyaPoint(input.destination);
+  if (metersBetween(origin, destination) > 500_000) throw new DriverError(400, "ROUTE_TOO_FAR", "Open Google Maps for destinations more than 500 km away.");
+  await enforceRouteLimit(driverId, "destination", 6, 120);
+  return calculateAmazonDriverRoute(origin, destination);
 }
