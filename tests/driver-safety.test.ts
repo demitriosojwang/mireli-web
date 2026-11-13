@@ -41,6 +41,22 @@ describe("driver identity and evidence",()=>{
     expect(evaluateDriverApplication({...app,documents:app.documents.map(d=>d.type==="licence"?{...d,expiresAt:new Date("2020-01-01")}:d)},"active",now,false).eligible).toBe(false);
     expect(evaluateDriverApplication({...app,documents:app.documents.map(d=>({...d,scanState:"clean_demo"}))},"active",now,false).eligible).toBe(false);
   });
+  it("keeps the blue check for exactly 30 days and leaves dispatch eligibility strict", () => {
+    const expiry = new Date("2026-10-06T20:59:59.999Z");
+    const deadline = new Date("2026-11-05T20:59:59.999Z");
+    const app = { status: "approved", policyVersion: POLICY_VERSION, ownsVehicle: true,
+      documents: applicableRequirements(true).filter(r => r.required).map(r => ({ type: r.id, state: "approved", scanState: "clean",
+        expiresAt: r.id === "licence" ? expiry : r.expires ? new Date("2028-01-01") : null })) };
+    const warning = evaluateDriverApplication(app, "active", new Date("2026-09-15"), false);
+    expect(warning.expiringDocuments).toEqual([{ type: "licence", expiresAt: expiry }]);
+    expect(evaluateDriverApplication(app, "active", expiry, false)).toMatchObject({ eligible: false, verified: true, graceUntil: deadline });
+    expect(evaluateDriverApplication(app, "active", deadline, false)).toMatchObject({ eligible: false, verified: false, graceUntil: null });
+    expect(evaluateDriverApplication(app, "suspended", expiry, false).verified).toBe(false);
+    app.documents.push({ type: "licence", state: "pending_review", scanState: "clean", expiresAt: new Date("2029-01-01") });
+    expect(evaluateDriverApplication(app, "active", deadline, false).verified).toBe(false);
+    app.documents[app.documents.length - 1].state = "approved";
+    expect(evaluateDriverApplication(app, "active", deadline, false)).toMatchObject({ eligible: true, verified: true, graceUntil: null });
+  });
 });
 describe("settlement proof",()=>{
   it("passes the full listed fare to the driver on a two-seat shared booking",()=>{

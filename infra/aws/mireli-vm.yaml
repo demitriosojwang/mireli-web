@@ -231,7 +231,7 @@ Resources:
         why: Let the host register with SSM, pull only Mireli images, read generated runtime secrets, and write/read its own backups.
         must:
           - Trust EC2 only.
-          - Grant no application-container access to instance metadata credentials.
+          - Require IMDSv2 for the trusted Mireli app container to obtain temporary instance-role credentials.
           - Scope ECR, Secrets Manager, and S3 permissions to this stack's resources.
     Properties:
       AssumeRolePolicyDocument:
@@ -324,7 +324,7 @@ Resources:
       MetadataOptions:
         HttpEndpoint: enabled
         HttpTokens: required
-        HttpPutResponseHopLimit: 1
+        HttpPutResponseHopLimit: 2
       NetworkInterfaces:
         - DeviceIndex: '0'
           AssociatePublicIpAddress: true

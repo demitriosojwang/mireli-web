@@ -3,18 +3,19 @@ import {createHash} from "node:crypto";
 import {isLocalDemoEnabled} from "@/lib/runtime-mode";
 import {DriverError, integer, text} from "./errors";
 import {applicableRequirements, POLICY_VERSION, maxDocumentBytes, requirements, validFile} from "./catalogue";
-import {deleteDocument, saveDocument} from "./storage";
+import {purgeDocumentFile, saveDocument} from "./storage";
 import {nairobiDate} from "@/lib/nairobi-time";
 import {phoneNumber} from "./auth";
 import {evaluateDriverApplication} from "./eligibility";
 
 export {evaluateDriverApplication} from "./eligibility";
 
-const documentFields = {id:true,type:true,mime:true,bytes:true,expiresAt:true,state:true,scanState:true,reviewReason:true,createdAt:true} as const;
+const documentFields = {id:true,type:true,mime:true,bytes:true,expiresAt:true,state:true,scanState:true,reviewReason:true,createdAt:true,filePurgedAt:true} as const;
 export async function onboarding(driverId: string) {
   const app = await db.driverApplication.findUnique({where:{driverId},include:{driver:true,documents:{where:{state:{not:"replaced"}},orderBy:{createdAt:"desc"},select:documentFields}}});
   if (!app) throw new DriverError(404,"APPLICATION_NOT_FOUND","Application not found.");
-  return {application:{id:app.id,status:app.status,version:app.version,licenceClass:app.licenceClass,ownsVehicle:app.ownsVehicle,reviewReason:app.reviewReason,submittedAt:app.submittedAt,documents:app.documents},
+  const documents = app.documents.filter((document, index, rows) => rows.findIndex(d => d.type === document.type) === index);
+  return {application:{id:app.id,status:app.status,version:app.version,licenceClass:app.licenceClass,ownsVehicle:app.ownsVehicle,reviewReason:app.reviewReason,submittedAt:app.submittedAt,documents},
     profile:{fullName:app.driver.name,phone:app.driver.phone,email:app.driver.email,plate:app.driver.plate,capacity:app.driver.capacity,cabType:app.driver.cabType},
     requirements:applicableRequirements(app.ownsVehicle),policyVersion:POLICY_VERSION,privacyUrl:process.env.DRIVER_PRIVACY_URL??null,termsUrl:process.env.DRIVER_TERMS_URL??null,maxDocumentBytes:maxDocumentBytes(),simulation:isLocalDemoEnabled()};
 }
@@ -44,16 +45,24 @@ export async function uploadDocument(driverId:string,type:string,expiry:string|n
   }
   const app=await db.driverApplication.findUnique({where:{driverId}});
   if(!app || app.version!==version || !["draft","changes_requested","approved"].includes(app.status)) throw new DriverError(409,"STALE_APPLICATION","Refresh before replacing evidence.");
+  const renewing = app.status === "approved";
   const objectKey=await saveDocument(bytes,mime);
   try {
     await db.$transaction(async tx=>{
-      const updated=await tx.driverApplication.updateMany({where:{id:app.id,version},data:{version:{increment:1},status:"draft"}});
+      const updated=await tx.driverApplication.updateMany({where:{id:app.id,version},data:{version:{increment:1},status:renewing?"approved":"draft"}});
       if(updated.count!==1) throw new DriverError(409,"STALE_APPLICATION","Another change arrived. Refresh and try again.");
-      await tx.driverDocument.updateMany({where:{applicationId:app.id,type,state:{not:"replaced"}},data:{state:"replaced"}});
+      await tx.driverDocument.updateMany({where:{applicationId:app.id,type,state:{notIn:renewing?["replaced","approved"]:["replaced"]}},
+        data:{state:"replaced",filePurgeAt:new Date()}});
       await tx.driverDocument.create({data:{applicationId:app.id,type,objectKey,mime,bytes:bytes.length,sha256:createHash("sha256").update(bytes).digest("hex"),expiresAt,scanState:isLocalDemoEnabled()?"clean_demo":"pending"}});
-      await tx.driver.update({where:{id:driverId},data:{status:"applicant"}});
+      if (!renewing) await tx.driver.update({where:{id:driverId},data:{status:"applicant"}});
     });
-  } catch(error) { await deleteDocument(objectKey).catch(()=>{}); throw error; }
+  } catch(error) {
+    // Confirm the transaction did not commit before discarding the evidence.
+    const persisted = await db.driverDocument.findUnique({where:{objectKey},select:{id:true}}).catch(() => undefined);
+    if (persisted === null) await purgeDocumentFile(objectKey).catch(() => console.error("driver.document.orphan.cleanup.failed"));
+    if (persisted) return onboarding(driverId);
+    throw error;
+  }
   return onboarding(driverId);
 }
 export async function submitApplication(driverId:string,body:Record<string,unknown>) {

@@ -10,6 +10,7 @@ async function handle(req:Request,{params}:{params:Promise<{id:string}>}) {
     if(req.method==="POST")return Response.json(await scanDocument(id,actor.id));
     const document=await db.driverDocument.findUnique({where:{id}});
     if(!document || document.state==="replaced")throw new DriverError(404,"NOT_FOUND","Current document not found.");
+    if(document.filePurgedAt || (document.filePurgeAt && document.filePurgeAt <= new Date()))throw new DriverError(410,"EVIDENCE_REMOVED","The file retention period has ended. The verification record remains.");
     const bytes=await readDocument(document.objectKey);
     if(bytes.length!==document.bytes || createHash("sha256").update(bytes).digest("hex")!==document.sha256)throw new DriverError(409,"EVIDENCE_CHANGED","Stored evidence does not match the uploaded file.");
     await db.auditLog.create({data:{actorId:actor.id,actorName:actor.name,actorRole:"compliance",action:"driver.document_read",entity:"driver_document",entityId:id}});

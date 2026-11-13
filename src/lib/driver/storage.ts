@@ -1,4 +1,4 @@
-import {S3Client, PutObjectCommand, GetObjectCommand, GetPublicAccessBlockCommand, DeleteObjectCommand} from "@aws-sdk/client-s3";
+import {S3Client, PutObjectCommand, GetObjectCommand, GetPublicAccessBlockCommand, DeleteObjectCommand, ListObjectVersionsCommand} from "@aws-sdk/client-s3";
 import {createCipheriv, createDecipheriv, createHash, randomBytes} from "node:crypto";
 import {mkdir, writeFile, readFile, unlink} from "node:fs/promises";
 import {join} from "node:path";
@@ -32,7 +32,7 @@ export async function saveDocument(bytes: Buffer, mime: string): Promise<string>
   } else {
     const s3 = client(); const bucket = await privateBucket(s3);
     await s3.send(new PutObjectCommand({Bucket:bucket,Key:objectKey,Body:bytes,ContentType:mime,
-      ServerSideEncryption:"AES256",ChecksumSHA256:createHash("sha256").update(bytes).digest("base64")}));
+      IfNoneMatch:"*",ServerSideEncryption:"AES256",ChecksumSHA256:createHash("sha256").update(bytes).digest("base64")}));
   }
   return objectKey;
 }
@@ -48,8 +48,37 @@ export async function readDocument(key: string): Promise<Buffer> {
   if (!object.Body || (object.ContentLength ?? Infinity) > 10*1024*1024) throw new Error("Invalid document object");
   return Buffer.from(await object.Body.transformToByteArray());
 }
-export async function deleteDocument(key: string) {
+export async function purgeDocumentFile(key: string) {
   const id = safeKey(key);
-  if (isLocalDemoEnabled()) await unlink(join(root(),id));
-  else {const s3=client(); await s3.send(new DeleteObjectCommand({Bucket:await privateBucket(s3),Key:key}));}
+  if (isLocalDemoEnabled()) {
+    await unlink(join(root(),id)).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") throw error;
+    });
+    return;
+  }
+  const s3 = client();
+  const Bucket = await privateBucket(s3);
+  const objects: { Key: string; VersionId: string }[] = [];
+  const markers: typeof objects = [];
+  let KeyMarker: string | undefined;
+  let VersionIdMarker: string | undefined;
+  do {
+    const page = await s3.send(new ListObjectVersionsCommand({ Bucket, Prefix: key, KeyMarker, VersionIdMarker }));
+    for (const version of page.Versions ?? []) {
+      if (version.Key === key && version.VersionId) objects.push({ Key: key, VersionId: version.VersionId });
+    }
+    for (const marker of page.DeleteMarkers ?? []) {
+      if (marker.Key === key && marker.VersionId) markers.push({ Key: key, VersionId: marker.VersionId });
+    }
+    if (!page.IsTruncated) break;
+    if (!page.NextKeyMarker || (KeyMarker === page.NextKeyMarker && VersionIdMarker === page.NextVersionIdMarker)) {
+      throw new Error("S3 did not advance document version pagination");
+    }
+    KeyMarker = page.NextKeyMarker;
+    VersionIdMarker = page.NextVersionIdMarker;
+  } while (KeyMarker);
+  // Remove the bytes before removing markers so retries never expose an older version.
+  for (const version of [...objects, ...markers]) {
+    await s3.send(new DeleteObjectCommand({ Bucket, ...version }));
+  }
 }

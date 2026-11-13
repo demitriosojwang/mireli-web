@@ -6,7 +6,7 @@ import {Button} from "@/components/ui/button";
 import {Card,CardContent} from "@/components/ui/card";
 import {requirements} from "@/lib/driver/catalogue";
 
-type Document={id:string;type:string;state:string;scanState:string;expiresAt:string|null;reviewReason:string|null};
+type Document={id:string;type:string;state:string;scanState:string;expiresAt:string|null;reviewReason:string|null;filePurgeAt:string|null;filePurgedAt:string|null};
 type Application={id:string;version:number;status:string;reviewReason:string|null;driver:{name:string;phone:string;plate:string;capacity:number};documents:Document[]};
 function ReviewCard({row,refresh}:{row:Application;refresh:()=>Promise<unknown>}) {
   const [busy,setBusy]=useState(false),[reason,setReason]=useState(""),[error,setError]=useState("");
@@ -24,15 +24,20 @@ function ReviewCard({row,refresh}:{row:Application;refresh:()=>Promise<unknown>}
     {row.reviewReason&&<p className="text-sm">Last review: {row.reviewReason}</p>}
     {error&&<p role="alert" className="text-sm text-red-700">{error}</p>}
     <label className="block text-sm">Reason or reviewer note<textarea className="mt-1 min-h-20 w-full rounded-lg border bg-background p-3" value={reason} onChange={e=>setReason(e.target.value.slice(0,500))} disabled={busy}/></label>
-    <div className="space-y-3">{row.documents.map(d=><div key={d.id} className="space-y-2 rounded-xl border p-3">
+    <div className="space-y-3">{row.documents.map(d=>{
+      const pending=d.state==="pending_review";
+      const reviewing=pending&&["submitted","approved"].includes(row.status);
+      const fileAvailable=!d.filePurgedAt&&(!d.filePurgeAt||Date.parse(d.filePurgeAt)>Date.now());
+      return <div key={d.id} className="space-y-2 rounded-xl border p-3">
       <p className="font-medium">{requirements.find(r=>r.id===d.type)?.title||d.type}</p>
       <p className="text-xs text-muted-foreground">Review: {d.state} · Scan: {d.scanState} · Expiry: {d.expiresAt?.slice(0,10)||"Reviewer must verify applicability"}</p>
       {d.reviewReason&&<p className="text-sm">{d.reviewReason}</p>}
-      <a href={`/api/admin/driver-onboarding/documents/${d.id}`} className="block text-sm underline">Download private evidence</a>
-      <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={busy} onClick={()=>scan(d.id)}>Run security scan</Button>
-        <Button size="sm" disabled={busy||row.status!=="submitted"||!["clean","clean_demo"].includes(d.scanState)} onClick={()=>action("approve_document",d.id)}>Approve document</Button>
-        <Button size="sm" variant="outline" disabled={busy||row.status!=="submitted"||reason.trim().length<5} onClick={()=>action("reject_document",d.id)}>Reject document</Button></div>
-    </div>)}</div>
+      {fileAvailable ? <a href={`/api/admin/driver-onboarding/documents/${d.id}`} className="block text-sm underline">Download private evidence</a> :
+        <p className="text-sm text-muted-foreground">{d.filePurgedAt ? "File deleted · verification record retained" : "File retention period ended"}</p>}
+      {pending&&fileAvailable&&<div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={busy} onClick={()=>scan(d.id)}>Run security scan</Button>
+        <Button size="sm" disabled={busy||!reviewing||!["clean","clean_demo"].includes(d.scanState)} onClick={()=>action("approve_document",d.id)}>Approve document</Button>
+        <Button size="sm" variant="outline" disabled={busy||!reviewing||reason.trim().length<5} onClick={()=>action("reject_document",d.id)}>Reject document</Button></div>}
+    </div>})}</div>
     {!row.documents.length&&<p className="text-sm text-muted-foreground">No submitted evidence yet.</p>}
     <div className="flex flex-wrap gap-2"><Button disabled={busy||row.status!=="submitted"} onClick={()=>action("approve")}>Approve application</Button>
       <Button variant="outline" disabled={busy||reason.trim().length<5} onClick={()=>action("needs_changes")}>Request changes</Button>

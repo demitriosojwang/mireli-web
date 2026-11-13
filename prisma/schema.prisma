@@ -402,7 +402,12 @@ model DriverDocument {
   reviewedAt DateTime?
   reviewReason String?
   createdAt DateTime @default(now())
+  filePurgeAt DateTime?
+  filePurgedAt DateTime?
+  expiryReminderAt DateTime?
   @@index([applicationId, type, state])
+  @@index([filePurgeAt])
+  @@index([state, expiresAt])
 }
 
 model PayoutAttempt {

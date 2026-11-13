@@ -4,6 +4,7 @@ import {isLocalDemoEnabled} from "@/lib/runtime-mode";
 import {applicableRequirements,POLICY_VERSION} from "./catalogue";
 import {DriverError,integer,text} from "./errors";
 import {sendOnboardingWelcomeEmail} from "./email";
+import {DRIVER_DOCUMENT_DAY_MS} from "./eligibility";
 
 export async function requireReviewer(req:Request,role:"compliance"|"finance"="compliance") {
   const session=await getAdminSession();
@@ -28,11 +29,17 @@ export async function reviewApplication(id:string,body:Record<string,unknown>,ac
     if(app.version!==version)throw new DriverError(409,"STALE_APPLICATION","Another reviewer changed this application. Refresh.");
     const now=new Date();let status=app.status;
     if(action==="approve_document" || action==="reject_document") {
-      if(app.status!=="submitted")throw new DriverError(409,"NOT_SUBMITTED","Documents can be reviewed after submission.");
+      if(!["submitted","approved"].includes(app.status))throw new DriverError(409,"NOT_SUBMITTED","Documents can be reviewed after submission.");
       const document=app.documents.find(d=>d.id===body.documentId);
       if(!document)throw new DriverError(404,"NOT_FOUND","Current document not found.");
-      if(action==="approve_document" && (!(["clean",...(isLocalDemoEnabled()?["clean_demo"]:[])].includes(document.scanState)) || (document.expiresAt && document.expiresAt<=now)))throw new DriverError(409,"DOCUMENT_NOT_READY","Document must pass scanning and be unexpired.");
-      await tx.driverDocument.update({where:{id:document.id},data:{state:action==="approve_document"?"approved":"rejected",reviewedBy:actor.id,reviewedAt:now,reviewReason:reason||null}});
+      if(document.state!=="pending_review" || !document.objectKey)throw new DriverError(409,"DOCUMENT_ALREADY_REVIEWED","Choose pending evidence for review.");
+      const approving = action === "approve_document";
+      if(approving && (!(["clean",...(isLocalDemoEnabled()?["clean_demo"]:[])].includes(document.scanState)) || (document.expiresAt && document.expiresAt<=now)))throw new DriverError(409,"DOCUMENT_NOT_READY","Document must pass scanning and be unexpired.");
+      const changed = await tx.driverDocument.updateMany({where:{id:document.id,state:"pending_review",scanState:document.scanState},
+        data:{state:approving?"approved":"rejected",reviewedBy:actor.id,reviewedAt:now,reviewReason:reason||null,filePurgeAt:new Date(now.getTime()+7*DRIVER_DOCUMENT_DAY_MS)}});
+      if(changed.count!==1)throw new DriverError(409,"DOCUMENT_CHANGED","Refresh the application before reviewing.");
+      if (approving) await tx.driverDocument.updateMany({where:{applicationId:id,type:document.type,id:{not:document.id},state:"approved"},
+        data:{state:"replaced",filePurgeAt:now}});
     } else if(action==="approve") {
       if(app.status!=="submitted")throw new DriverError(409,"NOT_SUBMITTED","Application must be submitted.");
       if(app.policyVersion!==POLICY_VERSION)throw new DriverError(409,"POLICY_UPDATED","The driver must acknowledge the current policy.");

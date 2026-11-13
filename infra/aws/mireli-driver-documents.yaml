@@ -141,6 +141,21 @@ Resources:
               AWS: !Ref RuntimeRoleArn
             Action: [s3:PutObject, s3:DeleteObject, s3:GetObject, s3:GetObjectTagging]
             Resource: !Sub '${DriverDocuments.Arn}/driver-documents/*'
+          - Sid: AllowRuntimeListEvidenceVersions
+            Effect: Allow
+            Principal:
+              AWS: !Ref RuntimeRoleArn
+            Action: s3:ListBucketVersions
+            Resource: !GetAtt DriverDocuments.Arn
+            Condition:
+              StringLike:
+                s3:prefix: driver-documents/*
+          - Sid: AllowRuntimePurgeEvidenceVersions
+            Effect: Allow
+            Principal:
+              AWS: !Ref RuntimeRoleArn
+            Action: s3:DeleteObjectVersion
+            Resource: !Sub '${DriverDocuments.Arn}/driver-documents/*'
 
   MalwareProtection:
     Type: AWS::GuardDuty::MalwareProtectionPlan
