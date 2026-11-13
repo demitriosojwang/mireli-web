@@ -55,7 +55,8 @@ async function createScheduledTrip(params: {
 
   for (const driverId of params.driverIds) {
     const result = await db.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${slotKey}))`;
+      // The lock returns PostgreSQL void. Execute it without decoding a result row.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${slotKey}))`;
       const existingSlot = await tx.trip.findFirst({
         where: {
           routeId: params.routeId,
