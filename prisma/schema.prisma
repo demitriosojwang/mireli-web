@@ -49,6 +49,14 @@ model Driver {
   tripProgress DriverTripProgress[]
   tripActions DriverTripAction[]
   payoutDestination DriverPayoutDestination?
+  profilePhoto DriverProfilePhoto?
+}
+
+model DriverProfilePhoto {
+  driverId  String   @id
+  driver    Driver   @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  jpeg      Bytes
+  updatedAt DateTime @updatedAt
 }
 
 // ─── Network ─────────────────────────────────────────────────────────────────

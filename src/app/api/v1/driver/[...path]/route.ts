@@ -13,6 +13,8 @@ import {driverServiceStatus} from "@/lib/driver/readiness";
 import {enforceRouteLimit, requestDestinationRoute, requestDriverRoute} from "@/lib/driver/navigation";
 import {amazonLocationConfigured, satelliteTile, searchDriverDestinations} from "@/lib/driver/amazon-location";
 
+import { driverProfilePhoto, maxProfilePhotoBytes, removeDriverProfilePhoto, saveDriverProfilePhoto } from "@/lib/driver/profile-photo";
+
 export const runtime="nodejs";
 type Context={params:Promise<{path:string[]}>};
 async function boundedBody(req:Request, max:number) {
@@ -38,6 +40,15 @@ async function handler(req:Request,context:Context) {
     let result:unknown;
     if(path==="auth/session" && req.method==="DELETE") {await db.driverSession.update({where:{id:session.id},data:{revokedAt:new Date()}});result={ok:true};}
     else if(path==="me" && req.method==="GET") result={driver:{id:driverId,name:session.driver.name,phone:session.driver.phone,status:session.driver.status},eligibility:await driverEligibility(driverId)};
+    else if(path==="profile-photo" && req.method==="GET") result=await driverProfilePhoto(driverId);
+    else if(path==="profile-photo" && req.method==="PUT") {
+      if (req.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "image/jpeg") {
+        throw new DriverError(415, "INVALID_PROFILE_PHOTO", "Choose a readable photo.");
+      }
+      await enforceRouteLimit(driverId, "profile-photo", 6, 30);
+      result=await saveDriverProfilePhoto(driverId, await boundedBody(req, maxProfilePhotoBytes));
+    }
+    else if(path==="profile-photo" && req.method==="DELETE") result=await removeDriverProfilePhoto(driverId);
     else if(path==="onboarding" && req.method==="GET") result=await onboarding(driverId);
     else if(path==="onboarding" && req.method==="PUT") result=await saveProfile(driverId,await json());
     else if(path==="onboarding/submissions" && req.method==="POST") result=await submitApplication(driverId,await json());

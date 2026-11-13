@@ -12,7 +12,7 @@ export default function PrivacyPage() {
       <main className="mx-auto w-full max-w-md flex-1 px-4 py-6 text-sm leading-relaxed text-muted-foreground">
         <h1 className="text-lg font-bold text-foreground">Privacy Policy</h1>
         <p className="mt-1 text-xs">
-          Last updated: 13 November 2026 · Mi-Reli (Mireli SGR Pilot), Mombasa, Kenya
+          Last updated: 14 November 2026 · Mi-Reli (Mireli SGR Pilot), Mombasa, Kenya
         </p>
 
         <div className="mt-5 space-y-5 [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:text-foreground [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2 [&_p]:mt-1 [&_li]:mt-1">
@@ -56,7 +56,7 @@ export default function PrivacyPage() {
             <p>
               Driver document files are kept privately for review and scheduled for deletion seven days after review.
               Mireli keeps the document type, review outcome and expiry date to record verification and send renewal reminders.
-              Driver account and payout information are kept separately to operate the service.
+              Driver account and payout information are kept separately to operate the service. An optional profile photo is displayed in your driver account. You can replace or remove it there at any time.
             </p>
           </section>
 
