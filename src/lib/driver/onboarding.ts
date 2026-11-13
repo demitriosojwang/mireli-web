@@ -17,7 +17,7 @@ export async function onboarding(driverId: string) {
   const documents = app.documents.filter((document, index, rows) => rows.findIndex(d => d.type === document.type) === index);
   return {application:{id:app.id,status:app.status,version:app.version,licenceClass:app.licenceClass,ownsVehicle:app.ownsVehicle,reviewReason:app.reviewReason,submittedAt:app.submittedAt,documents},
     profile:{fullName:app.driver.name,phone:app.driver.phone,email:app.driver.email,plate:app.driver.plate,capacity:app.driver.capacity,cabType:app.driver.cabType},
-    requirements:applicableRequirements(app.ownsVehicle),policyVersion:POLICY_VERSION,privacyUrl:process.env.DRIVER_PRIVACY_URL??null,termsUrl:process.env.DRIVER_TERMS_URL??null,maxDocumentBytes:maxDocumentBytes(),simulation:isLocalDemoEnabled()};
+    requirements:applicableRequirements(app.ownsVehicle),canRemovePendingDocument:true,policyVersion:POLICY_VERSION,privacyUrl:process.env.DRIVER_PRIVACY_URL??null,termsUrl:process.env.DRIVER_TERMS_URL??null,maxDocumentBytes:maxDocumentBytes(),simulation:isLocalDemoEnabled()};
 }
 export async function saveProfile(driverId:string, body:Record<string,unknown>) {
   const version=integer(body.expectedVersion,"Version"); const fullName=text(body.fullName,"Full name",3,100);
@@ -65,6 +65,43 @@ export async function uploadDocument(driverId:string,type:string,expiry:string|n
   }
   return onboarding(driverId);
 }
+export async function removePendingDocument(driverId: string, documentId: string, version: number) {
+  const now = new Date();
+  await db.$transaction(async (tx) => {
+    const application = await tx.driverApplication.findUnique({ where: { driverId } });
+    if (!application || application.version !== version ||
+        !["draft", "changes_requested", "submitted", "approved"].includes(application.status)) {
+      throw new DriverError(409, "STALE_APPLICATION", "Refresh your account before removing this file.");
+    }
+    const withdrawn = application.status === "submitted";
+    const updated = await tx.driverApplication.updateMany({
+      where: { id: application.id, version, status: application.status },
+      data: {
+        version: { increment: 1 },
+        ...(withdrawn ? { status: "draft", submittedAt: null } : {}),
+      },
+    });
+    if (updated.count !== 1) {
+      throw new DriverError(409, "STALE_APPLICATION", "Refresh your account before removing this file.");
+    }
+    const removed = await tx.driverDocument.updateMany({
+      where: { id: documentId, applicationId: application.id, state: "pending_review" },
+      data: { state: "replaced", filePurgeAt: now },
+    });
+    if (removed.count !== 1) {
+      throw new DriverError(409, "DOCUMENT_NOT_REMOVABLE", "Only documents awaiting review can be removed.");
+    }
+    await tx.auditLog.create({
+      data: {
+        actorId: driverId, actorRole: "driver", actorName: "Driver",
+        action: "driver.document_removed", entity: "driver_application", entityId: application.id,
+        metadata: JSON.stringify({ documentId, withdrawn }),
+      },
+    });
+  });
+  return onboarding(driverId);
+}
+
 export async function submitApplication(driverId:string,body:Record<string,unknown>) {
   const version=integer(body.expectedVersion,"Version");
   if(body.policyVersion!==POLICY_VERSION || body.accepted!==true) throw new DriverError(400,"POLICY_REQUIRED","Read and accept the current driver policy before submission.");

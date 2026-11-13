@@ -1,7 +1,7 @@
 import {db} from "@/lib/db";
 import {requireDriver, requestChallenge, requestEmailChallenge, verifyChallenge} from "@/lib/driver/auth";
 import {DriverError, integer} from "@/lib/driver/errors";
-import {onboarding, saveProfile, submitApplication, uploadDocument, driverEligibility} from "@/lib/driver/onboarding";
+import {onboarding, saveProfile, submitApplication, uploadDocument, removePendingDocument, driverEligibility} from "@/lib/driver/onboarding";
 import {maxDocumentBytes} from "@/lib/driver/catalogue";
 import {driverEarnings} from "@/lib/driver/earnings";
 import {supportCases,createSupportCase} from "@/lib/driver/support";
@@ -72,6 +72,10 @@ async function handler(req:Request,context:Context) {
     }
     else if(path==="support" && req.method==="GET")result=await supportCases(driverId);
     else if(path==="support" && req.method==="POST")result=await createSupportCase(driverId,await json());
+    else if (/^documents\/[a-zA-Z0-9_-]{1,128}$/.test(path) && req.method === "DELETE") {
+      const version = integer((await json()).expectedVersion, "Version");
+      result = await removePendingDocument(driverId, path.split("/")[1], version);
+    }
     else if(path.startsWith("documents/") && req.method==="POST" && path.split("/").length===2) {
       const version=integer(Number(req.headers.get("x-application-version")),"Version");
       if(!req.headers.has("x-application-version"))throw new DriverError(400,"VERSION_REQUIRED","Application version is required.");
