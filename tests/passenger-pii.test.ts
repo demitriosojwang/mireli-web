@@ -42,7 +42,10 @@ describe("passenger ID encryption", () => {
 
     vi.stubEnv("PASSENGER_PII_ENCRYPTION_KEY", TEST_KEY);
     const encrypted = encryptPassengerIdNumber("12345678")!;
-    const tampered = `${encrypted.slice(0, -1)}${encrypted.endsWith("a") ? "b" : "a"}`;
+    const ciphertextStart = encrypted.lastIndexOf(".") + 1;
+    const tampered = encrypted.slice(0, ciphertextStart) +
+      (encrypted[ciphertextStart] === "A" ? "B" : "A") +
+      encrypted.slice(ciphertextStart + 1);
     expect(() => decryptPassengerIdNumber(tampered)).toThrow(/could not be decrypted/);
   });
 });
