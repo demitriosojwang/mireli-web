@@ -6,7 +6,6 @@ export const requirements = [
   {id: "good_conduct", title: "Certificate of good conduct", expires: false, required: true},
   {id: "insurance", title: "PSV insurance", expires: true, required: true},
   {id: "inspection", title: "Vehicle inspection certificate", expires: true, required: true},
-  {id: "logbook", title: "Logbook / e-logbook", expires: false, required: true},
 ];
 export const maxDocumentBytes = () => process.env.VERCEL ? 2 * 1024 * 1024 : 10 * 1024 * 1024;
 export function validFile(mime: string, bytes: Uint8Array) {
