@@ -27,7 +27,7 @@ export async function GET() {
 /**
  * Admin authentication — completely separate from the passenger site.
  *  1. Email must be on the admin whitelist (identity, not a UI choice)
- *  2. OTP (prototype: any 4 digits)
+ *  2. OTP (prototype: any 6 digits)
  *  3. Second factor: the admin access code from platform config
  * A wrong email gets a generic rejection — the panel's existence isn't advertised.
  */
@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
       // Generic rejection — no enumeration of admin identities
       return NextResponse.json({ error: "This account does not have admin access." }, { status: 403 });
     }
-    return NextResponse.json({ ok: true, email, requires2fa: true, hint: "Prototype: any 4-digit code works" });
+    return NextResponse.json({ ok: true, email, requires2fa: true, hint: "Prototype: any 6-digit code works" });
   }
 
   if (step === "verify") {
@@ -76,8 +76,8 @@ export async function POST(req: NextRequest) {
     if (!isAdminEmail(email, adminEmails)) {
       return NextResponse.json({ error: "This account does not have admin access." }, { status: 403 });
     }
-    if (!/^\d{4}$/.test(code)) {
-      return NextResponse.json({ error: "Enter the 4-digit verification code" }, { status: 400 });
+    if (!/^\d{6}$/.test(code)) {
+      return NextResponse.json({ error: "Enter the 6-digit verification code" }, { status: 400 });
     }
     if (twofa !== cfg.admin2faCode) {
       await audit({

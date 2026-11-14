@@ -105,10 +105,10 @@ export default function AdminLoginPage() {
                 <Label className="text-xs">Verification code</Label>
                 <Input
                   inputMode="numeric"
-                  maxLength={4}
+                  maxLength={6}
                   value={code}
                   onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-                  placeholder="••••"
+                  placeholder="••••••"
                   className={cn("h-11 text-center text-lg tracking-[0.5em]", error && "border-destructive")}
                   autoFocus
                   disabled={busy}
@@ -138,7 +138,7 @@ export default function AdminLoginPage() {
               </motion.div>
 
               {error && <p className="text-xs text-destructive">{error}</p>}
-              <Button className="h-11 w-full" onClick={verify} disabled={busy || code.length !== 4 || !twofa}>
+              <Button className="h-11 w-full" onClick={verify} disabled={busy || code.length !== 6 || !twofa}>
                 Verify &amp; unlock console <KeyRound className="ml-1 h-4 w-4" />
               </Button>
               <button
