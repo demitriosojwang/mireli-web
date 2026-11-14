@@ -57,14 +57,20 @@ export async function requestChallenge(phoneInput: unknown) {
   }
   return {challengeId: challenge.id, expiresAt: challenge.expiresAt, cooldownSeconds: 60, ...(demo ? {demoCode: code, simulation: true} : {})};
 }
-export async function requestEmailChallenge(emailInput:unknown) {
+export async function requestEmailChallenge(emailInput: unknown, intent?: unknown) {
+  const channel = intent === undefined ? "email" : intent === "sign_in" ? "driver_sign_in" :
+    intent === "register" ? "driver_register" : null;
+  if (!channel) throw new DriverError(400, "INVALID_INPUT", "Choose Sign in or Register.");
+  if (channel === "driver_register" && !driverRegistrationConfigured()) {
+    throw new DriverError(503, "REGISTRATION_PAUSED", "New driver applications are paused.");
+  }
   const email=emailAddress(emailInput),demo=isLocalDemoEnabled();
   if(!demo && !emailSignInConfigured())throw new DriverError(503,"EMAIL_NOT_CONFIGURED","Email sign-in is not connected yet.");
   await limit(`email-send:${email}`,1,60000);
   await limit(`email-daily:${email}`,12,86400000);
   await limit("email-global-day",200,86400000);
   const id=randomBytes(24).toString("hex"),code=randomInt(100000,1000000).toString();
-  const challenge=await db.driverAuthChallenge.create({data:{id,email,channel:"email",codeHash:challengeHash(id,code),expiresAt:new Date(Date.now()+300000)}});
+  const challenge=await db.driverAuthChallenge.create({data:{id,email,channel,codeHash:challengeHash(id,code),expiresAt:new Date(Date.now()+300000)}});
   if(!demo)try{await sendEmailCode(email,code);}catch(error){
     await db.driverAuthChallenge.update({where:{id},data:{consumedAt:new Date()}});throw error;
   }
@@ -79,15 +85,18 @@ export async function verifyChallenge(input: Record<string, unknown>) {
   const denied = () => new DriverError(401, "INVALID_CHALLENGE", "The code is invalid or expired.");
   // Passenger sign-in uses the same storage table with a separate channel.
   // Never allow a passenger OTP to create or authenticate a driver session.
-  if (!challenge || !["sms", "email"].includes(challenge.channel) || challenge.consumedAt || challenge.expiresAt <= new Date() || challenge.attempts >= 5) throw denied();
+  if (!challenge || !["sms", "email", "driver_sign_in", "driver_register"].includes(challenge.channel) || challenge.consumedAt || challenge.expiresAt <= new Date() || challenge.attempts >= 5) throw denied();
   const attempted = await db.driverAuthChallenge.updateMany({where: {id, consumedAt: null, attempts: {lt: 5}, expiresAt: {gt: new Date()}}, data: {attempts: {increment: 1}}});
   if (attempted.count !== 1 || !/^\d{6}$/.test(code) || !matchesChallenge(id, code, challenge.codeHash)) throw denied();
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + 12 * 3600000);
   const driver = await db.$transaction(async tx => {
-    const email=challenge.channel==="email"?challenge.email:null;
+    const email = challenge.channel === "sms" ? null : challenge.email;
     if(!email && !challenge.phone)throw denied();
     const existing=await tx.driver.findUnique({where:email?{email}:{phone:challenge.phone!}});
+    if (!existing && challenge.channel === "driver_sign_in") {
+      throw new DriverError(404, "DRIVER_ACCOUNT_REQUIRED", "No driver account for this email. Choose Register to start an application.");
+    }
     // Recruiting may be paused while current drivers still sign in. Do not create a
     // new driver/application unless the independently guarded intake is open.
     if(!existing&&!driverRegistrationConfigured())throw new DriverError(503,"REGISTRATION_PAUSED","Your code is valid. New driver applications are not open yet. Contact Mireli support.");

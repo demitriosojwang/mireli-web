@@ -34,7 +34,10 @@ async function handler(req:Request,context:Context) {
       try {const body=JSON.parse((await boundedBody(req,16384)).toString());if(!body || Array.isArray(body) || typeof body!=="object")throw new Error();return body as Record<string,unknown>;}catch(error){if(error instanceof DriverError)throw error;throw new DriverError(400,"INVALID_JSON","Invalid request body.");}
     };
     if(path==="auth/challenges" && req.method==="POST") return Response.json(await requestChallenge((await json()).phone),{headers:{"Cache-Control":"no-store"}});
-    if(path==="auth/email-challenges" && req.method==="POST") return Response.json(await requestEmailChallenge((await json()).email),{headers:{"Cache-Control":"no-store"}});
+    if(path==="auth/email-challenges" && req.method==="POST") {
+      const body = await json();
+      return Response.json(await requestEmailChallenge(body.email, body.intent),{headers:{"Cache-Control":"no-store"}});
+    }
     if(path==="auth/sessions" && req.method==="POST") return Response.json(await verifyChallenge(await json()),{headers:{"Cache-Control":"no-store"}});
     const session=await requireDriver(req), driverId=session.driverId;
     let result:unknown;

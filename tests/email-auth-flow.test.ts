@@ -32,6 +32,33 @@ describe("email auth boundaries",()=>{
     expect(mocks.driverFind).toHaveBeenCalledWith({where:{email}});expect(mocks.driverCreate).not.toHaveBeenCalled();expect(result.token).toHaveLength(43);
     expect(mocks.claim).toHaveBeenCalledWith(expect.objectContaining({where:expect.objectContaining({consumedAt:null}),data:{consumedAt:expect.any(Date)}}));
   });
+  it("binds sign-in intent to the challenge and never creates a missing account", async () => {
+    const { challengeId } = await requestEmailChallenge("driver@example.com", "sign_in");
+    const code = mocks.send.mock.calls[0][1];
+    const record = mocks.create.mock.calls[0][0].data;
+    expect(record.channel).toBe("driver_sign_in");
+    mocks.find.mockResolvedValue({ ...record, consumedAt: null, attempts: 0 });
+    mocks.driverFind.mockResolvedValue(null);
+    await expect(verifyChallenge({ challengeId, code, deviceId: "device-12345", intent: "register" }))
+      .rejects.toMatchObject({ code: "DRIVER_ACCOUNT_REQUIRED" });
+    expect(mocks.driverCreate).not.toHaveBeenCalled();
+    expect(mocks.session).not.toHaveBeenCalled();
+  });
+
+  it("creates an account after verifying a registration challenge while intake is open", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("MIRELI_DEMO_MODE", "true");
+    const { challengeId, demoCode } = await requestEmailChallenge("new@example.com", "register");
+    const record = mocks.create.mock.calls[0][0].data;
+    expect(record.channel).toBe("driver_register");
+    mocks.find.mockResolvedValue({ ...record, consumedAt: null, attempts: 0 });
+    mocks.driverFind.mockResolvedValue(null);
+    mocks.driverCreate.mockResolvedValue({ id: "created", email: record.email });
+    const result = await verifyChallenge({ challengeId, code: demoCode, deviceId: "device-12345" });
+    expect(result.driver.id).toBe("created");
+    expect(mocks.application).toHaveBeenCalledOnce();
+  });
+
   it("does not grant sessions for replayed or expired codes",async()=>{
     for(const record of [{consumedAt:new Date(),expiresAt:new Date(Date.now()+60000)},{consumedAt:null,expiresAt:new Date(0)}]){
       mocks.find.mockResolvedValue({...record,attempts:0});await expect(verifyChallenge({challengeId:"a".repeat(48),code:"123456",deviceId:"device-12345"})).rejects.toMatchObject({status:401});
