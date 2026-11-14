@@ -19,6 +19,13 @@ export default function AdminLoginPage() {
   const [step, setStep] = useState<"email" | "verify">("email");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Verified staff sign-in: the request step issues a challengeId that the verify
+  // step must echo back, and a first sign-in additionally needs the one-time staff
+  // setup code and authenticator enrollment (the server returns the setup key).
+  const [challengeId, setChallengeId] = useState<string | null>(null);
+  const [setupCode, setSetupCode] = useState("");
+  const [needsSetup, setNeedsSetup] = useState(false);
+  const [enrollSecret, setEnrollSecret] = useState<string | null>(null);
 
   // Already signed in? straight to the console.
   useEffect(() => {
@@ -29,7 +36,13 @@ export default function AdminLoginPage() {
     setBusy(true);
     setError(null);
     try {
-      await api("/api/admin/auth", { body: { step: "request", email } });
+      const res = await api<{ challengeId?: string }>("/api/admin/auth", { body: { step: "request", email } });
+      setChallengeId(res?.challengeId ?? null);
+      setCode("");
+      setTwofa("");
+      setSetupCode("");
+      setNeedsSetup(false);
+      setEnrollSecret(null);
       setStep("verify");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Access denied");
@@ -42,13 +55,43 @@ export default function AdminLoginPage() {
     setBusy(true);
     setError(null);
     try {
-      await api("/api/admin/auth", { body: { step: "verify", email, code, twofa } });
-      router.replace("/admin");
+      const res = await api<{ enrollmentRequired?: boolean; totpSecret?: string; landingPage?: string }>(
+        "/api/admin/auth",
+        {
+          body: {
+            step: "verify",
+            challengeId,
+            code,
+            ...(twofa ? { twofa } : {}),
+            ...(setupCode.trim() ? { setupCode: setupCode.trim() } : {}),
+          },
+        }
+      );
+      // First sign-in: no session yet — the server hands back the authenticator
+      // setup key. The same emailed code + challenge stay valid for the retry.
+      if (res?.enrollmentRequired && res.totpSecret) {
+        setEnrollSecret(res.totpSecret);
+        return;
+      }
+      router.replace(res?.landingPage ?? "/admin");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Access denied");
+      const message = e instanceof Error ? e.message : "Access denied";
+      if (message.toLowerCase().includes("setup code")) setNeedsSetup(true);
+      setError(message);
     } finally {
       setBusy(false);
     }
+  }
+
+  function resetToEmail() {
+    setStep("email");
+    setChallengeId(null);
+    setCode("");
+    setTwofa("");
+    setSetupCode("");
+    setNeedsSetup(false);
+    setEnrollSecret(null);
+    setError(null);
   }
 
   return (
@@ -125,24 +168,80 @@ export default function AdminLoginPage() {
                   <Lock className="h-3 w-3" /> Admin verification (2FA)
                 </Label>
                 <Input
-                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
                   value={twofa}
-                  onChange={(e) => setTwofa(e.target.value)}
-                  placeholder="Enter admin access code"
+                  onChange={(e) => setTwofa(e.target.value.replace(/\D/g, ""))}
+                  placeholder="Authenticator code"
                   className="h-11"
                   onKeyDown={(e) => e.key === "Enter" && verify()}
                 />
                 <p className="text-[10px] text-muted-foreground">
-                  Admin access requires verified staff sign-in and a separate access code.
+                  The 6-digit code from your authenticator app. First sign-in? Leave this
+                  blank and verify — you will set up your authenticator in the next step.
                 </p>
               </motion.div>
 
-              {error && <p className="text-xs text-destructive">{error}</p>}
-              <Button className="h-11 w-full" onClick={verify} disabled={busy || code.length !== 6 || !twofa}>
+              {needsSetup && !enrollSecret && (
+                <div className="space-y-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+                  <Label className="flex items-center gap-1 text-xs text-amber-700">
+                    <Lock className="h-3 w-3" /> Staff setup code (one-time)
+                  </Label>
+                  <Input
+                    value={setupCode}
+                    onChange={(e) => setSetupCode(e.target.value)}
+                    placeholder="Setup code from your administrator"
+                    className="h-11 font-mono text-xs"
+                    onKeyDown={(e) => e.key === "Enter" && verify()}
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    Your administrator issues this code separately (it is never emailed and
+                    stays valid 30 minutes). Paste it, then verify again with the same
+                    emailed code.
+                  </p>
+                </div>
+              )}
+
+              {enrollSecret && (
+                <div className="space-y-2 rounded-xl border border-emerald-600/30 bg-emerald-500/5 p-3">
+                  <Label className="flex items-center gap-1 text-xs text-emerald-700">
+                    <ShieldCheck className="h-3 w-3" /> Set up your authenticator
+                  </Label>
+                  <ol className="list-decimal space-y-1 pl-4 text-[11px] text-muted-foreground">
+                    <li>Open your authenticator app and choose “Enter a setup key”.</li>
+                    <li>Account: {email} · Issuer: Mi-Reli · Key:</li>
+                  </ol>
+                  <code className="block select-all break-all rounded-md bg-background px-2 py-2 text-center font-mono text-xs tracking-widest">
+                    {enrollSecret}
+                  </code>
+                  <p className="text-[10px] text-muted-foreground">
+                    Then type the 6-digit code the app now shows into the 2FA box above and
+                    verify again — same emailed code, within its 5 minutes.
+                  </p>
+                </div>
+              )}
+
+              {error && (
+                <div className="space-y-1">
+                  <p className="text-xs text-destructive">{error}</p>
+                  {!needsSetup && !enrollSecret && (
+                    <p className="text-[10px] text-muted-foreground">
+                      Use the newest emailed code — it expires 5 minutes after sending and
+                      allows only a few attempts. If it keeps failing, go back and request
+                      a fresh one.
+                    </p>
+                  )}
+                </div>
+              )}
+              <Button
+                className="h-11 w-full"
+                onClick={verify}
+                disabled={busy || code.length !== 6 || (enrollSecret != null && twofa.length !== 6)}
+              >
                 Verify &amp; unlock console <KeyRound className="ml-1 h-4 w-4" />
               </Button>
               <button
-                onClick={() => setStep("email")}
+                onClick={resetToEmail}
                 className="w-full text-center text-xs text-muted-foreground hover:text-foreground"
               >
                 ← Use a different email
