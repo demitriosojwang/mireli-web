@@ -2,7 +2,7 @@ import {createHmac} from "node:crypto";
 import {isIP} from "node:net";
 import {db} from "@/lib/db";
 import {DriverError} from "./errors";
-import {amazonLocationConfigured, calculateAmazonDriverRoute} from "./amazon-location";
+import {amazonLocationConfigured, calculateAmazonDriverRoute, noFerryFreeRoute} from "./amazon-location";
 
 type Coordinate={latitude:number;longitude:number};
 type Maneuver={instruction:string;distanceMeters:number;durationSeconds:number;beginShapeIndex:number;endShapeIndex:number};
@@ -22,7 +22,7 @@ function metersBetween(a:Coordinate,b:Coordinate) {
 }
 
 /** Convert only the small, supported Valhalla response surface into app-safe data. */
-export function normalizeValhallaRoute(value:unknown) {
+export function normalizeValhallaRoute(value:unknown, avoidFerries = false) {
   const root=object(value),trip=object(root?.trip),legs=trip?.legs;
   if(!Array.isArray(legs)||legs.length!==1)throw new DriverError(502,"ROUTE_UNAVAILABLE","A driving route could not be calculated.");
   const leg=object(legs[0]),summary=object(leg?.summary),shape=leg?.shape;
@@ -32,6 +32,9 @@ export function normalizeValhallaRoute(value:unknown) {
     throw new DriverError(502,"ROUTE_UNAVAILABLE","A driving route could not be calculated.");
   const raw=leg?.maneuvers;
   if(!Array.isArray(raw)||raw.length<1||raw.length>120)throw new DriverError(502,"ROUTE_UNAVAILABLE","Route guidance is unavailable.");
+  const includesFerry = object(trip?.summary)?.has_ferry === true || summary?.has_ferry === true ||
+    raw.some(item => { const step = object(item); return step?.ferry === true || step?.type === 28 || step?.type === 29; });
+  if (avoidFerries && includesFerry) throw noFerryFreeRoute();
   const maneuvers:Maneuver[]=[];
   for(const item of raw){
     const row=object(item),instruction=row?.instruction,length=row?.length,time=row?.time,begin=row?.begin_shape_index,end=row?.end_shape_index;
@@ -41,7 +44,7 @@ export function normalizeValhallaRoute(value:unknown) {
       durationSeconds:Math.max(0,Math.round(time)),beginShapeIndex:begin as number,endShapeIndex:end as number});
   }
   if(!maneuvers.length)throw new DriverError(502,"ROUTE_UNAVAILABLE","Route guidance is unavailable.");
-  return {provider:"valhalla",geometry:shape,distanceMeters:Math.round(distanceKm*1000),durationSeconds:Math.round(timeSeconds),maneuvers};
+  return {provider:"valhalla",geometry:shape,distanceMeters:Math.round(distanceKm*1000),durationSeconds:Math.round(timeSeconds),...(includesFerry ? { includesFerry } : {}),maneuvers};
 }
 
 function rateKey(driverId:string) {
@@ -106,14 +109,15 @@ export async function requestDriverRoute(driverId:string,input:Record<string,unk
   const target=coordinate({latitude:targetRow.lat,longitude:targetRow.lng},"Assigned stop");
   if(metersBetween(origin,target)>300000)throw new DriverError(400,"ROUTE_TOO_FAR","This route is outside the supported Mombasa service area.");
   await enforceRouteLimit(driverId);
-  if (!valhallaConfigured()) return calculateAmazonDriverRoute(origin, target);
+  const avoidFerries = input.avoidFerries === true;
+  if (!valhallaConfigured()) return calculateAmazonDriverRoute(origin, target, avoidFerries);
   const endpoint=process.env.VALHALLA_URL!;
   const headers:Record<string,string>={"content-type":"application/json",accept:"application/json"};
   if(process.env.VALHALLA_API_TOKEN)headers.authorization=`Bearer ${process.env.VALHALLA_API_TOKEN}`;
   let response:Response;
   try {
     response=await fetch(endpoint,{method:"POST",headers,redirect:"error",signal:AbortSignal.timeout(12000),body:JSON.stringify({locations:[
-      {lat:origin.latitude,lon:origin.longitude,type:"break"},{lat:target.latitude,lon:target.longitude,type:"break"}],costing:"auto",units:"kilometers",directions_options:{units:"kilometers",language:"en-US"}})});
+      {lat:origin.latitude,lon:origin.longitude,type:"break"},{lat:target.latitude,lon:target.longitude,type:"break"}],costing:"auto",...(avoidFerries ? {costing_options:{auto:{use_ferry:0}}} : {}),units:"kilometers",directions_options:{units:"kilometers",language:"en-US"}})});
   } catch {throw new DriverError(502,"ROUTE_PROVIDER_UNAVAILABLE","Route guidance could not connect. Try again or use your map app.");}
   if(!response.ok)throw new DriverError(502,"ROUTE_PROVIDER_UNAVAILABLE","Route guidance could not calculate this drive. Try again or use your map app.");
   let payload:unknown;
@@ -121,8 +125,7 @@ export async function requestDriverRoute(driverId:string,input:Record<string,unk
     if(error instanceof DriverError)throw error;
     throw new DriverError(502,"ROUTE_RESPONSE_INVALID","Route guidance returned an invalid response.");
   }
-  const route=normalizeValhallaRoute(payload);
-  return route;
+  return normalizeValhallaRoute(payload, avoidFerries);
 }
 
 export async function requestDestinationRoute(driverId: string, input: Record<string, unknown>) {
@@ -139,5 +142,5 @@ export async function requestDestinationRoute(driverId: string, input: Record<st
   const origin = kenyaPoint(input.origin), destination = kenyaPoint(input.destination);
   if (metersBetween(origin, destination) > 500_000) throw new DriverError(400, "ROUTE_TOO_FAR", "Open Google Maps for destinations more than 500 km away.");
   await enforceRouteLimit(driverId, "destination", 6, 120);
-  return calculateAmazonDriverRoute(origin, destination);
+  return calculateAmazonDriverRoute(origin, destination, input.avoidFerries === true);
 }
