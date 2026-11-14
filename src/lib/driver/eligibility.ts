@@ -1,10 +1,9 @@
 import { isLocalDemoEnabled } from "@/lib/runtime-mode";
-import { applicableRequirements, POLICY_VERSION } from "./catalogue";
+import { requirements, POLICY_VERSION } from "./catalogue";
 
 type EligibilityApplication = {
   status: string;
   policyVersion: string | null;
-  ownsVehicle: boolean;
   documents: { type: string; state: string; scanState: string; expiresAt: Date | null }[];
 };
 
@@ -26,7 +25,7 @@ export function evaluateDriverApplication(
   if (app && driverStatus !== "active") reasons.push("Your driver account is not active.");
   if (app && app.policyVersion !== POLICY_VERSION) reasons.push("Your driver policy acknowledgement needs updating.");
   const accountApproved = reasons.length === 0;
-  const required = app ? applicableRequirements(app.ownsVehicle).filter((r) => r.required) : [];
+  const required = app ? requirements : [];
   const evidence = app?.documents ?? [];
   const expiringDocuments: { type: string; expiresAt: Date }[] = [];
   const graceDeadlines: Date[] = [];

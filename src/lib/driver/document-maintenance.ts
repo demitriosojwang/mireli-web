@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { applicableRequirements, POLICY_VERSION } from "./catalogue";
+import { requirements, POLICY_VERSION } from "./catalogue";
 import { documentGraceUntil, DRIVER_DOCUMENT_DAY_MS } from "./eligibility";
 import { EmailProviderError, sendTransactionalEmail, transactionalEmailConfigured } from "./email";
 import { purgeDocumentFile } from "./storage";
@@ -26,15 +26,16 @@ export async function maintainDriverDocuments(now = new Date()) {
   const windowEnd = new Date(now.getTime() + reminderDays * DRIVER_DOCUMENT_DAY_MS);
   const windowStart = new Date(now.getTime() - reminderDays * DRIVER_DOCUMENT_DAY_MS);
   const date = new Intl.DateTimeFormat("en-KE", { dateStyle: "long", timeZone: "Africa/Nairobi" });
+  const expiringTypes = requirements.filter(requirement => requirement.expires).map(requirement => requirement.id);
   const documents = await db.driverDocument.findMany({
-    where: { state: "approved", scanState: "clean", expiresAt: { gt: windowStart, lte: windowEnd }, expiryReminderAt: null,
+    where: { type: { in: expiringTypes }, state: "approved", scanState: "clean", expiresAt: { gt: windowStart, lte: windowEnd }, expiryReminderAt: null,
       application: { status: "approved", policyVersion: POLICY_VERSION, driver: { status: "active", email: { not: null } } } },
     orderBy: { expiresAt: "asc" }, take: limit,
-    select: { id: true, type: true, expiresAt: true, application: { select: { ownsVehicle: true, driver: { select: { email: true } } } } },
+    select: { id: true, type: true, expiresAt: true, application: { select: { driver: { select: { email: true } } } } },
   });
   for (const document of documents) {
     const expiry = document.expiresAt;
-    const title = applicableRequirements(document.application.ownsVehicle).find((r) => r.id === document.type && r.required)?.title;
+    const title = requirements.find((r) => r.id === document.type)?.title;
     const email = document.application.driver.email;
     if (!expiry || !title || !email) continue;
     const claim = await db.driverDocument.updateMany({ where: { id: document.id, state: "approved", expiryReminderAt: null },

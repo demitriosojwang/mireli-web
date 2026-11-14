@@ -1,7 +1,7 @@
 import {db} from "@/lib/db";
 import {getAdminSession} from "@/lib/session";
 import {isLocalDemoEnabled} from "@/lib/runtime-mode";
-import {applicableRequirements,POLICY_VERSION} from "./catalogue";
+import {requirements,POLICY_VERSION} from "./catalogue";
 import {DriverError,integer,text} from "./errors";
 import {sendOnboardingWelcomeEmail} from "./email";
 import {DRIVER_DOCUMENT_DAY_MS} from "./eligibility";
@@ -43,7 +43,7 @@ export async function reviewApplication(id:string,body:Record<string,unknown>,ac
     } else if(action==="approve") {
       if(app.status!=="submitted")throw new DriverError(409,"NOT_SUBMITTED","Application must be submitted.");
       if(app.policyVersion!==POLICY_VERSION)throw new DriverError(409,"POLICY_UPDATED","The driver must acknowledge the current policy.");
-      const missing=applicableRequirements(app.ownsVehicle).filter(r=>r.required && !app.documents.some(d=>d.type===r.id && d.state==="approved" && (!d.expiresAt || d.expiresAt>now) && (d.scanState==="clean" || (isLocalDemoEnabled() && d.scanState==="clean_demo"))));
+      const missing=requirements.filter(r=>!app.documents.some(d=>d.type===r.id && d.state==="approved" && (!d.expiresAt || d.expiresAt>now) && (d.scanState==="clean" || (isLocalDemoEnabled() && d.scanState==="clean_demo"))));
       if(missing.length)throw new DriverError(409,"OUTSTANDING_DOCUMENTS","Approve all required current documents first.");
       status="approved";approvedDriverId=app.driverId;await tx.driver.update({where:{id:app.driverId},data:{status:"active"}});
     } else if(action==="needs_changes") {status="changes_requested";await tx.driver.update({where:{id:app.driverId},data:{status:"applicant"}});}
