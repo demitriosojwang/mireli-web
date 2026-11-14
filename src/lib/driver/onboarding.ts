@@ -2,7 +2,7 @@ import {db} from "@/lib/db";
 import {createHash} from "node:crypto";
 import {isLocalDemoEnabled} from "@/lib/runtime-mode";
 import {DriverError, integer, text} from "./errors";
-import {applicableRequirements, POLICY_VERSION, maxDocumentBytes, requirements, validFile} from "./catalogue";
+import {POLICY_VERSION, maxDocumentBytes, requirements, validFile} from "./catalogue";
 import {purgeDocumentFile, saveDocument} from "./storage";
 import {nairobiDate} from "@/lib/nairobi-time";
 import {phoneNumber} from "./auth";
@@ -17,7 +17,7 @@ export async function onboarding(driverId: string) {
   const documents = app.documents.filter((document, index, rows) => rows.findIndex(d => d.type === document.type) === index);
   return {application:{id:app.id,status:app.status,version:app.version,licenceClass:app.licenceClass,ownsVehicle:app.ownsVehicle,reviewReason:app.reviewReason,submittedAt:app.submittedAt,documents},
     profile:{fullName:app.driver.name,phone:app.driver.phone,email:app.driver.email,plate:app.driver.plate,capacity:app.driver.capacity,cabType:app.driver.cabType},
-    requirements:applicableRequirements(app.ownsVehicle),canRemovePendingDocument:true,policyVersion:POLICY_VERSION,privacyUrl:process.env.DRIVER_PRIVACY_URL??null,termsUrl:process.env.DRIVER_TERMS_URL??null,maxDocumentBytes:maxDocumentBytes(),simulation:isLocalDemoEnabled()};
+    requirements,canRemovePendingDocument:true,policyVersion:POLICY_VERSION,privacyUrl:process.env.DRIVER_PRIVACY_URL??null,termsUrl:process.env.DRIVER_TERMS_URL??null,maxDocumentBytes:maxDocumentBytes(),simulation:isLocalDemoEnabled()};
 }
 export async function saveProfile(driverId:string, body:Record<string,unknown>) {
   const version=integer(body.expectedVersion,"Version"); const fullName=text(body.fullName,"Full name",3,100);
@@ -36,7 +36,8 @@ export async function saveProfile(driverId:string, body:Record<string,unknown>) 
 }
 export async function uploadDocument(driverId:string,type:string,expiry:string|null,version:number,bytes:Buffer,mime:string) {
   const requirement=requirements.find(r=>r.id===type);
-  if(!requirement || !validFile(mime,bytes) || bytes.length>maxDocumentBytes()) throw new DriverError(400,"INVALID_DOCUMENT","Choose a valid PDF, JPEG or PNG within the file limit.");
+  if(!requirement) throw new DriverError(400,"DOCUMENT_NOT_REQUESTED","This document is no longer on the checklist. Refresh your account.");
+  if(!validFile(mime,bytes) || bytes.length>maxDocumentBytes()) throw new DriverError(400,"INVALID_DOCUMENT","Choose a valid PDF, JPEG or PNG within the file limit.");
   let expiresAt:Date|null=null;
   if(requirement.expires) {
     if(!expiry || !/^\d{4}-\d{2}-\d{2}$/.test(expiry) || Number.isNaN(Date.parse(expiry)) || new Date(expiry).toISOString().slice(0,10)!==expiry || expiry<nairobiDate(new Date()))
@@ -112,7 +113,7 @@ export async function submitApplication(driverId:string,body:Record<string,unkno
     if(app.status==="submitted" && app.version===version+1 && app.policyVersion===POLICY_VERSION) return;
     if(app.version!==version || !["draft","changes_requested"].includes(app.status)) throw new DriverError(409,"STALE_APPLICATION","Refresh before submitting.");
     if(app.driver.name.length<3 || !app.driver.phone || !app.driver.plate || !app.licenceClass || !app.driver.cabType) throw new DriverError(400,"INCOMPLETE_PROFILE","Complete driver contact and vehicle details.");
-    const missing=applicableRequirements(app.ownsVehicle).filter(r=>r.required).filter(r=>!app.documents.some(d=>d.type===r.id && d.state!=="rejected" && (!d.expiresAt || d.expiresAt>new Date())));
+    const missing=requirements.filter(r=>!app.documents.some(d=>d.type===r.id && d.state!=="rejected" && (!d.expiresAt || d.expiresAt>new Date())));
     if(missing.length) throw new DriverError(400,"MISSING_DOCUMENTS",`Attach current evidence: ${missing.map(r=>r.title).join(", ")}.`);
     const updated=await tx.driverApplication.updateMany({where:{id:app.id,version},data:{status:"submitted",version:{increment:1},policyVersion:POLICY_VERSION,submittedAt:new Date()}});
     if(updated.count!==1) throw new DriverError(409,"STALE_APPLICATION","Refresh before submitting.");

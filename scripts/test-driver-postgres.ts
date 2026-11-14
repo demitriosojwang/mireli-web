@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import {randomBytes} from "node:crypto";
 import {db} from "../src/lib/db";
 import {driverTripCommand,driverTrips} from "../src/lib/driver/trips";
-import {applicableRequirements,POLICY_VERSION} from "../src/lib/driver/catalogue";
+import {requirements,POLICY_VERSION} from "../src/lib/driver/catalogue";
 import {requestPayoutDestination,reviewPayoutDestination} from "../src/lib/driver/beneficiary";
 import {executePayout} from "../src/lib/money";
 async function main(){
@@ -10,7 +10,7 @@ async function main(){
   const tag=randomBytes(6).toString("hex");
   try{
     await db.platformConfig.upsert({where:{id:"main"},create:{id:"main"},update:{}});
-    const driver=await db.driver.create({data:{name:"Synthetic PostgreSQL Driver",phone:`+254700${Date.now().toString().slice(-6)}`,mpesaNumber:"+254700000000",plate:"DEMO PG",cabType:"Shuttle",capacity:10,status:"active",application:{create:{status:"approved",policyVersion:POLICY_VERSION,licenceClass:"D1",ownsVehicle:true,documents:{create:applicableRequirements(true).filter(r=>r.required).map(r=>({type:r.id,objectKey:`SYNTHETIC-${tag}-${r.id}`,mime:"application/pdf",bytes:10,sha256:"synthetic",state:"approved",scanState:"clean_demo",expiresAt:r.expires?new Date("2028-12-31"):null}))}}}}});
+    const driver=await db.driver.create({data:{name:"Synthetic PostgreSQL Driver",phone:`+254700${Date.now().toString().slice(-6)}`,mpesaNumber:"+254700000000",plate:"DEMO PG",cabType:"Shuttle",capacity:10,status:"active",application:{create:{status:"approved",policyVersion:POLICY_VERSION,licenceClass:"D1",ownsVehicle:true,documents:{create:requirements.map(r=>({type:r.id,objectKey:`SYNTHETIC-${tag}-${r.id}`,mime:"application/pdf",bytes:10,sha256:"synthetic",state:"approved",scanState:"clean_demo",expiresAt:r.expires?new Date("2028-12-31"):null}))}}}}});
     const other=await db.driver.create({data:{name:"Synthetic Other Driver",phone:`OTHER-${tag}`,mpesaNumber:"",plate:"DEMO",cabType:"Shuttle",capacity:10}});
     const route=await db.route.create({data:{name:`Synthetic PG Route ${tag}`,durationMinutes:30,charterPrice:1000}});
     const passenger=await db.passenger.create({data:{phone:`SYNTHETIC-${tag}`,name:"Synthetic passenger"}});

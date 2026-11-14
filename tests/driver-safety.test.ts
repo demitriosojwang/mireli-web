@@ -1,6 +1,6 @@
 import {describe,it,expect,vi,afterEach} from "vitest";
 import {phoneNumber,challengeHash,matchesChallenge,hashToken} from "@/lib/driver/auth";
-import {validFile,applicableRequirements} from "@/lib/driver/catalogue";
+import {validFile,requirements} from "@/lib/driver/catalogue";
 import {minor} from "@/lib/driver/earnings";
 import {calculateSettlement,classifySubmission} from "@/lib/payout-settlement";
 import {evaluateDriverApplication} from "@/lib/driver/onboarding";
@@ -26,15 +26,22 @@ describe("driver identity and evidence",()=>{
     expect(validFile("application/pdf",Buffer.from("%PDF-1.7\nfixture"))).toBe(true);
     expect(validFile("image/png",Buffer.from("not a PNG"))).toBe(false);
   });
-  it("requires ownership evidence conditionally and leaves medical optional",()=>{
-    expect(applicableRequirements(true).some(r=>r.id==="lease")).toBe(false);
-    expect(applicableRequirements(false).some(r=>r.id==="lease")).toBe(true);
-    expect(applicableRequirements(true).find(r=>r.id==="medical")?.required).toBe(false);
+  it("requires only the seven driver and vehicle verification documents", () => {
+    expect(requirements.map(({ id, required }) => [id, required])).toEqual([
+      ["identity", true], ["licence", true], ["psv_badge", true], ["good_conduct", true],
+      ["insurance", true], ["inspection", true], ["logbook", true],
+    ]);
   });
   it("requires approved current evidence instead of a cached active flag",()=>{
     const now=new Date("2026-10-06T00:00:00Z");
-    const app={status:"approved",policyVersion:POLICY_VERSION,ownsVehicle:true,documents:applicableRequirements(true).filter(r=>r.required).map(r=>({type:r.id,state:"approved",scanState:"clean",expiresAt:r.expires?new Date("2028-12-31T00:00:00Z"):null}))};
-    expect(evaluateDriverApplication(app,"active",now,false).eligible).toBe(true);
+    const app={status:"approved",policyVersion:POLICY_VERSION,ownsVehicle:true,documents:requirements.map(r=>({type:r.id,state:"approved",scanState:"clean",expiresAt:r.expires?new Date("2028-12-31T00:00:00Z"):null}))};
+    expect(evaluateDriverApplication(app,"active",now,false)).toMatchObject({eligible: true, requiredDocuments: 7});
+    for (const requirement of requirements) {
+      const documents = app.documents.filter(document => document.type !== requirement.id);
+      expect(evaluateDriverApplication({...app, documents}, "active", now, false).eligible).toBe(false);
+    }
+    const priorChecklistDocument = {...app.documents[0], type: "kra_pin", state: "rejected"};
+    expect(evaluateDriverApplication({...app, documents: [...app.documents, priorChecklistDocument]}, "active", now, false).eligible).toBe(true);
     expect(evaluateDriverApplication(null,"active",now,false).eligible).toBe(false);
     expect(evaluateDriverApplication(app,"suspended",now,false).eligible).toBe(false);
     expect(evaluateDriverApplication({...app,policyVersion:"old-policy"},"active",now,false).eligible).toBe(false);
@@ -45,7 +52,7 @@ describe("driver identity and evidence",()=>{
     const expiry = new Date("2026-10-06T20:59:59.999Z");
     const deadline = new Date("2026-11-05T20:59:59.999Z");
     const app = { status: "approved", policyVersion: POLICY_VERSION, ownsVehicle: true,
-      documents: applicableRequirements(true).filter(r => r.required).map(r => ({ type: r.id, state: "approved", scanState: "clean",
+      documents: requirements.map(r => ({ type: r.id, state: "approved", scanState: "clean",
         expiresAt: r.id === "licence" ? expiry : r.expires ? new Date("2028-01-01") : null })) };
     const warning = evaluateDriverApplication(app, "active", new Date("2026-09-15"), false);
     expect(warning.expiringDocuments).toEqual([{ type: "licence", expiresAt: expiry }]);

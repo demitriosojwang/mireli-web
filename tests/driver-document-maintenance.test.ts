@@ -13,7 +13,7 @@ import { maintainDriverDocuments } from "@/lib/driver/document-maintenance";
 const now = new Date("2026-11-13T09:00:00Z");
 const document = { id: "doc1", objectKey: `driver-documents/${"a".repeat(64)}` };
 const renewal = { id: "doc2", type: "licence", expiresAt: new Date("2026-12-01T20:59:59Z"),
-  application: { ownsVehicle: true, driver: { email: "driver@example.com" } } };
+  application: { driver: { email: "driver@example.com" } } };
 
 describe("driver document maintenance", () => {
   beforeEach(() => vi.resetAllMocks());
@@ -23,6 +23,9 @@ describe("driver document maintenance", () => {
     mocks.updateMany.mockResolvedValue({ count: 1 });
     await maintainDriverDocuments(now);
     expect(mocks.purge).toHaveBeenCalledWith(document.objectKey);
+    expect(mocks.findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      where: expect.objectContaining({ type: { in: ["licence", "psv_badge", "insurance", "inspection"] } }),
+    }));
     expect(mocks.updateMany).toHaveBeenNthCalledWith(1, { where: document,
       data: { objectKey: "purged/doc1", filePurgedAt: now, sha256: "", mime: "", bytes: 0, filePurgeAt: null } });
     expect(mocks.updateMany).toHaveBeenNthCalledWith(2, { where: { id: "doc2", state: "approved", expiryReminderAt: null },
