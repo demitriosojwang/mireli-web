@@ -1,5 +1,5 @@
 import { GeoPlacesClient, SearchTextCommand } from "@aws-sdk/client-geo-places";
-import { CalculateRoutesCommand, GeoRoutesClient } from "@aws-sdk/client-geo-routes";
+import { CalculateRoutesCommand, GeoRoutesClient, type Route } from "@aws-sdk/client-geo-routes";
 import { GeoMapsClient, GetTileCommand } from "@aws-sdk/client-geo-maps";
 import { DriverError, text } from "./errors";
 import { isLocalDemoEnabled } from "@/lib/runtime-mode";
@@ -27,32 +27,77 @@ export async function searchDriverDestinations(input: Record<string, unknown>) {
 
 type Coordinate = { latitude: number; longitude: number };
 
-export async function calculateAmazonDriverRoute(origin: Coordinate, destination: Coordinate) {
+export function noFerryFreeRoute() {
+  return new DriverError(422, "NO_FERRY_FREE_ROUTE", "No ferry-free route found. Try Google Maps or allow ferries.");
+}
+
+function routeUsesFerry(route: Route): boolean {
+  return route.Legs?.some(leg => leg.Type === "Ferry" || !!leg.FerryLegDetails) === true;
+}
+
+export function normalizeAmazonDriverRoute(routes: Route[], avoidFerries: boolean) {
+  const route = routes.find(candidate => !avoidFerries || !routeUsesFerry(candidate));
+  if (avoidFerries && routes.length && !route) throw noFerryFreeRoute();
+  const unavailable = () => new DriverError(422, "NO_DRIVING_ROUTE", "No driving route was found to that destination.");
+  const legs = route?.Legs;
+  if (!route || !legs?.length) throw unavailable();
+
+  const points: number[][] = [];
+  const maneuvers: { instruction: string; distanceMeters: number; durationSeconds: number; beginShapeIndex: number; endShapeIndex: number }[] = [];
+  let distanceMeters = 0;
+  let durationSeconds = 0;
+  for (const leg of legs) {
+    const line = leg.Geometry?.LineString;
+    const vehicle = leg.VehicleLegDetails;
+    const ferry = leg.Type === "Ferry" || !!leg.FerryLegDetails;
+    const summary = ferry ? leg.FerryLegDetails?.Summary?.Overview : vehicle?.Summary?.Overview;
+    if (!line || line.length < 2 || line.length > 16_000 ||
+        !line.every(point => point.length === 2 && point.every(Number.isFinite)) ||
+        summary?.Distance === undefined || !Number.isFinite(summary.Distance) || summary.Distance < 0 ||
+        summary.Duration === undefined || !Number.isFinite(summary.Duration) || summary.Duration < 0) {
+      throw unavailable();
+    }
+
+    const previous = points.at(-1);
+    const sharedEndpoint = previous?.[0] === line[0][0] && previous?.[1] === line[0][1];
+    const offset = points.length - (sharedEndpoint ? 1 : 0);
+    points.push(...(sharedEndpoint ? line.slice(1) : line));
+    if (points.length > 16_000) throw unavailable();
+    distanceMeters += summary.Distance;
+    durationSeconds += summary.Duration;
+
+    const steps = ferry ? [] : vehicle?.TravelSteps ?? [];
+    if (!steps.length) {
+      maneuvers.push({ instruction: ferry ? "Take the ferry" : "Follow the highlighted route",
+        distanceMeters: Math.round(summary.Distance), durationSeconds: Math.round(summary.Duration),
+        beginShapeIndex: offset, endShapeIndex: offset + line.length - 1 });
+      continue;
+    }
+    const indexInRoute = (index: number) => offset + Math.max(0, Math.min(line.length - 1, index));
+    for (const [index, step] of steps.entries()) {
+      const road = step.NextRoad?.RoadName?.[0]?.Value;
+      const direction = step.TurnStepDetails?.SteeringDirection?.toLowerCase();
+      const instruction = step.Type === "Arrive" && leg === legs.at(-1) ? "Arrive at your destination" :
+        step.Type === "Depart" ? "Start driving" : direction === "left" || direction === "right" ?
+        `Turn ${direction}` : step.Type === "RoundaboutEnter" ? "Enter the roundabout" : "Continue";
+      maneuvers.push({ instruction: `${instruction}${road ? ` onto ${road}` : ""}`.slice(0, 240),
+        distanceMeters: Math.round(step.Distance ?? 0), durationSeconds: Math.round(step.Duration ?? 0),
+        beginShapeIndex: indexInRoute(step.GeometryOffset ?? 0),
+        endShapeIndex: indexInRoute(steps[index + 1]?.GeometryOffset ?? line.length - 1) });
+    }
+  }
+  if (durationSeconds <= 0 || distanceMeters <= 0) throw unavailable();
+  return { provider: "amazon-location", points, distanceMeters: Math.round(distanceMeters),
+    durationSeconds: Math.round(durationSeconds), includesFerry: routeUsesFerry(route), maneuvers: maneuvers.slice(0, 120) };
+}
+
+export async function calculateAmazonDriverRoute(origin: Coordinate, destination: Coordinate, avoidFerries: boolean) {
   const response = await new GeoRoutesClient({ region: region(), maxAttempts: 1 }).send(new CalculateRoutesCommand({
     Origin: [origin.longitude, origin.latitude], Destination: [destination.longitude, destination.latitude],
-    TravelMode: "Car", LegGeometryFormat: "Simple", TravelStepType: "TurnByTurn", Languages: ["en"],
+    TravelMode: "Car", OptimizeRoutingFor: "FastestRoute", LegGeometryFormat: "Simple", TravelStepType: "TurnByTurn",
+    Languages: ["en"], ...(avoidFerries ? { Avoid: { Ferries: true }, MaxAlternatives: 2 } : {}),
   }), { abortSignal: AbortSignal.timeout(12_000) }).catch(() => { throw providerUnavailable(); });
-  const leg = response.Routes?.[0]?.Legs?.[0];
-  const points = leg?.Geometry?.LineString;
-  const details = leg?.VehicleLegDetails;
-  const summary = details?.Summary?.Overview;
-  if (!points || points.length < 2 || points.length > 16_000 || !points.every(p => p.length === 2 && p.every(Number.isFinite)) ||
-      !summary?.Distance || !summary.Duration) {
-    throw new DriverError(422, "NO_DRIVING_ROUTE", "No driving route was found to that destination.");
-  }
-  const steps = details?.TravelSteps ?? [];
-  const maneuvers = steps.slice(0, 120).map((step, index) => {
-    const road = step.NextRoad?.RoadName?.[0]?.Value;
-    const direction = step.TurnStepDetails?.SteeringDirection?.toLowerCase();
-    const instruction = step.Type === "Arrive" ? "Arrive at your destination" : step.Type === "Depart" ? "Start driving" :
-      direction === "left" || direction === "right" ? `Turn ${direction}` : step.Type === "RoundaboutEnter" ? "Enter the roundabout" : "Continue";
-    return { instruction: `${instruction}${road ? ` onto ${road}` : ""}`.slice(0, 240),
-      distanceMeters: Math.round(step.Distance ?? 0), durationSeconds: Math.round(step.Duration ?? 0),
-      beginShapeIndex: step.GeometryOffset ?? 0, endShapeIndex: steps[index + 1]?.GeometryOffset ?? points.length - 1 };
-  });
-  return { provider: "amazon-location", points, distanceMeters: Math.round(summary.Distance), durationSeconds: Math.round(summary.Duration),
-    maneuvers: maneuvers.length ? maneuvers : [{ instruction: "Follow the highlighted route", distanceMeters: Math.round(summary.Distance),
-      durationSeconds: Math.round(summary.Duration), beginShapeIndex: 0, endShapeIndex: points.length - 1 }] };
+  return normalizeAmazonDriverRoute(response.Routes ?? [], avoidFerries);
 }
 
 export async function satelliteTile(z: string, x: string, y: string): Promise<Response> {
