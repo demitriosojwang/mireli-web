@@ -26,21 +26,21 @@ describe("driver identity and evidence",()=>{
     expect(validFile("application/pdf",Buffer.from("%PDF-1.7\nfixture"))).toBe(true);
     expect(validFile("image/png",Buffer.from("not a PNG"))).toBe(false);
   });
-  it("requires only the seven driver and vehicle verification documents", () => {
+  it("requires only the six driver and vehicle verification documents", () => {
     expect(requirements.map(({ id, required }) => [id, required])).toEqual([
       ["identity", true], ["licence", true], ["psv_badge", true], ["good_conduct", true],
-      ["insurance", true], ["inspection", true], ["logbook", true],
+      ["insurance", true], ["inspection", true],
     ]);
   });
   it("requires approved current evidence instead of a cached active flag",()=>{
     const now=new Date("2026-10-06T00:00:00Z");
     const app={status:"approved",policyVersion:POLICY_VERSION,ownsVehicle:true,documents:requirements.map(r=>({type:r.id,state:"approved",scanState:"clean",expiresAt:r.expires?new Date("2028-12-31T00:00:00Z"):null}))};
-    expect(evaluateDriverApplication(app,"active",now,false)).toMatchObject({eligible: true, requiredDocuments: 7});
+    expect(evaluateDriverApplication(app,"active",now,false)).toMatchObject({eligible: true, requiredDocuments: 6});
     for (const requirement of requirements) {
       const documents = app.documents.filter(document => document.type !== requirement.id);
       expect(evaluateDriverApplication({...app, documents}, "active", now, false).eligible).toBe(false);
     }
-    const priorChecklistDocument = {...app.documents[0], type: "kra_pin", state: "rejected"};
+    const priorChecklistDocument = {...app.documents[0], type: "logbook", state: "rejected"};
     expect(evaluateDriverApplication({...app, documents: [...app.documents, priorChecklistDocument]}, "active", now, false).eligible).toBe(true);
     expect(evaluateDriverApplication(null,"active",now,false).eligible).toBe(false);
     expect(evaluateDriverApplication(app,"suspended",now,false).eligible).toBe(false);
