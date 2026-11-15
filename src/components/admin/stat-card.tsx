@@ -12,19 +12,20 @@ export function StatCard({
   sub?: string;
   tone?: "default" | "good" | "warn" | "bad" | "info";
 }) {
+  // Tones are translucent tints so the cards sit correctly on the dark workspace.
   const tones: Record<string, string> = {
     default: "",
-    good: "border-emerald-200 bg-emerald-50",
-    warn: "border-amber-200 bg-amber-50",
-    bad: "border-red-200 bg-red-50",
-    info: "border-teal-200 bg-teal-50",
+    good: "border-emerald-400/25 bg-emerald-400/[0.07]",
+    warn: "border-amber-400/25 bg-amber-400/[0.07]",
+    bad: "border-red-400/25 bg-red-400/[0.07]",
+    info: "border-teal-400/25 bg-teal-400/[0.07]",
   };
   return (
     <Card className={cn(tones[tone])}>
-      <CardContent className="p-3">
-        <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-        <p className="mt-1 text-lg font-bold tracking-tight tabular-nums">{value}</p>
-        {sub && <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground">{sub}</p>}
+      <CardContent className="p-4 sm:p-5">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+        <p className="mt-1.5 text-2xl font-bold tracking-tight tabular-nums sm:text-[28px]">{value}</p>
+        {sub && <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{sub}</p>}
       </CardContent>
     </Card>
   );

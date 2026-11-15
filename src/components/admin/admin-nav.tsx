@@ -6,40 +6,27 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/client";
 import { LogoTile } from "@/components/site-chrome";
-import {
-  AlertTriangle,
-  BarChart3,
-  CalendarCog,
-  Car,
-  ClipboardList,
-  Coins,
-  MapPin,
-  Radar,
-  Receipt,
-  Train,
-  Users,
-  Wallet,
-} from "lucide-react";
+import { ArrowUpRight, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
-  { href: "/admin", label: "Overview", icon: BarChart3 },
-  { href: "/admin/bookings", label: "Bookings", icon: ClipboardList },
-  { href: "/admin/routes", label: "Routes", icon: MapPin },
-  { href: "/admin/timetable", label: "Timetable", icon: Train },
-  { href: "/admin/trips", label: "Trips", icon: Car },
-  { href: "/admin/drivers", label: "Drivers", icon: Users },
-  { href: "/admin/driver-onboarding", label: "Compliance", icon: ClipboardList },
-  { href: "/admin/driver-support", label: "Support", icon: Users },
-  { href: "/admin/driver-payout-destinations", label: "Beneficiaries", icon: Users },
-  { href: "/admin/money", label: "Ledger", icon: Coins },
-  { href: "/admin/reconciliation", label: "Recon", icon: Radar },
-  { href: "/admin/payments", label: "Payments", icon: Wallet },
-  { href: "/admin/config", label: "Config", icon: CalendarCog },
-  { href: "/admin/audit", label: "Audit", icon: Receipt },
+  { href: "/admin", label: "Overview" },
+  { href: "/admin/bookings", label: "Bookings" },
+  { href: "/admin/routes", label: "Routes" },
+  { href: "/admin/timetable", label: "Timetable" },
+  { href: "/admin/trips", label: "Trips" },
+  { href: "/admin/drivers", label: "Drivers" },
+  { href: "/admin/driver-onboarding", label: "Compliance" },
+  { href: "/admin/driver-support", label: "Support" },
+  { href: "/admin/driver-payout-destinations", label: "Beneficiaries" },
+  { href: "/admin/money", label: "Ledger" },
+  { href: "/admin/reconciliation", label: "Recon" },
+  { href: "/admin/payments", label: "Payments" },
+  { href: "/admin/config", label: "Config" },
+  { href: "/admin/audit", label: "Audit" },
 ];
 
-/** Original-style admin chrome: app header ("Admin Console") + pill tab nav. */
+/** Dark workspace chrome: identity header + underline tab bar (desktop-first). */
 export function AdminChrome({ adminName, adminEmail }: { adminName: string; adminEmail: string }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -56,9 +43,9 @@ export function AdminChrome({ adminName, adminEmail }: { adminName: string; admi
   }
 
   return (
-    <>
-      <header className="sticky top-0 z-30 border-b border-border/60 bg-background/90 backdrop-blur-md supports-[backdrop-filter]:bg-background/75">
-        <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-2.5 sm:max-w-3xl sm:px-6 lg:max-w-5xl xl:max-w-6xl">
+    <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur-md supports-[backdrop-filter]:bg-background/75">
+      <div className="mx-auto w-full max-w-md px-4 sm:max-w-3xl sm:px-6 lg:max-w-5xl xl:max-w-6xl">
+        <div className="flex items-center justify-between gap-3 py-3">
           <div className="flex items-center gap-2.5">
             <Link href="/admin" aria-label="Mi-Reli admin">
               <LogoTile />
@@ -66,48 +53,48 @@ export function AdminChrome({ adminName, adminEmail }: { adminName: string; admi
             <div className="leading-tight">
               <div className="text-base font-bold tracking-tight text-foreground">Mi-Reli</div>
               <div className="-mt-0.5 flex items-center gap-1 text-[10px] tracking-wide text-muted-foreground">
-                <AlertTriangle className="h-2.5 w-2.5 text-accent" /> Admin Console · oversight only
+                <ShieldCheck className="h-2.5 w-2.5 text-accent" /> Admin Console · oversight only
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button onClick={logout} disabled={busy} className="text-[10px] text-muted-foreground hover:text-foreground">
+          <div className="flex items-center gap-3 sm:gap-4">
+            <div className="hidden text-right leading-tight md:block">
+              <p className="text-xs font-medium text-foreground">{adminName}</p>
+              <p className="text-[10px] text-muted-foreground">{adminEmail} · private workspace</p>
+            </div>
+            <Link href="/" className="hidden items-center gap-0.5 text-xs font-medium text-accent hover:underline sm:inline-flex">
+              Passenger site <ArrowUpRight className="h-3.5 w-3.5" />
+            </Link>
+            <Button variant="outline" size="sm" onClick={logout} disabled={busy}>
               Logout
-            </button>
+            </Button>
           </div>
         </div>
-
-        {/* Pill tab nav — scrollable on small screens, wraps once there is room */}
-        <div className="mx-auto w-full max-w-md px-4 pb-2.5 sm:max-w-3xl sm:px-6 lg:max-w-5xl xl:max-w-6xl">
-          <div className="flex gap-1 overflow-x-auto rounded-2xl bg-secondary/50 p-1 backdrop-blur-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden xl:flex-wrap xl:overflow-visible">
-            {NAV.map((item) => {
-              const active = pathname === item.href;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    "flex shrink-0 items-center gap-1 rounded-xl px-2.5 py-2 text-[11px] font-semibold transition-all duration-200 sm:text-xs",
-                    active
-                      ? "mireli-pill-active"
-                      : "text-muted-foreground hover:bg-accent/10 hover:text-foreground",
-                  )}
-                >
-                  <item.icon className="h-3 w-3" /> {item.label}
-                </Link>
-              );
-            })}
-          </div>
-        </div>
-      </header>
-
-      {/* Account strip */}
-      <div className="mx-auto w-full max-w-md px-4 pt-3 sm:max-w-3xl sm:px-6 lg:max-w-5xl xl:max-w-6xl">
-        <p className="text-[10px] text-muted-foreground">
-          Signed in as <span className="font-medium text-foreground">{adminName}</span> · {adminEmail}
-        </p>
       </div>
-    </>
+
+      {/* Underline tab bar — scrollable on small screens */}
+      <nav className="border-t border-border/70" aria-label="Admin sections">
+        <div className="mx-auto flex w-full max-w-md gap-1 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:max-w-3xl sm:px-6 lg:max-w-5xl xl:max-w-6xl">
+          {NAV.map((item) => {
+            const active = pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "relative whitespace-nowrap px-3 py-2.5 text-[13px] font-medium transition-colors",
+                  active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {item.label}
+                {active && <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-accent" />}
+              </Link>
+            );
+          })}
+        </div>
+      </nav>
+    </header>
   );
 }
 

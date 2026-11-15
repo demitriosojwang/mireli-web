@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import { useMemo } from "react";
 import { useAdminData } from "@/components/admin/use-admin-data";
 import { StatCard } from "@/components/admin/stat-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ksh, fmtDateTime, LEDGER_LABELS } from "@/lib/format";
-import { AlertTriangle, BadgeAlert, Radio, Wallet } from "lucide-react";
+import { AlertTriangle, BadgeAlert, RefreshCw, Wallet } from "lucide-react";
 
 interface Overview {
   config: {
@@ -37,7 +38,11 @@ interface Overview {
 }
 
 export default function AdminOverview() {
-  const { data } = useAdminData<Overview>("/api/admin/overview");
+  const { data, refresh } = useAdminData<Overview>("/api/admin/overview");
+  const updatedAt = useMemo(
+    () => (data ? new Date().toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" }) : ""),
+    [data]
+  );
   if (!data) return <Loading />;
 
   const alertCount =
@@ -51,16 +56,28 @@ export default function AdminOverview() {
     (data.alerts.unallocatedBookings > 0 ? 1 : 0);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold tracking-tight">Overview</h1>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          Your oversight surface: totals and exceptions. The engine moves the money — you watch the
-          buckets and step in when something flags.
-        </p>
+    <div className="space-y-6 pt-2 sm:pt-4">
+      {/* Workspace hero */}
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">
+            Operations · live ledger
+          </p>
+          <h1 className="mt-1.5 text-3xl font-bold tracking-tight sm:text-4xl">Admin workspace</h1>
+          <p className="mt-1.5 max-w-xl text-sm text-muted-foreground">
+            Your oversight surface: totals and exceptions. The engine moves the money — you watch
+            the buckets and step in when something flags.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {updatedAt && <span className="text-xs text-muted-foreground">Updated {updatedAt}</span>}
+          <Button variant="outline" onClick={() => refresh()}>
+            <RefreshCw className="h-4 w-4" /> Refresh
+          </Button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard label="Collected today" value={ksh(data.today.collected)} sub={`${data.today.bookings} bookings placed`} tone="good" />
         <StatCard label="Commission today" value={ksh(data.today.commission)} sub={`charter rate ${(data.config.commissionRate * 100).toFixed(1)}% (NTSA cap 18%)`} tone="info" />
         <StatCard label="Paid out today" value={ksh(data.today.paidOut)} sub={`${data.config.payoutMode} mode`} />
@@ -80,7 +97,7 @@ export default function AdminOverview() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
             {Object.entries(data.buckets).map(([bucket, v]) => (
               <div key={bucket} className="rounded-lg border bg-muted/30 p-3">
                 <p className="text-xs font-medium text-muted-foreground">{LEDGER_LABELS[bucket] || bucket}</p>
@@ -99,13 +116,13 @@ export default function AdminOverview() {
             <AlertTriangle className={`h-4 w-4 ${alertCount > 0 ? "text-amber-600" : "text-emerald-600"}`} />
             Exceptions needing a look
             {alertCount > 0 && (
-              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">{alertCount}</span>
+              <span className="rounded-full bg-amber-400/15 px-2 py-0.5 text-xs font-semibold text-amber-200">{alertCount}</span>
             )}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {alertCount === 0 && (
-            <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-900">
+            <p className="rounded-md bg-emerald-400/10 p-3 text-sm text-emerald-200">
               All clear — no stuck refunds, failed transfers, ambiguous payments, late captures,
               Paybill mismatches, assignment reviews or unallocated bookings.
             </p>
@@ -217,12 +234,12 @@ export default function AdminOverview() {
 
 function AlertRow({ title, detail, href, cta }: { title: string; detail: string; href: string; cta: string }) {
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-amber-200 bg-amber-50 p-3">
+    <div className="flex flex-col gap-2 rounded-md border border-amber-400/25 bg-amber-400/[0.07] p-3">
       <div>
-        <p className="flex items-center gap-1.5 text-sm font-medium text-amber-950">
+        <p className="flex items-center gap-1.5 text-sm font-medium text-amber-200">
           <BadgeAlert className="h-4 w-4" /> {title}
         </p>
-        <p className="mt-0.5 text-xs text-amber-900/80">{detail}</p>
+        <p className="mt-0.5 text-xs text-amber-200/70">{detail}</p>
       </div>
       <Button asChild size="sm" variant="outline">
         <Link href={href}>{cta}</Link>
@@ -233,11 +250,11 @@ function AlertRow({ title, detail, href, cta }: { title: string; detail: string;
 
 function Loading() {
   return (
-    <div className="space-y-4">
-      <div className="h-8 w-48 animate-pulse rounded bg-muted" />
-      <div className="grid grid-cols-2 gap-2">
+    <div className="space-y-4 pt-2 sm:pt-4">
+      <div className="h-10 w-64 animate-pulse rounded bg-muted" />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="h-24 animate-pulse rounded-lg bg-muted" />
+          <div key={i} className="h-28 animate-pulse rounded-lg bg-muted" />
         ))}
       </div>
       <div className="h-48 animate-pulse rounded-lg bg-muted" />
