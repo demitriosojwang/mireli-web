@@ -23,7 +23,9 @@ jobs:
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.head_repository.full_name == github.repository &&
       vars.MIRELI_AWS_DEPLOY_ENABLED == 'true'
-    runs-on: ubuntu-24.04
+    # Native ARM64 runner: the release image is linux/arm64, so this removes the
+    # QEMU emulation that made every build take 25-40 minutes.
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
     environment:
       name: production
@@ -88,8 +90,6 @@ jobs:
           aws ecr get-login-password --region "$AWS_REGION" \
             | docker login --username AWS --password-stdin "$registry"
 
-      - uses: docker/setup-qemu-action@v4
-        if: steps.freshness.outputs.deploy == 'true'
       - uses: docker/setup-buildx-action@v4
         if: steps.freshness.outputs.deploy == 'true'
       - name: Build and publish the tested ARM64 release image
@@ -100,6 +100,11 @@ jobs:
           target: runner
           platforms: linux/arm64
           push: true
+          # Warm layer cache: a cold emulated build was the other half of the
+          # 25-40 minute deploy. The runner is ARM-native now; the cache makes
+          # repeat builds (dependency layers) near-instant.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           tags: ${{ env.ECR_REPOSITORY_URI }}:${{ env.RELEASE_TAG }}
           labels: |
             org.opencontainers.image.revision=${{ env.SOURCE_SHA }}
@@ -157,12 +162,26 @@ jobs:
           echo "SSM deployment command: $command_id"
 
           status=Pending
+          fetch_failures=0
           for _ in $(seq 1 150); do
-            status=$(aws ssm get-command-invocation \
+            if status=$(aws ssm get-command-invocation \
               --command-id "$command_id" \
               --instance-id "$EC2_INSTANCE_ID" \
               --query Status \
-              --output text 2>/dev/null || true)
+              --output text 2>/dev/null); then
+              fetch_failures=0
+            else
+              # Fail in a minute, not 25: a persistently unreadable invocation
+              # almost always means the deploy identity lost the
+              # ssm:GetCommandInvocation grant (it authorizes against the
+              # invocation ARN, not the instance/document ARNs).
+              status=Pending
+              fetch_failures=$((fetch_failures + 1))
+              if [ "$fetch_failures" -ge 5 ]; then
+                echo "::error::Cannot read SSM command status after $fetch_failures attempts. Grant ssm:GetCommandInvocation to the deploy identity (resource: the invocation ARN). The command may still be running on the VM."
+                exit 1
+              fi
+            fi
             case "$status" in
               Success|Cancelled|TimedOut|Failed|Cancelling|DeliveryTimedOut|ExecutionTimedOut|Undeliverable|Terminated) break ;;
               *) sleep 10 ;;
