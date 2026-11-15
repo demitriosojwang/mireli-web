@@ -45,7 +45,7 @@ export function SplashScreen({ onDone }: { onDone: () => void }) {
           className="mb-6 h-48 w-48 overflow-hidden rounded-3xl bg-white shadow-2xl"
           style={{ boxShadow: "0 0 60px oklch(0.67 0.19 42 / 0.4)" }}
         >
-          <img src="/mireli-logo.jpeg" alt="Mi-Reli" className="h-full w-full object-contain" />
+          <img src="/mireli-logo.svg" alt="Mi-Reli" className="h-full w-full object-contain" />
         </div>
 
         {/* Tagline */}
