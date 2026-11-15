@@ -25,7 +25,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/client";
 import { ksh } from "@/lib/format";
-import { AlertTriangle, Plus, ShieldAlert, UserPlus, Users } from "lucide-react";
+import { AlertTriangle, BadgeCheck, Plus, ShieldAlert, UserPlus, Users } from "lucide-react";
 
 interface DriverRow {
   id: string;
@@ -37,6 +37,7 @@ interface DriverRow {
   cabType: string;
   capacity: number;
   status: string;
+  verified: boolean;
   rating: number;
   completedTrips: number;
   earnings: { lifetimeGross: number; queued: number; paid: number; failed: number };
@@ -99,6 +100,14 @@ export default function AdminDrivers() {
     suspended: "bg-red-100 text-red-900 border-red-200",
   };
 
+  // Verified (compliance-approved) drivers first, then by status, then name.
+  const statusRank: Record<string, number> = { active: 0, inactive: 1, suspended: 2 };
+  const sortedDrivers = [...(data?.drivers || [])].sort((a, b) =>
+    Number(b.verified) - Number(a.verified) ||
+    (statusRank[a.status] ?? 3) - (statusRank[b.status] ?? 3) ||
+    a.name.localeCompare(b.name)
+  );
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -115,14 +124,19 @@ export default function AdminDrivers() {
         </Button>
       </div>
 
-      <div className="grid gap-3">
-        {(data?.drivers || []).map((d) => (
+      <div className="grid gap-3 xl:grid-cols-2">
+        {sortedDrivers.map((d) => (
           <Card key={d.id}>
             <CardContent className="p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-semibold">{d.name}</span>
+                    {d.verified && (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium text-sky-600">
+                        <BadgeCheck className="h-4 w-4 fill-sky-500 text-white" /> Verified
+                      </span>
+                    )}
                     <Badge variant="outline" className={statusStyles[d.status] || ""}>{d.status}</Badge>
                     {d.mpesaAtRisk && (
                       <Badge variant="outline" className="border-red-200 bg-red-50 text-red-900">
