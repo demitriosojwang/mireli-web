@@ -8,7 +8,6 @@ import {
   passengerCookieOptions,
   type Session,
 } from "@/lib/session";
-import { issueCredit } from "@/lib/money";
 import { audit } from "@/lib/audit";
 import { decryptPassengerIdNumber } from "@/lib/passenger-pii";
 
@@ -38,23 +37,12 @@ export async function GET() {
     if (passenger) return respondFor(passenger, existing);
   }
 
-  // A guest session lets people browse before operations have finished
-  // configuring the platform. Welcome credit is only issued when an operator
-  // configuration exists; never invent settings to make a guest account.
-  const cfg = await db.platformConfig.findUnique({
-    where: { id: "main" },
-    select: { creditValidityDays: true },
-  });
+  // Mi-Reli does not offer free credit: a new guest starts at zero balance.
+  // The old KSh 100 welcome grant was minted for every fresh session (each
+  // incognito window = another free ride), a direct revenue leak. Credit now
+  // only ever enters an account as a refund or ops-issued compensation.
   const passenger = await createGuestPassenger();
 
-  if (cfg) {
-    await issueCredit({
-      passengerId: passenger.id,
-      amount: 100,
-      note: "Karibu Mi-Reli! Welcome credit — applies to any ride.",
-      validityDays: cfg.creditValidityDays,
-    });
-  }
   await audit({
     actorId: passenger.id,
     actorName: "Guest",
@@ -62,7 +50,7 @@ export async function GET() {
     action: "auth.guest_start",
     entity: "passenger",
     entityId: passenger.id,
-    metadata: { welcomeCredit: cfg ? 100 : 0, welcomeCreditSkipped: !cfg },
+    metadata: { welcomeCredit: 0 },
   });
 
   const session = {

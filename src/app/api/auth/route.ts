@@ -7,7 +7,7 @@ import {
   normalizePhone,
   passengerCookieOptions,
 } from "@/lib/session";
-import { issueCredit } from "@/lib/money";
+
 import { audit } from "@/lib/audit";
 import { DriverError, text } from "@/lib/driver/errors";
 import { assertPassengerPiiEncryptionReady, decryptPassengerIdNumber, encryptPassengerIdNumber } from "@/lib/passenger-pii";
@@ -98,25 +98,8 @@ async function verifySignIn(body: Record<string, unknown>) {
     return { passenger, isNew: true };
   });
 
-  let welcomeCredit = 0;
-  if (result.isNew) {
-    try {
-      const config = await db.platformConfig.findUnique({ where: { id: "main" }, select: { creditValidityDays: true } });
-      if (config) {
-        await issueCredit({
-          passengerId: result.passenger.id,
-          amount: 100,
-          note: "Karibu Mi-Reli! Welcome credit — applies to any ride.",
-          validityDays: config.creditValidityDays,
-        });
-        welcomeCredit = 100;
-      }
-    } catch (error) {
-      // Authentication remains available if the optional welcome-credit
-      // ledger is unavailable; never create operator settings as a fallback.
-      console.error("passenger welcome credit could not be issued", error);
-    }
-  }
+  // No welcome credit on signup either: new accounts start at zero balance.
+  // Credit is only issued as refunds or ops compensation (see lib/money).
 
   const passenger = result.passenger;
   const session = {
@@ -135,7 +118,7 @@ async function verifySignIn(body: Record<string, unknown>) {
     action: result.isNew ? "auth.signup" : "auth.login",
     entity: "passenger",
     entityId: passenger.id,
-    metadata: result.isNew ? { welcomeCredit } : undefined,
+    metadata: result.isNew ? { welcomeCredit: 0 } : undefined,
   });
   return res;
 }
