@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence, useAnimationControls } from "framer-motion";
-import { DURATION, EASE_IN_OUT, KNOB_STRETCH, LAYOUT_ID } from "@/lib/motion";
+import { DURATION, EASE_IN_OUT, EASE_OUT, KNOB_STRETCH, LAYOUT_ID, PRESS_SCALE, STAGGER_MS } from "@/lib/motion";
 import { ACTIVE_BOOKING_STATUSES, INACTIVE_BOOKING_STATUSES } from "@/lib/state-machines";
 import { SiteFooter, SiteHeader, SiteNav } from "@/components/site-chrome";
 import { InstallPrompt } from "@/components/install-prompt";
@@ -11,7 +11,7 @@ import { BookingSheet, BookableTrip, BookingDraft } from "@/components/booking-s
 import { PaySheet } from "@/components/pay-sheet";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Command,
@@ -542,22 +542,51 @@ export default function Home() {
 
       {/* Direction switcher â€” the signature pill row */}
       <div className="mx-auto w-full max-w-md px-4 pt-3 sm:max-w-2xl sm:px-6 lg:max-w-5xl">
-        <Tabs value={direction} onValueChange={(v) => changeDirection(v as "FROM_TERMINUS" | "TO_TERMINUS")}>
-          <TabsList className="relative grid w-full grid-cols-2">
-            <TabsTrigger value="FROM_TERMINUS" className="relative flex items-center gap-1.5 data-[state=active]:bg-transparent! data-[state=active]:shadow-none">
-              {direction === "FROM_TERMINUS" && <DirectionPill />}
-              <span className="relative z-10 flex items-center gap-1.5">
-                <Anchor className="h-3.5 w-3.5" /> From Terminus
-              </span>
-            </TabsTrigger>
-            <TabsTrigger value="TO_TERMINUS" className="relative flex items-center gap-1.5 data-[state=active]:bg-transparent! data-[state=active]:shadow-none">
-              {direction === "TO_TERMINUS" && <DirectionPill />}
-              <span className="relative z-10 flex items-center gap-1.5">
-                <Navigation className="h-3.5 w-3.5" /> To Terminus
-              </span>
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+        {/* A two-option direction switch is a radiogroup, not a tablist: Radix
+            Tabs set aria-controls to panels that never exist here, which failed
+            the aria audit. Buttons keep the exact trigger styling + pill. */}
+        <div
+          role="radiogroup"
+          aria-label="Journey direction"
+          className="relative grid h-9 w-full grid-cols-2 items-center justify-center rounded-lg bg-muted p-[3px] text-muted-foreground"
+          onKeyDown={(e) => {
+            if (!["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp"].includes(e.key)) return;
+            e.preventDefault();
+            changeDirection(direction === "FROM_TERMINUS" ? "TO_TERMINUS" : "FROM_TERMINUS");
+            requestAnimationFrame(() => {
+              e.currentTarget.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')?.focus();
+            });
+          }}
+        >
+          <button
+            type="button"
+            role="radio"
+            aria-checked={direction === "FROM_TERMINUS"}
+            data-state={direction === "FROM_TERMINUS" ? "active" : "inactive"}
+            tabIndex={direction === "FROM_TERMINUS" ? 0 : -1}
+            onClick={() => changeDirection("FROM_TERMINUS")}
+            className="relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-transparent px-2 py-1 text-sm font-medium text-foreground transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 data-[state=active]:bg-transparent! data-[state=active]:shadow-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 dark:text-muted-foreground dark:data-[state=active]:border-input dark:data-[state=active]:bg-input/30 dark:data-[state=active]:text-foreground"
+          >
+            {direction === "FROM_TERMINUS" && <DirectionPill />}
+            <span className="relative z-10 flex items-center gap-1.5">
+              <Anchor className="h-3.5 w-3.5" /> From Terminus
+            </span>
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={direction === "TO_TERMINUS"}
+            data-state={direction === "TO_TERMINUS" ? "active" : "inactive"}
+            tabIndex={direction === "TO_TERMINUS" ? 0 : -1}
+            onClick={() => changeDirection("TO_TERMINUS")}
+            className="relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-transparent px-2 py-1 text-sm font-medium text-foreground transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 data-[state=active]:bg-transparent! data-[state=active]:shadow-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 dark:text-muted-foreground dark:data-[state=active]:border-input dark:data-[state=active]:bg-input/30 dark:data-[state=active]:text-foreground"
+          >
+            {direction === "TO_TERMINUS" && <DirectionPill />}
+            <span className="relative z-10 flex items-center gap-1.5">
+              <Navigation className="h-3.5 w-3.5" /> To Terminus
+            </span>
+          </button>
+        </div>
       </div>
       <SiteNav />
 
@@ -569,8 +598,8 @@ export default function Home() {
             key={direction}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8, transition: { duration: 0.16, ease: "easeInOut" } }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
+            exit={{ opacity: 0, y: -8, transition: { duration: DURATION.exit, ease: EASE_IN_OUT } }}
+            transition={{ duration: DURATION.move, ease: EASE_OUT }}
             className="space-y-4"
           >
             {bookingCatalogueView === "booking" && <ol aria-label="Booking steps" className="flex items-center gap-2 text-[11px]">
@@ -1114,8 +1143,8 @@ export default function Home() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.97 }}
-                    transition={{ duration: 0.22, delay: index * 0.03, ease: "easeOut" }}
-                    whileTap={{ scale: 0.97, transition: { duration: 0.08 } }}
+                    transition={{ duration: DURATION.move, delay: index * STAGGER_MS, ease: EASE_OUT }}
+                    whileTap={{ scale: PRESS_SCALE, transition: { duration: DURATION.press } }}
                   >
                     <CabCard
                       trip={trip}

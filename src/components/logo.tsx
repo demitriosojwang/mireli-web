@@ -5,10 +5,10 @@ export function Logo({ size = "md", light = false }: { size?: "sm" | "md" | "lg"
     <span className="inline-flex items-center gap-2">
       <span className={`${dims} relative shrink-0 overflow-hidden rounded-xl bg-white`}>
         <img
-          src="/mireli-logo.svg"
+          src="/mireli-logo.jpeg"
           alt=""
           aria-hidden="true"
-          className="h-full w-full object-contain"
+          className="absolute left-1/2 top-0 h-[150%] max-w-none -translate-x-1/2"
         />
       </span>
       <span className={`${text} font-bold tracking-tight ${light ? "text-primary-foreground" : "text-primary"}`}>

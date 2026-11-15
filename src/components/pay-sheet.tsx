@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { ksh, fmtPhone } from "@/lib/format";
 import { api } from "@/lib/client";
+import { iconCrossfade } from "@/lib/motion";
 import {
   Check,
   Copy,
@@ -425,10 +426,10 @@ function CopyFeedback({ copied }: { copied: boolean }) {
         <motion.span
           key="copied"
           className="inline-flex"
-          initial={{ opacity: 0, filter: "blur(4px)", scale: 0.9 }}
-          animate={{ opacity: 1, filter: "blur(0px)", scale: 1 }}
-          exit={{ opacity: 0, filter: "blur(4px)", scale: 0.9 }}
-          transition={{ duration: 0.15, ease: "easeInOut" }}
+          variants={iconCrossfade}
+          initial="hidden"
+          animate="show"
+          exit="exit"
         >
           <Check className="h-3.5 w-3.5 text-primary" />
         </motion.span>
@@ -436,10 +437,10 @@ function CopyFeedback({ copied }: { copied: boolean }) {
         <motion.span
           key="idle"
           className="inline-flex"
-          initial={{ opacity: 0, filter: "blur(4px)", scale: 0.9 }}
-          animate={{ opacity: 1, filter: "blur(0px)", scale: 1 }}
-          exit={{ opacity: 0, filter: "blur(4px)", scale: 0.9 }}
-          transition={{ duration: 0.15, ease: "easeInOut" }}
+          variants={iconCrossfade}
+          initial="hidden"
+          animate="show"
+          exit="exit"
         >
           <Copy className="h-3.5 w-3.5" />
         </motion.span>
