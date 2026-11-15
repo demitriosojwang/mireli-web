@@ -20,7 +20,7 @@ const nextConfig: NextConfig = {
         headers: [{ key: "Cache-Control", value: "public, max-age=2592000, immutable" }],
       },
       {
-        source: "/:file(mireli-logo.svg|logo.svg|favicon.svg)",
+        source: "/:file(mireli-logo.jpeg|mireli-logo.svg|logo.svg|favicon.svg)",
         headers: [{ key: "Cache-Control", value: "public, max-age=604800" }],
       },
     ];

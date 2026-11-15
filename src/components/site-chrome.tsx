@@ -15,9 +15,9 @@ export function LogoTile({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
   return (
     <div className={cn(dims, "relative shrink-0 select-none overflow-hidden bg-white shadow-sm")}>
       <img
-        src="/mireli-logo.svg"
+        src="/mireli-logo.jpeg"
         alt="Mi-Reli logo"
-        className="h-full w-full object-contain"
+        className="absolute left-1/2 top-0 h-[150%] max-w-none -translate-x-1/2"
       />
     </div>
   );
