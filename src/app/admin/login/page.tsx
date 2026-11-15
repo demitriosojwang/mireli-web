@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/client";
+import { DURATION } from "@/lib/motion";
 import { ArrowRight, KeyRound, Lock, Mail, ShieldAlert, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -100,7 +101,7 @@ export default function AdminLoginPage() {
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.4 }}
+          transition={{ duration: DURATION.brand }}
         >
           <LogoTile size="lg" />
         </motion.div>

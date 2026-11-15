@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/client";
+import { DURATION, EASE_OUT } from "@/lib/motion";
 import { Mail, Phone, ArrowRight, ShieldCheck } from "lucide-react";
 import { LogoTile } from "@/components/site-chrome";
 import { cn } from "@/lib/utils";
@@ -103,7 +104,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.4, ease: "easeOut" }}
+          transition={{ duration: DURATION.brand, ease: EASE_OUT }}
         >
           <LogoTile size="lg" />
         </motion.div>
