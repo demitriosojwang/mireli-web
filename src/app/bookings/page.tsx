@@ -186,7 +186,7 @@ export default function BookingsPage() {
             {identityError || "Your booking session is unavailable. Please try again."}
           </p>
           <Button variant="outline" onClick={() => void retryIdentity()} disabled={meLoading}>
-            {meLoading ? "Retryingâ€¦" : "Try again"}
+            {meLoading ? "Retrying…" : "Try again"}
           </Button>
           <Button asChild>
             <Link href="/">Book a ride</Link>
@@ -206,7 +206,7 @@ export default function BookingsPage() {
       <SiteNav />
       <main className="mx-auto w-full max-w-md flex-1 px-4 pb-8 sm:max-w-2xl sm:px-6 lg:max-w-4xl xl:max-w-5xl">
         <p className="mb-4 text-xs text-muted-foreground">
-          Your fare is held by the platform until your ride is delivered â€” never paid directly to a
+          Your fare is held by the platform until your ride is delivered — never paid directly to a
           driver.
         </p>
 
@@ -236,7 +236,7 @@ export default function BookingsPage() {
           <p role="alert" className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
             We couldn&apos;t refresh your rides. The details shown may be out of date. {" "}
             <button type="button" className="font-semibold underline" onClick={() => void load()} disabled={refreshingBookings}>
-              {refreshingBookings ? "Retryingâ€¦" : "Try again"}
+              {refreshingBookings ? "Retrying…" : "Try again"}
             </button>
           </p>
         )}
@@ -413,7 +413,7 @@ function BookingCard({
             <p className="mt-1 flex items-center gap-1.5 text-sm">
               <CalendarClock className="h-4 w-4 text-primary" />
               {fmtDateTime(b.departureAt)}
-              {b.tripStatus && <span className="text-muted-foreground">Â· trip {b.tripStatus}</span>}
+              {b.tripStatus && <span className="text-muted-foreground">· trip {b.tripStatus}</span>}
             </p>
             <p className="mt-0.5 flex items-center gap-1.5 text-sm text-muted-foreground">
               <MapPin className="h-4 w-4" /> {b.stageName}
@@ -421,7 +421,7 @@ function BookingCard({
             </p>
             {b.driver && (
               <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
-                <Car className="h-4 w-4" /> {b.driver.name} Â· {b.driver.plate}
+                <Car className="h-4 w-4" /> {b.driver.name} · {b.driver.plate}
                 {b.driver.phone && (
                   <a href={`tel:${b.driver.phone}`} className="font-mono text-xs text-primary underline-offset-2 hover:underline">
                     {fmtPhone(b.driver.phone)}
@@ -436,14 +436,14 @@ function BookingCard({
               <p className="mt-0.5 flex items-center gap-1.5 text-sm text-muted-foreground">
                 <UserRound className="h-4 w-4" /> {b.passengerName}
                 {b.passengerPhone && (
-                  <span className="font-mono text-xs">Â· +{b.passengerPhone.replace(/^(254)/, "")}</span>
+                  <span className="font-mono text-xs">· +{b.passengerPhone.replace(/^(254)/, "")}</span>
                 )}
               </p>
             )}
           </div>
           <div className="text-right text-sm [font-variant-numeric:tabular-nums]">
             <p className="font-semibold">{ksh(b.fareAmount)}</p>
-            {b.creditApplied > 0 && <p className="text-xs text-emerald-700">credit âˆ’{ksh(b.creditApplied)}</p>}
+            {b.creditApplied > 0 && <p className="text-xs text-emerald-700">credit −{ksh(b.creditApplied)}</p>}
             {b.cashDue > 0 && b.status === "awaiting_payment" && (
               <p className="text-xs text-amber-700">{ksh(b.cashDue)} by M-Pesa</p>
             )}
@@ -459,7 +459,7 @@ function BookingCard({
         {b.direction === "TO_TERMINUS" && b.departureAt &&
           ACTIVE_BOOKING_STATUSES.includes(b.status) && (
           <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
-            <b>Be at the stage by {fmtTime(b.departureAt)}</b> â€” cabs leave 2h before the train and
+            <b>Be at the stage by {fmtTime(b.departureAt)}</b> — cabs leave 2h before the train and
             wait at most 15 minutes if you haven&apos;t notified the driver.
           </p>
         )}
@@ -501,7 +501,7 @@ function PastCard({ b }: { b: BookingRow }) {
               )}
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              {fmtDateTime(b.departureAt || b.createdAt)} Â· {b.stageName}
+              {fmtDateTime(b.departureAt || b.createdAt)} · {b.stageName}
             </p>
             {b.ledger?.receipt && (
               <p className="mt-0.5 font-mono text-xs text-muted-foreground">M-Pesa {b.ledger.receipt}</p>
@@ -509,18 +509,18 @@ function PastCard({ b }: { b: BookingRow }) {
             {b.refund && (
               <p className="mt-1 flex items-center gap-1 text-xs text-sky-900">
                 <Banknote className="h-3.5 w-3.5" />
-                Refund {ksh(b.refund.amount)} Â· {b.refund.status}
+                Refund {ksh(b.refund.amount)} · {b.refund.status}
               </p>
             )}
           </div>
           <div className="text-right text-sm [font-variant-numeric:tabular-nums]">
             <p className="font-semibold">{ksh(b.fareAmount)}</p>
-            {b.creditApplied > 0 && <p className="text-xs text-emerald-700">credit âˆ’{ksh(b.creditApplied)}</p>}
+            {b.creditApplied > 0 && <p className="text-xs text-emerald-700">credit −{ksh(b.creditApplied)}</p>}
           </div>
         </div>
         {b.status === "no_show" && (
           <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-900">
-            The seat was held and the driver went to the point for it â€” the fare was forfeited per
+            The seat was held and the driver went to the point for it — the fare was forfeited per
             the cancellation policy.
           </p>
         )}

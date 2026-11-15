@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { TRIP_STATUS_LABELS } from "@/components/status-badges";
 import { nairobiToday } from "@/lib/nairobi-time";
 
-/* â”€â”€â”€ Date helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── Date helpers ─────────────────────────────────────────────────────────── */
 
 export function todayStr(offset = 0): string {
   return nairobiToday(offset);
@@ -31,7 +31,7 @@ export function fmtDateShort(v: string): string {
   });
 }
 
-/* â”€â”€â”€ Status badge with the pulsing dot â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── Status badge with the pulsing dot ────────────────────────────────────── */
 
 const BADGE_STYLES: Record<string, { label: string; cls: string; dotCls: string }> = {
   scheduled: { label: TRIP_STATUS_LABELS.scheduled, cls: "bg-accent/15 text-accent border-accent/30", dotCls: "bg-accent mireli-live-dot" },
@@ -56,7 +56,7 @@ export function DotBadge({ status }: { status: string }) {
   );
 }
 
-/* â”€â”€â”€ Seat meter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── Seat meter ───────────────────────────────────────────────────────────── */
 
 export function SeatMeter({ booked, capacity }: { booked: number; capacity: number }) {
   const pct = Math.min(100, Math.round((booked / capacity) * 100));
@@ -78,18 +78,18 @@ export function SeatMeter({ booked, capacity }: { booked: number; capacity: numb
   );
 }
 
-/* â”€â”€â”€ Stars â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── Stars ────────────────────────────────────────────────────────────────── */
 
 export function Stars({ rating }: { rating: number }) {
   return (
     <span className="inline-flex items-center gap-0.5 text-[11px] text-amber-700">
-      <span aria-hidden>â˜…</span>
+      <span aria-hidden>★</span>
       <span className="font-medium tabular-nums">{rating.toFixed(1)}</span>
     </span>
   );
 }
 
-/* â”€â”€â”€ Train pill â€” big time, service name (train selector) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── Train pill — big time, service name (train selector) ─────────────────── */
 
 export function TrainPill({ time, label, name, active, gone, onClick }: {
   time: string;
@@ -132,7 +132,7 @@ export function TrainPill({ time, label, name, active, gone, onClick }: {
   );
 }
 
-/* â”€â”€â”€ Charter badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── Charter badge ────────────────────────────────────────────────────────── */
 
 export function CharterBadge() {
   return (
@@ -143,7 +143,7 @@ export function CharterBadge() {
   );
 }
 
-/* â”€â”€â”€ Date picker â€” Today / Tomorrow / pick (original pills) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── Date picker — Today / Tomorrow / pick (original pills) ───────────────── */
 
 export function DatePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
@@ -172,10 +172,10 @@ export function DatePicker({ value, onChange }: { value: string; onChange: (v: s
   return (
     <div className="flex gap-2">
       <button onClick={() => onChange(todayStr())} className={pill(isToday(value))}>
-        Today<span className="text-[10px] font-medium opacity-80"> Â· {fmtDateShort(todayStr())}</span>
+        Today<span className="text-[10px] font-medium opacity-80"> · {fmtDateShort(todayStr())}</span>
       </button>
       <button onClick={() => onChange(todayStr(1))} className={pill(isTomorrow(value))}>
-        Tomorrow<span className="text-[10px] font-medium opacity-80"> Â· {fmtDateShort(todayStr(1))}</span>
+        Tomorrow<span className="text-[10px] font-medium opacity-80"> · {fmtDateShort(todayStr(1))}</span>
       </button>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
@@ -193,7 +193,7 @@ export function DatePicker({ value, onChange }: { value: string; onChange: (v: s
   );
 }
 
-/* â”€â”€â”€ Seat stepper (original style) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── Seat stepper (original style) ────────────────────────────────────────── */
 
 export function SeatStepper({ value, min = 1, max = 14, onChange }: {
   value: number;
