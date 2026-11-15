@@ -12,7 +12,7 @@ import { LogoTile } from "@/components/site-chrome";
 import { cn } from "@/lib/utils";
 
 /**
- * Original-style login: centered logo + wordmark + tagline, identifier â†’ OTP,
+ * Original-style login: centered logo + wordmark + tagline, identifier → OTP,
  * first-time name capture, trust indicators. Wired to the real /api/auth.
  */
 export function LoginScreen({ onDone }: { onDone: () => void }) {
@@ -109,7 +109,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
           <LogoTile size="lg" />
         </motion.div>
         <h1 className="mb-1 mt-4 text-2xl font-bold tracking-tight">Mi-Reli</h1>
-        <p className="mb-8 text-sm text-muted-foreground">Ride Â· Connect Â· Journey</p>
+        <p className="mb-8 text-sm text-muted-foreground">Ride · Connect · Journey</p>
 
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm space-y-4">
           {step === "identifier" ? (
@@ -162,7 +162,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
                     setCode(e.target.value.replace(/\D/g, ""));
                     setError(null);
                   }}
-                  placeholder="â€¢â€¢â€¢â€¢â€¢â€¢"
+                  placeholder="••••••"
                   className={cn("h-11 text-center text-lg tracking-[0.5em]", error && "border-destructive")}
                   autoFocus
                   onKeyDown={(e) => e.key === "Enter" && handleVerifyOtp()}
@@ -215,7 +215,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
 
           {step !== "identifier" && (
             <button onClick={reset} className="w-full text-center text-xs text-muted-foreground hover:text-foreground">
-              â† Use a different email or phone
+              ← Use a different email or phone
             </button>
           )}
         </motion.div>
@@ -228,7 +228,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
           </div>
           <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
-            <span>Fares are held by the platform â€” never paid to a driver directly.</span>
+            <span>Fares are held by the platform — never paid to a driver directly.</span>
           </div>
           <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
@@ -237,7 +237,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
         </div>
       </div>
 
-      <div className="px-6 py-4 text-center text-[10px] text-muted-foreground">Mi-Reli Â· Mombasa Terminus Â· Kenya Coast</div>
+      <div className="px-6 py-4 text-center text-[10px] text-muted-foreground">Mi-Reli · Mombasa Terminus · Kenya Coast</div>
     </div>
   );
 }
