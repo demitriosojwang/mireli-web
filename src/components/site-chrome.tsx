@@ -33,7 +33,7 @@ export function SiteHeader({ subtitle = "Mombasa Terminus" }: { subtitle?: strin
 
   return (
     <header className="sticky top-0 z-30 border-b border-border/60 bg-background/90 backdrop-blur-md supports-[backdrop-filter]:bg-background/75">
-      <div className="mx-auto flex max-w-md items-center justify-between px-4 py-2.5">
+      <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-2.5 sm:max-w-2xl sm:px-6 lg:max-w-4xl xl:max-w-5xl">
         <div className="flex items-center gap-2.5">
           <Link href="/" aria-label="Mi-Reli home">
             <LogoTile />
@@ -75,7 +75,7 @@ export function SiteNav() {
   ];
 
   return (
-    <div className="mx-auto max-w-md px-4 pb-2.5">
+    <div className="mx-auto w-full max-w-md px-4 pb-2.5 sm:max-w-2xl sm:px-6 lg:max-w-4xl xl:max-w-5xl">
       <div className="grid grid-cols-3 gap-1 rounded-2xl bg-secondary/50 p-1 backdrop-blur-sm">
         {items.map((item) => (
           <Link
@@ -99,7 +99,7 @@ export function SiteNav() {
 export function SiteFooter() {
   return (
     <footer className="mt-auto border-t bg-background/95 backdrop-blur">
-      <div className="mx-auto max-w-md px-4 py-2 text-center text-[10px] text-muted-foreground">
+      <div className="mx-auto w-full max-w-md px-4 py-2 text-center text-[10px] text-muted-foreground sm:max-w-2xl sm:px-6 lg:max-w-4xl xl:max-w-5xl">
         Mi-Reli · Mombasa Terminus · availability is confirmed before checkout
         <div className="mt-1 flex items-center justify-center gap-3">
           <a href="mailto:mirelisgr001@gmail.com" className="underline underline-offset-2">mirelisgr001@gmail.com</a>

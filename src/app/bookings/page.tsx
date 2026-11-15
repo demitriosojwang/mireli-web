@@ -6,6 +6,7 @@ import { rowVariants, STAGGER_MS } from "@/lib/motion";
 import { ACTIVE_BOOKING_STATUSES, INACTIVE_BOOKING_STATUSES } from "@/lib/state-machines";
 import Link from "next/link";
 import { SiteFooter, SiteHeader, SiteNav } from "@/components/site-chrome";
+import { InstallPrompt } from "@/components/install-prompt";
 import { PaySheet } from "@/components/pay-sheet";
 import { DotBadge } from "@/components/app/shared";
 import {
@@ -178,7 +179,7 @@ export default function BookingsPage() {
     return (
       <div className="flex min-h-screen flex-col bg-background">
         <SiteHeader />
-        <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-4 px-4 text-center">
+        <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-4 px-4 text-center sm:max-w-2xl sm:px-6 lg:max-w-4xl xl:max-w-5xl">
           <Ticket className="h-10 w-10 text-muted-foreground" />
           <p className="font-semibold">Couldn&apos;t load your session</p>
           <p className="text-sm text-muted-foreground">
@@ -203,7 +204,7 @@ export default function BookingsPage() {
     <div className="flex min-h-screen flex-col bg-background">
       <SiteHeader subtitle="My rides" />
       <SiteNav />
-      <main className="mx-auto w-full max-w-md flex-1 px-4 pb-8">
+      <main className="mx-auto w-full max-w-md flex-1 px-4 pb-8 sm:max-w-2xl sm:px-6 lg:max-w-4xl xl:max-w-5xl">
         <p className="mb-4 text-xs text-muted-foreground">
           Your fare is held by the platform until your ride is delivered â€” never paid directly to a
           driver.
@@ -300,6 +301,7 @@ export default function BookingsPage() {
       </main>
 
       <SiteFooter />
+      <InstallPrompt />
 
       {payFor && (
         <PaySheet

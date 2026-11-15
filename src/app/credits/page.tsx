@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { rowVariants, STAGGER_MS } from "@/lib/motion";
 import Link from "next/link";
 import { SiteFooter, SiteHeader, SiteNav } from "@/components/site-chrome";
+import { InstallPrompt } from "@/components/install-prompt";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -38,7 +39,7 @@ export default function CreditsPage() {
     return (
       <div className="flex min-h-screen flex-col bg-background">
         <SiteHeader />
-        <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-4 px-4 text-center">
+        <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-4 px-4 text-center sm:max-w-2xl sm:px-6 lg:max-w-4xl xl:max-w-5xl">
           <Wallet className="h-10 w-10 text-muted-foreground" />
           <p className="font-semibold">Couldn&apos;t load your credits</p>
           <p className="text-sm text-muted-foreground">
@@ -66,7 +67,7 @@ export default function CreditsPage() {
     <div className="flex min-h-screen flex-col bg-background">
       <SiteHeader subtitle="Travel credits" />
       <SiteNav />
-      <main className="mx-auto w-full max-w-md flex-1 px-4 pb-8">
+      <main className="mx-auto w-full max-w-md flex-1 px-4 pb-8 sm:max-w-2xl sm:px-6 lg:max-w-4xl xl:max-w-5xl">
         {/* Balance card with the gradient accent bar */}
         <Card className="overflow-hidden">
           <div className="mireli-accent-bar h-1.5 w-full" />
@@ -162,6 +163,7 @@ export default function CreditsPage() {
         </section>
       </main>
       <SiteFooter />
+      <InstallPrompt />
     </div>
   );
 }

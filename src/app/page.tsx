@@ -6,6 +6,7 @@ import { motion, AnimatePresence, useAnimationControls } from "framer-motion";
 import { DURATION, EASE_IN_OUT, KNOB_STRETCH, LAYOUT_ID } from "@/lib/motion";
 import { ACTIVE_BOOKING_STATUSES, INACTIVE_BOOKING_STATUSES } from "@/lib/state-machines";
 import { SiteFooter, SiteHeader, SiteNav } from "@/components/site-chrome";
+import { InstallPrompt } from "@/components/install-prompt";
 import { BookingSheet, BookableTrip, BookingDraft } from "@/components/booking-sheet";
 import { PaySheet } from "@/components/pay-sheet";
 import { Button } from "@/components/ui/button";
@@ -540,7 +541,7 @@ export default function Home() {
       <SiteHeader />
 
       {/* Direction switcher â€” the signature pill row */}
-      <div className="mx-auto max-w-md w-full px-4 pt-3">
+      <div className="mx-auto w-full max-w-md px-4 pt-3 sm:max-w-2xl sm:px-6 lg:max-w-5xl">
         <Tabs value={direction} onValueChange={(v) => changeDirection(v as "FROM_TERMINUS" | "TO_TERMINUS")}>
           <TabsList className="relative grid w-full grid-cols-2">
             <TabsTrigger value="FROM_TERMINUS" className="relative flex items-center gap-1.5 data-[state=active]:bg-transparent! data-[state=active]:shadow-none">
@@ -560,7 +561,9 @@ export default function Home() {
       </div>
       <SiteNav />
 
-      <main className="mx-auto w-full max-w-md flex-1 px-4 pb-6">
+      <main className="mx-auto w-full max-w-md flex-1 px-4 pb-6 sm:max-w-2xl sm:px-6 lg:max-w-5xl">
+        <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-6">
+        <div className="min-w-0">
         <AnimatePresence mode="popLayout">
           <motion.div
             key={direction}
@@ -624,7 +627,7 @@ export default function Home() {
                     <p className="text-xs text-muted-foreground"><span className="font-semibold text-foreground">0 pooled cabs</span> Â· no eligible drivers are available right now</p>
                   )}
                 </div>
-                <div className="mt-4 border-t pt-3" aria-label="Madaraka Express timetable">
+                <div className="mt-4 border-t pt-3 lg:hidden" aria-label="Madaraka Express timetable">
                   <h3 className="text-sm font-semibold">Madaraka Express times</h3>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {direction === "FROM_TERMINUS" ? "Arrival at Mombasa Terminus" : "Departure from Mombasa Terminus"} Â· Kenya time
@@ -1189,9 +1192,59 @@ export default function Home() {
             )}
           </motion.div>
         </AnimatePresence>
+        </div>
+
+        {/* Desktop rail: timetable + guidance beside the booking column */}
+        <aside className="mt-6 hidden space-y-4 lg:sticky lg:top-24 lg:mt-0 lg:block">
+          <section className="rounded-2xl border bg-card p-4" aria-label="Madaraka Express timetable">
+            <h2 className="text-sm font-semibold">Madaraka Express times</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {direction === "FROM_TERMINUS" ? "Arrival at Mombasa Terminus" : "Departure from Mombasa Terminus"} · Kenya time
+            </p>
+            {timetableStatus === "loading" && <p role="status" className="mt-2 text-xs text-muted-foreground">Loading train times…</p>}
+            {timetableStatus === "error" && (
+              <p role="alert" className="mt-2 text-xs text-muted-foreground">
+                Train times could not load. <button type="button" className="font-medium text-primary underline underline-offset-2" onClick={retryCatalogues}>Try again</button>
+              </p>
+            )}
+            {timetableStatus === "empty" && <p className="mt-2 text-xs text-muted-foreground">The timetable is being configured.</p>}
+            {timetableStatus === "ready" && trainOptions.length === 0 && <p className="mt-2 text-xs text-muted-foreground">No trains are listed for this date.</p>}
+            {trainOptions.length > 0 && (
+              <ul className="mt-2 grid grid-cols-3 gap-2">
+                {trainOptions.map((train) => (
+                  <li key={train.id} className="rounded-lg border bg-background px-2 py-2">
+                    <p className="text-[10px] font-medium text-muted-foreground">{train.name}</p>
+                    <p className="text-sm font-semibold tabular-nums">{train.time}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="rounded-2xl border bg-card p-4">
+            <h2 className="text-sm font-semibold">How booking works</h2>
+            <ol className="mt-2 space-y-2 text-xs leading-relaxed text-muted-foreground">
+              <li><span className="font-semibold text-foreground">1.</span> Choose a direction and date, then an approved stop.</li>
+              <li><span className="font-semibold text-foreground">2.</span> Pick a shared ride or a private cab — the full fare shows before you pay.</li>
+              <li><span className="font-semibold text-foreground">3.</span> Pay at checkout. We only show cabs with an approved driver available.</li>
+            </ol>
+          </section>
+
+          <section className="rounded-2xl border bg-card p-4">
+            <h2 className="text-sm font-semibold">Need help?</h2>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              Questions about a ride, a stop, or your booking? Write to us.
+            </p>
+            <a href="mailto:mirelisgr001@gmail.com" className="mt-2 inline-block text-xs font-medium text-primary underline underline-offset-2">
+              mirelisgr001@gmail.com
+            </a>
+          </section>
+        </aside>
+        </div>
       </main>
 
       <SiteFooter />
+      <InstallPrompt />
 
       <BookingSheet
         open={sheetOpen}
