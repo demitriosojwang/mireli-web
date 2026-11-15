@@ -14,6 +14,7 @@ export async function GET() {
     include: {
       trips: { where: { status: "completed" }, select: { id: true } },
       payouts: { orderBy: { initiatedAt: "desc" } },
+      application: { select: { status: true } },
     },
   });
 
@@ -28,6 +29,8 @@ export async function GET() {
       cabType: d.cabType,
       capacity: d.capacity,
       status: d.status,
+      // Verified = compliance approved the onboarding application (blue check).
+      verified: d.application?.status === "approved",
       rating: d.rating,
       completedTrips: d.trips.length,
       earnings: {

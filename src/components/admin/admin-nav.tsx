@@ -58,7 +58,7 @@ export function AdminChrome({ adminName, adminEmail }: { adminName: string; admi
   return (
     <>
       <header className="sticky top-0 z-30 border-b border-border/60 bg-background/90 backdrop-blur-md supports-[backdrop-filter]:bg-background/75">
-        <div className="mx-auto flex max-w-md items-center justify-between px-4 py-2.5">
+        <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-2.5 sm:max-w-3xl sm:px-6 lg:max-w-5xl xl:max-w-6xl">
           <div className="flex items-center gap-2.5">
             <Link href="/admin" aria-label="Mi-Reli admin">
               <LogoTile />
@@ -77,9 +77,9 @@ export function AdminChrome({ adminName, adminEmail }: { adminName: string; admi
           </div>
         </div>
 
-        {/* Pill tab nav — horizontally scrollable, original text-[10px] style */}
-        <div className="mx-auto max-w-md px-4 pb-2.5">
-          <div className="flex gap-1 overflow-x-auto rounded-2xl bg-secondary/50 p-1 backdrop-blur-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {/* Pill tab nav — scrollable on small screens, wraps once there is room */}
+        <div className="mx-auto w-full max-w-md px-4 pb-2.5 sm:max-w-3xl sm:px-6 lg:max-w-5xl xl:max-w-6xl">
+          <div className="flex gap-1 overflow-x-auto rounded-2xl bg-secondary/50 p-1 backdrop-blur-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden xl:flex-wrap xl:overflow-visible">
             {NAV.map((item) => {
               const active = pathname === item.href;
               return (
@@ -87,7 +87,7 @@ export function AdminChrome({ adminName, adminEmail }: { adminName: string; admi
                   key={item.href}
                   href={item.href}
                   className={cn(
-                    "flex shrink-0 items-center gap-1 rounded-xl px-2.5 py-2 text-[10px] font-semibold transition-all duration-200",
+                    "flex shrink-0 items-center gap-1 rounded-xl px-2.5 py-2 text-[11px] font-semibold transition-all duration-200 sm:text-xs",
                     active
                       ? "mireli-pill-active"
                       : "text-muted-foreground hover:bg-accent/10 hover:text-foreground",
@@ -102,7 +102,7 @@ export function AdminChrome({ adminName, adminEmail }: { adminName: string; admi
       </header>
 
       {/* Account strip */}
-      <div className="mx-auto w-full max-w-md px-4 pt-3">
+      <div className="mx-auto w-full max-w-md px-4 pt-3 sm:max-w-3xl sm:px-6 lg:max-w-5xl xl:max-w-6xl">
         <p className="text-[10px] text-muted-foreground">
           Signed in as <span className="font-medium text-foreground">{adminName}</span> · {adminEmail}
         </p>
