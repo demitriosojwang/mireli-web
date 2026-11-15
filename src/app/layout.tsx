@@ -11,7 +11,7 @@ export const metadata: Metadata = {
     "Plan a ground ride from Mombasa Terminus with Mi-Reli. Approved stops, published train times, fares, and cab availability appear in the booking flow when service is open.",
   keywords: ["Mi-Reli", "Mombasa", "SGR", "Madaraka Express", "Mombasa Terminus", "shared rides", "private cab"],
   icons: {
-    icon: "/mireli-logo.svg",
+    icon: "/mireli-logo.jpeg",
     apple: "/icons/apple-touch-icon.png",
   },
 };
