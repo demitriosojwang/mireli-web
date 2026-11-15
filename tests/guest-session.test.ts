@@ -98,7 +98,7 @@ describe("guest passenger session", () => {
     expect(response.headers.get("set-cookie")).toContain("mireli_session=");
     expect(mocks.issueCredit).not.toHaveBeenCalled();
     expect(mocks.audit).toHaveBeenCalledWith(expect.objectContaining({
-      metadata: { welcomeCredit: 0, welcomeCreditSkipped: true },
+      metadata: { welcomeCredit: 0 },
     }));
   });
 
@@ -119,16 +119,17 @@ describe("guest passenger session", () => {
     log.mockRestore();
   });
 
-  it("issues configured welcome credit only when operator settings exist", async () => {
+  it("never issues welcome credit, even when operator settings exist", async () => {
+    // Founder policy (2026-11-15): Mi-Reli does not offer free credit. The old
+    // KSh 100 welcome grant was minted per fresh session and farmed for losses.
     mocks.platformConfigFindUnique.mockResolvedValue({ creditValidityDays: 30 });
 
     const response = await GET();
 
     expect(response.status).toBe(200);
-    expect(mocks.issueCredit).toHaveBeenCalledWith(expect.objectContaining({
-      passengerId: guest.id,
-      amount: 100,
-      validityDays: 30,
+    expect(mocks.issueCredit).not.toHaveBeenCalled();
+    expect(mocks.audit).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: { welcomeCredit: 0 },
     }));
   });
 
