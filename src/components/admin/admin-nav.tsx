@@ -26,7 +26,7 @@ const NAV = [
   { href: "/admin/audit", label: "Audit" },
 ];
 
-/** Dark workspace chrome: identity header + underline tab bar (desktop-first). */
+/** Workspace chrome: identity header + underline tab bar (desktop-first, brand theme). */
 export function AdminChrome({ adminName, adminEmail }: { adminName: string; adminEmail: string }) {
   const pathname = usePathname();
   const router = useRouter();

@@ -116,13 +116,13 @@ export default function AdminOverview() {
             <AlertTriangle className={`h-4 w-4 ${alertCount > 0 ? "text-amber-600" : "text-emerald-600"}`} />
             Exceptions needing a look
             {alertCount > 0 && (
-              <span className="rounded-full bg-amber-400/15 px-2 py-0.5 text-xs font-semibold text-amber-200">{alertCount}</span>
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">{alertCount}</span>
             )}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {alertCount === 0 && (
-            <p className="rounded-md bg-emerald-400/10 p-3 text-sm text-emerald-200">
+            <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-900">
               All clear — no stuck refunds, failed transfers, ambiguous payments, late captures,
               Paybill mismatches, assignment reviews or unallocated bookings.
             </p>
@@ -234,12 +234,12 @@ export default function AdminOverview() {
 
 function AlertRow({ title, detail, href, cta }: { title: string; detail: string; href: string; cta: string }) {
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-amber-400/25 bg-amber-400/[0.07] p-3">
+    <div className="flex flex-col gap-2 rounded-md border border-amber-200 bg-amber-50 p-3">
       <div>
-        <p className="flex items-center gap-1.5 text-sm font-medium text-amber-200">
+        <p className="flex items-center gap-1.5 text-sm font-medium text-amber-950">
           <BadgeAlert className="h-4 w-4" /> {title}
         </p>
-        <p className="mt-0.5 text-xs text-amber-200/70">{detail}</p>
+        <p className="mt-0.5 text-xs text-amber-900/80">{detail}</p>
       </div>
       <Button asChild size="sm" variant="outline">
         <Link href={href}>{cta}</Link>

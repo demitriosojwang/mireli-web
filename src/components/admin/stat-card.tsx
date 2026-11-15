@@ -12,13 +12,12 @@ export function StatCard({
   sub?: string;
   tone?: "default" | "good" | "warn" | "bad" | "info";
 }) {
-  // Tones are translucent tints so the cards sit correctly on the dark workspace.
   const tones: Record<string, string> = {
     default: "",
-    good: "border-emerald-400/25 bg-emerald-400/[0.07]",
-    warn: "border-amber-400/25 bg-amber-400/[0.07]",
-    bad: "border-red-400/25 bg-red-400/[0.07]",
-    info: "border-teal-400/25 bg-teal-400/[0.07]",
+    good: "border-emerald-200 bg-emerald-50",
+    warn: "border-amber-200 bg-amber-50",
+    bad: "border-red-200 bg-red-50",
+    info: "border-teal-200 bg-teal-50",
   };
   return (
     <Card className={cn(tones[tone])}>
