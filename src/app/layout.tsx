@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { SwRegister } from "@/components/sw-register";
 import { Toaster } from "@/components/ui/toaster";
 import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 import { connection } from "next/server";
@@ -35,7 +36,7 @@ export default async function RootLayout({
         {isLocalDemoEnabled() && <div role="status" className="bg-amber-100 px-4 py-2 text-center text-xs font-medium text-amber-950">LOCAL PREVIEW · Sample bookings and simulated payments · No transport service is booked</div>}
         {children}
         <Toaster />
-        <script src="/sw-register.js" defer />
+        <SwRegister />
       </body>
     </html>
   );

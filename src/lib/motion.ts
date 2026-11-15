@@ -45,6 +45,8 @@ export const NO_BOUNCE: Transition = { ease: EASE_IN_OUT };
 /* ------------------------------------------------------------------ */
 
 export const DURATION = {
+  /** Brand mark entrance (logo settle on sign-in / splash). */
+  brand: 0.4,
   /** Rule 2 — dropdowns/popovers land inside 150-250ms. */
   dropdown: 0.18,
   /** Standard state change (pills, toggles, colour). */
