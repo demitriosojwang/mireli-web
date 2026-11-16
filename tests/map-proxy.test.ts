@@ -4,6 +4,7 @@ import {
   MAP_STYLE_URL,
   OPENFREEMAP_ORIGIN,
   isAllowedMapAssetPath,
+  resolvePublicOrigin,
   rewriteMapAssetUrls,
 } from "@/lib/map-proxy";
 
@@ -77,5 +78,21 @@ describe("passenger map style url", () => {
   it("loads the basemap from the same-origin proxy", () => {
     expect(MAP_PROXY_PATH).toBe("/api/map-proxy");
     expect(MAP_STYLE_URL).toBe("/api/map-proxy?path=styles/liberty");
+  });
+});
+
+describe("public origin resolution", () => {
+  it("uses the configured public origin when one is set", () => {
+    expect(resolvePublicOrigin("https://staging.mireli.online/api/map-proxy", "https://staging.mireli.online/")).toBe(
+      "https://staging.mireli.online",
+    );
+  });
+
+  it("keeps the request origin for a directly reached host", () => {
+    expect(resolvePublicOrigin("http://localhost:3000/api/map-proxy", undefined)).toBe("http://localhost:3000");
+  });
+
+  it("falls back to the public site when the reverse proxy forwards the container address", () => {
+    expect(resolvePublicOrigin("https://0.0.0.0:3000/api/map-proxy", undefined)).toBe("https://mireli.online");
   });
 });

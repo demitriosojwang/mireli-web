@@ -3,6 +3,7 @@ import {
   MAP_PROXY_PATH,
   OPENFREEMAP_ORIGIN,
   isAllowedMapAssetPath,
+  resolvePublicOrigin,
   rewriteMapAssetUrls,
 } from "@/lib/map-proxy";
 
@@ -34,7 +35,8 @@ export async function GET(request: Request) {
 
     if (contentType.includes("json")) {
       const body = await upstream.text();
-      return new NextResponse(rewriteMapAssetUrls(body, requestUrl.origin), {
+      const origin = resolvePublicOrigin(request.url, process.env.MIRELI_PUBLIC_ORIGIN);
+      return new NextResponse(rewriteMapAssetUrls(body, origin), {
         status: 200,
         headers: { "content-type": contentType, "cache-control": CACHE_CONTROL },
       });
