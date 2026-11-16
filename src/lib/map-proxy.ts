@@ -1,6 +1,6 @@
 export const OPENFREEMAP_ORIGIN = "https://tiles.openfreemap.org";
 export const MAP_PROXY_PATH = "/api/map-proxy";
-export const MAP_STYLE_URL = `${MAP_PROXY_PATH}?path=styles/liberty`;
+export const MAP_STYLE_URL = `${MAP_PROXY_PATH}/styles/liberty`;
 export const DEFAULT_PUBLIC_ORIGIN = "https://mireli.online";
 
 const ALLOWED_ROOTS = ["styles/", "planet", "fonts/", "sprites/", "natural_earth/"];
@@ -22,7 +22,7 @@ export function isAllowedMapAssetPath(path: string): boolean {
 }
 
 export function rewriteMapAssetUrls(body: string, origin: string): string {
-  return body.split(`${OPENFREEMAP_ORIGIN}/`).join(`${origin}${MAP_PROXY_PATH}?path=`);
+  return body.split(`${OPENFREEMAP_ORIGIN}/`).join(`${origin}${MAP_PROXY_PATH}/`);
 }
 
 export function resolvePublicOrigin(requestUrl: string, configuredOrigin?: string): string {
