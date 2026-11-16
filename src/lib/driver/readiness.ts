@@ -1,7 +1,7 @@
 import {isLocalDemoEnabled} from "@/lib/runtime-mode";
 import {POLICY_VERSION} from "./catalogue";
 import {navigationRoutingConfigured} from "./navigation";
-import {emailSignInConfigured} from "./email";
+import {emailSignInConfigured,supportEmailAddress} from "./email";
 import {amazonLocationConfigured} from "./amazon-location";
 
 // Verified staff authentication ships with this release: src/lib/staff/auth.ts
@@ -37,14 +37,19 @@ export function driverRegistrationConfigured(): boolean {
     securePolicyUrl(process.env.DRIVER_PRIVACY_URL) && securePolicyUrl(process.env.DRIVER_TERMS_URL);
 }
 
+function supportPhoneAddress():string|undefined {
+  const configured=process.env.MIRELI_SUPPORT_PHONE?.trim().replace(/[\s()-]/g,"");
+  return configured&&/^\+[1-9]\d{7,14}$/.test(configured)?configured:undefined;
+}
 export function driverServiceStatus() {
   const phoneSignInOpen=driverPhoneSignInConfigured();
   const emailSignInOpen=isLocalDemoEnabled() || emailSignInConfigured();
   const registrationOpen=driverRegistrationConfigured();
+  const supportPhone=supportPhoneAddress();
   return {apiVersion: "v1", driverEntryIntent: true, simulation: isLocalDemoEnabled(), phoneSignInOpen,emailSignInOpen, registrationOpen,
     navigationOpen:navigationRoutingConfigured(), destinationSearchOpen:amazonLocationConfigured(), satelliteOpen:amazonLocationConfigured(),
     trackingOpen: true,
-    supportEmail: "mirelisgr001@gmail.com",
+    supportEmail: supportEmailAddress(),...(supportPhone?{supportPhone}:{}),
     message: !phoneSignInOpen && !emailSignInOpen ? "Driver email sign-in is not configured yet." :
       !registrationOpen ? "Existing drivers can sign in. New driver applications are paused." :
       "Verify your email to apply or sign in."};

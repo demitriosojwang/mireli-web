@@ -1,5 +1,5 @@
 import {DriverError} from "./errors";
-import {mireliCodeBlock, mireliEmailHeader, mireliEmailShell, mireliSupportLine} from "@/lib/emails/brand";
+import {escapeHtml as escapeText, mireliCodeBlock, mireliEmailHeader, mireliEmailShell, mireliSupportLine} from "@/lib/emails/brand";
 
 export function emailAddress(value:unknown):string {
   if(typeof value!=="string" || /[\r\n]/.test(value))throw new DriverError(400,"INVALID_EMAIL","Enter a valid email address.");
@@ -7,6 +7,14 @@ export function emailAddress(value:unknown):string {
   if(email.length>254 || !/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(email))
     throw new DriverError(400,"INVALID_EMAIL","Enter a valid email address.");
   return email;
+}
+
+export const MIRELI_SUPPORT_EMAIL_FALLBACK="mirelisgr001@gmail.com";
+
+export function supportEmailAddress():string {
+  const configured=process.env.MIRELI_SUPPORT_EMAIL?.trim();
+  if(!configured)return MIRELI_SUPPORT_EMAIL_FALLBACK;
+  try{return emailAddress(configured);}catch{return MIRELI_SUPPORT_EMAIL_FALLBACK;}
 }
 
 export class EmailProviderError extends Error {
@@ -65,12 +73,11 @@ export async function sendTransactionalEmail(message: {
   }
 
   if (!response.ok) {
-    // The provider's own reason (unverified sender, revoked key, exhausted
-    // credits, IP restriction) is the only thing that makes this diagnosable.
-    // Log the status and body; never the API key or the code itself.
-    const detail = await response.text().catch(() => "");
-    console.error("brevo.send.rejected", { status: response.status, detail: detail.slice(0, 500) });
     const uncertain = response.status >= 500;
+    console.error("brevo.send.rejected", {
+      status: response.status,
+      reason: uncertain ? "PROVIDER_RESPONSE_UNCERTAIN" : "PROVIDER_REJECTED",
+    });
     throw new EmailProviderError(
       "Email provider did not accept the message.",
       uncertain ? "PROVIDER_RESPONSE_UNCERTAIN" : "PROVIDER_REJECTED",
@@ -87,7 +94,7 @@ export async function sendTransactionalEmail(message: {
 
 export async function sendEmailCode(email:string,code:string,purpose:"driver"|"staff"="driver"):Promise<void> {
   if(!/^[0-9]{6}$/.test(code))throw new DriverError(400,"INVALID_CODE","Invalid verification code.");
-  const supportEmail = process.env.MIRELI_SUPPORT_EMAIL?.trim() || "mirelisgr001@gmail.com";
+  const supportEmail = supportEmailAddress();
   const staff = purpose === "staff";
   try {
     await sendTransactionalEmail({
@@ -113,8 +120,80 @@ export async function sendEmailCode(email:string,code:string,purpose:"driver"|"s
   }
 }
 
-function escapeText(value:string):string {
-  return value.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]!));
+export function driverSupportCaseReference(caseId:string):string {
+  return `MDS-${caseId.replace(/[^a-zA-Z0-9]/g,"").slice(-10).toUpperCase()}`;
+}
+
+export async function sendDriverSupportAcknowledgementEmail(input:{email:string;driverId:string;caseId:string;driverName?:string|null}):Promise<void> {
+  const reference=driverSupportCaseReference(input.caseId);
+  const firstName=(input.driverName??"").trim().split(/\s+/)[0]||"Driver";
+  const supportEmail=supportEmailAddress();
+  try {
+    await sendTransactionalEmail({
+      to: input.email,
+      senderName: "Mireli Driver",
+      subject: `Mireli support request received — ${reference}`,
+      textContent:
+        `Hi ${firstName},\n\n`+
+        `Mireli support has received your request.\n\n`+
+        `Your support case reference is ${reference}. Our support team will review it and follow up by email.\n\n`+
+        `If you need to reply, quote ${reference}.\n\n`+
+        `— The Mireli Driver team\n${supportEmail}`,
+      htmlContent: mireliEmailShell({
+        headerHtml: mireliEmailHeader("We received your support request"),
+        bodyHtml:
+          `<p style="margin:0 0 12px;font-size:15px">Hi ${escapeText(firstName)},</p>`+
+          `<p style="margin:0 0 12px;font-size:15px;line-height:1.55">Mireli support has received your request. Our support team will review it and follow up by email.</p>`+
+          mireliCodeBlock("Support case reference", reference)+
+          `<p style="margin:0 0 12px;font-size:15px;line-height:1.55">If you need to reply, please quote this reference.</p>`+
+          `<p style="margin:16px 0 0;color:#64748b;font-size:13px">${mireliSupportLine(supportEmail)}</p>`,
+        footerNote: "Mireli Driver · part of the Mi-Reli network",
+      }),
+      tags: ["driver-support-acknowledgement"],
+    });
+  } catch(error) {
+    console.error("driver.support_ack_email.failed", {
+      driverId: input.driverId,
+      caseId: input.caseId,
+      reason: error instanceof EmailProviderError ? error.code : "UNEXPECTED",
+    });
+  }
+}
+
+export async function sendDriverSupportReplyEmail(input:{email:string;driverId:string;caseId:string;reply:string;driverName?:string|null}):Promise<void> {
+  const reference=driverSupportCaseReference(input.caseId);
+  const firstName=(input.driverName??"").trim().split(/\s+/)[0]||"Driver";
+  const supportEmail=supportEmailAddress();
+  try {
+    await sendTransactionalEmail({
+      to: input.email,
+      senderName: "Mireli Driver",
+      subject: `Mireli support reply — ${reference}`,
+      textContent:
+        `Hi ${firstName},\n\n`+
+        `Mireli support has replied to your request.\n\n`+
+        `${input.reply}\n\n`+
+        `Your support case reference is ${reference}.\n\n`+
+        `— The Mireli Driver team\n${supportEmail}`,
+      htmlContent: mireliEmailShell({
+        headerHtml: mireliEmailHeader("A reply from Mireli support"),
+        bodyHtml:
+          `<p style="margin:0 0 12px;font-size:15px">Hi ${escapeText(firstName)},</p>`+
+          `<p style="margin:0 0 12px;font-size:15px;line-height:1.55">Mireli support has replied to your request.</p>`+
+          `<div style="margin:0 0 16px;padding:16px;background:#f6f5f1;border:1px solid #e6e1d8;border-radius:12px;font-size:15px;line-height:1.55;white-space:pre-wrap">${escapeText(input.reply)}</div>`+
+          mireliCodeBlock("Support case reference", reference)+
+          `<p style="margin:16px 0 0;color:#64748b;font-size:13px">${mireliSupportLine(supportEmail)}</p>`,
+        footerNote: "Mireli Driver · part of the Mi-Reli network",
+      }),
+      tags: ["driver-support-reply"],
+    });
+  } catch(error) {
+    console.error("driver.support_reply_email.failed", {
+      driverId: input.driverId,
+      caseId: input.caseId,
+      reason: error instanceof EmailProviderError ? error.code : "UNEXPECTED",
+    });
+  }
 }
 
 /**
@@ -123,7 +202,7 @@ function escapeText(value:string):string {
  * swallowed: a missing welcome email must never roll back or block onboarding.
  */
 export async function sendOnboardingWelcomeEmail(input:{email:string;driverName?:string|null}):Promise<void> {
-  const supportEmail = process.env.MIRELI_SUPPORT_EMAIL?.trim() || "mirelisgr001@gmail.com";
+  const supportEmail = supportEmailAddress();
   const firstName = (input.driverName ?? "").trim().split(/\s+/)[0] || "Driver";
   try {
     await sendTransactionalEmail({

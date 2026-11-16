@@ -1,5 +1,5 @@
 export class DriverError extends Error {
-  constructor(public status: number, public code: string, message: string) { super(message); }
+  constructor(public status: number, public code: string, message: string, public retryAfter?: number) { super(message); }
 }
 export function integer(value: unknown, name: string, min = 0, max = Number.MAX_SAFE_INTEGER): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < min || value > max)

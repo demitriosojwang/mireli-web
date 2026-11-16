@@ -10,6 +10,7 @@ import {
 import * as daraja from "@/lib/daraja";
 import { isBookingReadyForPayment } from "@/lib/booking-payment-eligibility";
 import { MIRELI_SUPPORT_PHONE_E164 } from "@/lib/support";
+import { supportEmailAddress } from "@/lib/driver/email";
 import { BOOKING_MACHINE, casUpdateMany, MPESA_MACHINE } from "@/lib/state-machines";
 import { describeCancellationCutoff, LATE_CANCELLATION_CREDIT_VALIDITY_DAYS } from "@/lib/cancellation-policy";
 
@@ -262,7 +263,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         orderBy: { createdAt: "desc" },
       });
       if (unmatchedPaybill) {
-        const supportEmail = process.env.MIRELI_SUPPORT_EMAIL?.trim() || "mirelisgr001@gmail.com";
+        const supportEmail = supportEmailAddress();
         const error = unmatchedPaybill.amount > 0
           ? `We received a Paybill payment of KSh ${unmatchedPaybill.amount}, but this booking requires exactly KSh ${booking.cashDue}. Please contact ${supportEmail} with reference ${booking.code} before paying again.`
           : `We received a Paybill receipt for this booking that could not be matched to its fare. Please contact ${supportEmail} with reference ${booking.code} before paying again.`;

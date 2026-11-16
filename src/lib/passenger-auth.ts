@@ -2,7 +2,7 @@ import { createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { DriverError, text } from "@/lib/driver/errors";
-import { emailAddress, emailSignInConfigured } from "@/lib/driver/email";
+import { emailAddress, emailSignInConfigured, supportEmailAddress } from "@/lib/driver/email";
 import { mireliCodeBlock, mireliEmailHeader, mireliEmailShell, mireliSupportLine } from "@/lib/emails/brand";
 import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 
@@ -103,7 +103,7 @@ async function sendSms(phone: string, code: string) {
 }
 
 async function sendEmail(email: string, code: string) {
-  const supportEmail = process.env.MIRELI_SUPPORT_EMAIL?.trim() || "mirelisgr001@gmail.com";
+  const supportEmail = supportEmailAddress();
   const response = await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
     headers: { "api-key": process.env.BREVO_API_KEY!, Accept: "application/json", "Content-Type": "application/json" },

@@ -1,7 +1,7 @@
 import {afterEach,describe,expect,it,vi} from "vitest";
 import {emailAddress,sendEmailCode,emailSignInConfigured} from "@/lib/driver/email";
 
-afterEach(()=>{vi.unstubAllEnvs();vi.unstubAllGlobals();});
+afterEach(()=>{vi.unstubAllEnvs();vi.unstubAllGlobals();vi.restoreAllMocks();});
 describe("Brevo verification",()=>{
   it("normalizes addresses and rejects header injection and invalid input",()=>{
     expect(emailAddress(" Driver@Example.com ")).toBe("driver@example.com");
@@ -22,6 +22,29 @@ describe("Brevo verification",()=>{
     expect(body.htmlContent).toContain("https://mireli.online/mireli-logo.jpeg");
     expect(body.htmlContent).toContain("123456");
     expect(body.htmlContent).toContain("Your driver sign-in code");
+  });
+  it("does not log provider response bodies",async()=>{
+    vi.stubEnv("BREVO_API_KEY","private-test-key");vi.stubEnv("BREVO_SENDER_EMAIL","login@example.com");
+    const consoleError=vi.spyOn(console,"error").mockImplementation(()=>undefined);
+    vi.stubGlobal("fetch",vi.fn().mockResolvedValue({
+      ok:false,
+      status:400,
+      text:async()=>"recipient=private-recipient@example.com reason=private-provider-detail",
+    }));
+    await expect(sendEmailCode("driver@example.com","123456")).rejects.toMatchObject({code:"EMAIL_UNAVAILABLE"});
+    const logs=JSON.stringify(consoleError.mock.calls);
+    expect(logs).not.toContain("private-recipient@example.com");
+    expect(logs).not.toContain("private-provider-detail");
+    expect(logs).toContain("PROVIDER_REJECTED");
+  });
+  it("does not log network rejection details",async()=>{
+    vi.stubEnv("BREVO_API_KEY","private-test-key");vi.stubEnv("BREVO_SENDER_EMAIL","login@example.com");
+    const consoleError=vi.spyOn(console,"error").mockImplementation(()=>undefined);
+    vi.stubGlobal("fetch",vi.fn().mockRejectedValue(new Error("private-network-detail")));
+    await expect(sendEmailCode("driver@example.com","123456")).rejects.toMatchObject({code:"EMAIL_UNAVAILABLE"});
+    const logs=JSON.stringify(consoleError.mock.calls);
+    expect(logs).not.toContain("private-network-detail");
+    expect(logs).toContain("PROVIDER_RESPONSE_UNCERTAIN");
   });
   it("does not expose provider errors or accept a missing message receipt",async()=>{
     vi.stubEnv("BREVO_API_KEY","private-test-key");vi.stubEnv("BREVO_SENDER_EMAIL","login@example.com");

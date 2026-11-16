@@ -88,7 +88,7 @@ async function handler(req:Request,context:Context) {
     } else throw new DriverError(404,"NOT_FOUND","Driver endpoint not found.");
     return Response.json(result,{headers:{"Cache-Control":"no-store"}});
   } catch(error) {
-    if(error instanceof DriverError) return Response.json({error:error.message,code:error.code},{status:error.status,headers:{"Cache-Control":"no-store",...(error.status===429?{"Retry-After":"60"}:{})}});
+    if(error instanceof DriverError) return Response.json({error:error.message,code:error.code},{status:error.status,headers:{"Cache-Control":"no-store",...(error.status===429?{"Retry-After":String(error.retryAfter??60)}:{})}});
     return Response.json({error:"The driver service is temporarily unavailable.",code:"SERVICE_UNAVAILABLE"},{status:503,headers:{"Cache-Control":"no-store"}});
   }
 }

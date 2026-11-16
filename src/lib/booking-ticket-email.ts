@@ -3,6 +3,7 @@ import {
   EmailProviderError,
   emailAddress,
   sendTransactionalEmail,
+  supportEmailAddress,
   transactionalEmailConfigured,
 } from "@/lib/driver/email";
 
@@ -68,7 +69,7 @@ function ticketContent(booking: {
   const driver = booking.trip?.driver
     ? `${booking.trip.driver.name} · ${booking.trip.driver.plate}`
     : "Driver details will be shared before departure";
-  const supportEmail = process.env.MIRELI_SUPPORT_EMAIL?.trim() || "mirelisgr001@gmail.com";
+  const supportEmail = supportEmailAddress();
   const paid = ksh(booking.fareAmount);
   const receipt = booking.ledgerEntry?.mpesaReceipt;
   const subject = `Your Mi-Reli SGR ticket · ${booking.code}`;
