@@ -38,3 +38,18 @@ export function getCabAvailabilityCountLabel(params: {
     : 0;
   return `${count} cabs`;
 }
+
+/**
+ * Approved cabs are visible to passengers before stops are published, so an
+ * eligible driver is never hidden while the route catalogue is still empty.
+ */
+export function getApprovedCabReadinessLabel(params: {
+  hasEligibleDrivers: boolean | null;
+  eligibleDriverCount: number | null;
+}): string | null {
+  if (params.hasEligibleDrivers !== true) return null;
+  const count = Number.isSafeInteger(params.eligibleDriverCount) && (params.eligibleDriverCount ?? 0) > 0
+    ? params.eligibleDriverCount as number
+    : 1;
+  return count === 1 ? "1 pooled cab" : `${count} pooled cabs`;
+}
