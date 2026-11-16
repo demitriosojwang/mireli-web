@@ -88,6 +88,9 @@ export default function PickupMap({
         const maplibregl = await import("maplibre-gl");
         if (disposed || !containerRef.current) return;
         maplibreRef.current = maplibregl;
+        // Vector tiles are parsed in a web worker. The bundler cannot emit
+        // that worker, so it is published in `public/` at build time.
+        maplibregl.setWorkerUrl("/maplibre-gl-worker.mjs");
 
         const map = new maplibregl.Map({
           container: containerRef.current,
@@ -95,7 +98,6 @@ export default function PickupMap({
           center: [origin.lng, origin.lat],
           zoom: 12.4,
           scrollZoom: false,
-          cooperativeGestures: true,
           attributionControl: { compact: true },
         });
         mapRef.current = map;
