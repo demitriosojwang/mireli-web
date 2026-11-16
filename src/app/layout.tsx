@@ -15,10 +15,22 @@ export const metadata: Metadata = {
     icon: "/mireli-logo.jpeg",
     apple: "/icons/apple-touch-icon.png",
   },
+  // iOS Home-Screen web app: launches full-screen like a native app instead of
+  // inside a Safari tab, with the app's own status-bar styling.
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Mi-Reli",
+  },
+  formatDetection: { telephone: false },
 };
 
 export const viewport: Viewport = {
   themeColor: "#26304a",
+  // viewport-fit=cover is what lets a Home-Screen PWA draw under the iPhone
+  // notch and home indicator; the safe-area padding in globals.css keeps
+  // content clear of both.
+  viewportFit: "cover",
 };
 
 export default async function RootLayout({
@@ -31,7 +43,7 @@ export default async function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className="font-sans antialiased bg-background text-foreground min-h-screen flex flex-col"
+        className="font-sans antialiased bg-background text-foreground min-h-dvh flex flex-col"
       >
         {isLocalDemoEnabled() && <div role="status" className="bg-amber-100 px-4 py-2 text-center text-xs font-medium text-amber-950">LOCAL PREVIEW · Sample bookings and simulated payments · No transport service is booked</div>}
         {children}

@@ -8,7 +8,7 @@
  * - The offline fallback is the cached home page, so a passenger without
  *   connectivity sees the real landing page, never stale booking data.
  */
-const CACHE = "mireli-shell-v1";
+const CACHE = "mireli-shell-v2";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -61,7 +61,7 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          if (response.ok) {
+          if (response.ok && url.pathname === "/" && !url.search) {
             const copy = response.clone();
             caches.open(CACHE).then((cache) => cache.put("/", copy));
           }

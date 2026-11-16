@@ -1,3 +1,4 @@
+import { PASSENGER_TERMINUS } from "@/lib/passenger-terminus";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
@@ -30,7 +31,7 @@ export async function GET() {
     });
 
     return NextResponse.json({
-      origin: { id: "mombasa-terminus", name: "Mombasa Terminus", lat: -4.0214, lng: 39.5802 },
+      origin: PASSENGER_TERMINUS,
       stops: stops.map((stop) => ({
         id: stop.id,
         name: stop.name,

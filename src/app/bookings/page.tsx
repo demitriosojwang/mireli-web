@@ -37,6 +37,7 @@ import {
   Home,
   Loader2,
   MapPin,
+  Radio,
   Ticket,
   TicketX,
   UserRound,
@@ -177,7 +178,7 @@ export default function BookingsPage() {
 
   if (!me?.session) {
     return (
-      <div className="flex min-h-screen flex-col bg-background">
+      <div className="flex min-h-dvh flex-col bg-background">
         <SiteHeader />
         <main className="mx-auto flex w-full max-w-md flex-1 flex-col items-center justify-center gap-4 px-4 text-center sm:max-w-2xl sm:px-6 lg:max-w-4xl xl:max-w-5xl">
           <Ticket className="h-10 w-10 text-muted-foreground" />
@@ -201,7 +202,7 @@ export default function BookingsPage() {
   const past = (bookings || []).filter((b) => INACTIVE_BOOKING_STATUSES.includes(b.status));
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
+    <div className="flex min-h-dvh flex-col bg-background">
       <SiteHeader subtitle="My rides" />
       <SiteNav />
       <main className="mx-auto w-full max-w-md flex-1 px-4 pb-8 sm:max-w-2xl sm:px-6 lg:max-w-4xl xl:max-w-5xl">
@@ -395,8 +396,7 @@ function BookingCard({
   onCancel: () => void;
   onCheckIn: () => void;
   checkingIn: boolean;
-}) {
-  return (
+}) {  return (
     <Card className="mireli-card-tap">
       <CardContent className="space-y-2 p-3">
         <div className="flex flex-wrap items-start justify-between gap-2">
@@ -479,6 +479,13 @@ function BookingCard({
           {b.canCancel && (
             <Button size="sm" variant="ghost" className="h-8 text-destructive hover:text-destructive" onClick={onCancel}>
               <TicketX className="h-3.5 w-3.5" /> {b.cancellationRequestedAt ? "Continue request" : "Request cancellation"}
+            </Button>
+          )}
+          {["confirmed", "boarded"].includes(b.status) && (
+            <Button size="sm" variant="outline" className="h-8" asChild>
+              <Link href={`/bookings/${b.id}/track`}>
+                <Radio className="h-3.5 w-3.5" /> Track ride
+              </Link>
             </Button>
           )}
         </div>
