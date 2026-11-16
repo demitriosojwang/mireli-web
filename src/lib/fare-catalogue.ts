@@ -1,19 +1,23 @@
 /** Fare values transcribed from the owner-supplied 12 Oct 2026 passenger fare sheet.
  *  Coordinates and door-to-door surcharges are deliberately not part of this
- *  catalogue because the sheet does not specify them. */
+ *  catalogue because the sheet does not specify them.
+ *
+ *  The sheet prices each stop as the **driver fare per seat**. Mi-Reli adds a
+ *  separate KSh 50 platform fee per seat (PlatformConfig.bookingFeeAmount), so
+ *  the passenger total for one seat is the listed fare plus KSh 50. */
 export const APPROVED_STAGE_FARES = [
   { coast: "north", name: "Kiembeni Mwisho", fare: 400 },
   { coast: "north", name: "Kiembeni Police", fare: 400 },
-  { coast: "north", name: "Ananda Magaya", fare: 400, aliases: ["Ananda Marga"] },
+  { coast: "north", name: "Ananda Marga", fare: 400, aliases: ["Ananda Magaya", "Ananda Magog"] },
   { coast: "north", name: "San Sera", fare: 400 },
   { coast: "north", name: "Green Estate", fare: 400 },
-  { coast: "north", name: "Kona Kiembeni", fare: 400 },
+  { coast: "north", name: "Kora Kiembeni", fare: 400, aliases: ["Kona Kiembeni"] },
   { coast: "north", name: "Bamburi Mwisho", fare: 400 },
   { coast: "north", name: "Bamburi Naivas", fare: 400, aliases: ["Naivas Bamburi"] },
   { coast: "north", name: "Total Bamburi", fare: 400 },
   { coast: "north", name: "Fisheries", fare: 400 },
-  { coast: "north", name: "Mwenbeni", fare: 400, aliases: ["Mwembeni"] },
-  { coast: "north", name: "GCC Junction", fare: 400, aliases: ["JCC Junction"] },
+  { coast: "north", name: "Mwambeni", fare: 400, aliases: ["Mwenbeni", "Mwembeni"] },
+  { coast: "north", name: "ICC Junction", fare: 400, aliases: ["GCC Junction", "JCC Junction"] },
   { coast: "north", name: "Nyali Centre", fare: 400, aliases: ["Nyali Center"] },
   { coast: "north", name: "VOK", fare: 400 },
   { coast: "north", name: "Bambolulu", fare: 400, aliases: ["Bombolulu"] },
