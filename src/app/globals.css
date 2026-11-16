@@ -232,4 +232,49 @@
     background-size: 200% 100%;
     animation: mireli-shimmer 1.5s linear infinite;
   }
+
+  /* Passenger map markers */
+  .mireli-map-marker {
+    width: 13px;
+    height: 13px;
+    border-radius: 9999px;
+    border: 2px solid oklch(1 0 0);
+    box-shadow: 0 2px 6px oklch(0.18 0.04 260 / 0.35);
+  }
+  .mireli-map-marker--origin {
+    width: 18px;
+    height: 18px;
+    background: oklch(0.28 0.07 258);
+  }
+  .mireli-map-marker--stop {
+    background: oklch(0.67 0.19 42);
+  }
+  .mireli-map-marker--selected {
+    width: 17px;
+    height: 17px;
+    background: oklch(0.28 0.07 258);
+    box-shadow:
+      0 0 0 4px oklch(0.28 0.07 258 / 0.18),
+      0 2px 6px oklch(0.18 0.04 260 / 0.35);
+  }
+  .mireli-map-marker--cab {
+    width: 16px;
+    height: 16px;
+    background: oklch(0.62 0.16 250);
+  }
+  .mireli-map-marker--me {
+    width: 15px;
+    height: 15px;
+    background: oklch(0.55 0.19 255);
+    box-shadow:
+      0 0 0 4px oklch(0.55 0.19 255 / 0.22),
+      0 2px 6px oklch(0.18 0.04 260 / 0.35);
+  }
+  .maplibregl-ctrl-attrib {
+    font-size: 10px;
+  }
+  .maplibregl-ctrl-group {
+    border-radius: 10px;
+    overflow: hidden;
+  }
 }
