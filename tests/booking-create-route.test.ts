@@ -147,18 +147,19 @@ describe("booking creation with no driver supply", () => {
     expect(mocks.bookingCreate).not.toHaveBeenCalled();
   });
 
-  it("refuses a cash booking before creating or allocating it when M-Pesa is unavailable", async () => {
+  it("creates the held booking when M-Pesa is unavailable instead of refusing before allocation", async () => {
     mocks.getPublicPayOptions.mockRejectedValue(new Error("private credential detail"));
 
     const response = await POST(request(validBookingBody()));
 
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({
-      error: "M-Pesa is temporarily unavailable. No booking was created and no payment was requested.",
-      code: "PAYMENT_OPTIONS_UNAVAILABLE",
-    });
-    expect(mocks.bookingCreate).not.toHaveBeenCalled();
-    expect(mocks.allocateBooking).not.toHaveBeenCalled();
+    // The fixture has no assignable driver, so the held draft is released by
+    // the allocation gate — but the booking is attempted end to end and
+    // payment availability is never consulted.
+    expect(response.status).toBe(409);
+    expect(mocks.bookingCreate).toHaveBeenCalledOnce();
+    expect(mocks.allocateBooking).toHaveBeenCalledOnce();
+    expect(mocks.bookingDelete).toHaveBeenCalledWith({ where: { id: "booking-1" } });
+    expect(mocks.getPublicPayOptions).not.toHaveBeenCalled();
   });
 
   it("fails closed before writing identity data when production encryption is not configured", async () => {
@@ -188,19 +189,45 @@ describe("booking creation with no driver supply", () => {
     expect(mocks.getPublicPayOptions).not.toHaveBeenCalled();
   });
 
-  it("releases the cab when a concurrent checkout spent credit and M-Pesa is unavailable", async () => {
+  it("keeps the held booking with the residual cash due when a concurrent checkout spent credit", async () => {
     mocks.creditFindMany.mockResolvedValue([{ amount: 550 }]);
     mocks.allocateBooking.mockResolvedValue({ tripId: "trip-1", note: "Allocated" });
     mocks.applyCredits.mockResolvedValue(0); // strict redemption sees the smaller, locked balance
     mocks.getPublicPayOptions.mockRejectedValue(new Error("M-Pesa unavailable"));
+    mocks.bookingFindUnique.mockResolvedValue({
+      id: "booking-1",
+      code: "MR-ABC123",
+      status: "awaiting_payment",
+      fareAmount: 550,
+      platformFeeAmount: 50,
+      homeSurcharge: 0,
+      creditApplied: 0,
+      cashDue: 550,
+      stageName: "Nyali",
+      seats: 1,
+      isCharter: false,
+      passengerName: "Amina Wanjiru",
+      passengerPhone: "+254712345678",
+      allocationNote: "Allocated",
+      trip: null,
+      reservationTrip: {
+        id: "trip-1",
+        departureAt: new Date("2026-10-16T09:00:00.000Z"),
+        status: "scheduled",
+        route: { name: "Route 1" },
+        driver: { name: "Hidden Driver", plate: "KAA 123A", phone: "+254712345678" },
+      },
+      ledgerEntry: null,
+    });
 
     const response = await POST(request(validBookingBody({ applyCredit: true })));
 
-    expect(response.status).toBe(503);
-    expect((await response.json()).code).toBe("PAYMENT_OPTIONS_UNAVAILABLE");
+    expect(response.status).toBe(200);
     expect(mocks.applyCredits).toHaveBeenCalledWith("guest-1", "booking-1", 550, { requireFull: true });
-    expect(mocks.releaseUnpaidBookingReservation).toHaveBeenCalledWith("booking-1", "trip-1");
-    expect(mocks.audit).not.toHaveBeenCalled();
+    expect(mocks.applyCredits).toHaveBeenCalledWith("guest-1", "booking-1", 550);
+    expect(mocks.releaseUnpaidBookingReservation).not.toHaveBeenCalled();
+    expect(mocks.bookingDelete).not.toHaveBeenCalled();
+    expect(mocks.audit).toHaveBeenCalled();
   });
 
   it("rejects an inactive route before creating a booking", async () => {
@@ -410,19 +437,20 @@ describe("booking creation with no driver supply", () => {
     }));
   });
 
-  it("refuses a charter before creating or allocating it when M-Pesa is unavailable", async () => {
+  it("creates the held charter booking when M-Pesa is unavailable", async () => {
     mocks.passengerFindUnique.mockResolvedValue({ id: "passenger-1", phone: "+254712345678" });
     mocks.getPublicPayOptions.mockRejectedValue(new Error("private payment configuration"));
 
     const response = await POST(request(validBookingBody({ isCharter: true })));
 
-    expect(response.status).toBe(503);
-    expect((await response.json()).code).toBe("PAYMENT_OPTIONS_UNAVAILABLE");
+    // The fixture has no assignable driver, so the held draft is released by
+    // the allocation gate after creation is attempted.
+    expect(response.status).toBe(409);
     expect(mocks.tripFindUnique).toHaveBeenCalledOnce();
-    expect(mocks.bookingCreate).not.toHaveBeenCalled();
-    expect(mocks.allocateBooking).not.toHaveBeenCalled();
-    expect(mocks.bookingDelete).not.toHaveBeenCalled();
-    expect(mocks.audit).not.toHaveBeenCalled();
+    expect(mocks.bookingCreate).toHaveBeenCalledOnce();
+    expect(mocks.allocateBooking).toHaveBeenCalledOnce();
+    expect(mocks.bookingDelete).toHaveBeenCalledWith({ where: { id: "booking-1" } });
+    expect(mocks.getPublicPayOptions).not.toHaveBeenCalled();
   });
 
   it("allows private charter addresses without a distance surcharge", async () => {

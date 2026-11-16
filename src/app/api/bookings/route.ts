@@ -3,8 +3,8 @@ import { db } from "@/lib/db";
 import { getPassengerSession } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import { applyCredits, getConfig, recordCollection } from "@/lib/money";
-import { allocateBooking, releaseUnpaidBookingReservation } from "@/lib/engine";
-import { generateBookingCode, getPublicPayOptions, toMpesaMsISDN } from "@/lib/daraja";
+import { allocateBooking } from "@/lib/engine";
+import { generateBookingCode, toMpesaMsISDN } from "@/lib/daraja";
 import { nairobiDate, nairobiDayRange } from "@/lib/nairobi-time";
 import { isBookingReadyForPayment } from "@/lib/booking-payment-eligibility";
 import { attemptBookingTicketEmail } from "@/lib/booking-ticket-email";
@@ -24,18 +24,6 @@ const GUEST_COUNTING_STATUSES = {
 /** The exact rule copy shown to guests who try to go past the 1-seat limit. */
 const GUEST_LIMIT_ERROR =
   "You can only book up to 1 seat without logging in. Login to book more seats.";
-
-const PAYMENT_UNAVAILABLE_ERROR =
-  "M-Pesa is temporarily unavailable. No booking was created and no payment was requested.";
-
-async function hasStkPaymentMethod(): Promise<boolean> {
-  try {
-    const options = await getPublicPayOptions();
-    return options.methods.includes("mpesa_stk");
-  } catch {
-    return false;
-  }
-}
 
 /** My bookings */
 export async function GET() {
@@ -304,17 +292,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Refuse before creating a booking or allocating a seat if cash will be due
-  // but the real STK method is not ready. Charter total is based on the exact
-  // selected vehicle capacity above.
-  const estimatedCashDue = total - Math.min(total, availableCreditBalance);
-  if (estimatedCashDue > 0 && !(await hasStkPaymentMethod())) {
-    return NextResponse.json(
-      { error: PAYMENT_UNAVAILABLE_ERROR, code: "PAYMENT_OPTIONS_UNAVAILABLE" },
-      { status: 503 },
-    );
-  }
-
+  // Cash may be due while M-Pesa is not yet configured. The booking is still
+  // created and the seat held; unpaid holds release automatically, and the
+  // pay sheet reports checkout availability when the passenger pays.
   if (!isGuest && passenger) {
     // Signed-in account — keep the profile in sync with the details they book
     // with, so future bookings prefill identically.
@@ -401,35 +381,13 @@ export async function POST(req: NextRequest) {
   if (applyCredit) {
     // If the preflight thought credit covered the whole fare, make the final
     // redemption all-or-nothing. A competing checkout may have spent it after
-    // the balance read. In that case only continue if real M-Pesa is available.
-    const requireFullCredit = estimatedCashDue === 0;
+    // the balance read; then redeem whatever remains and let the passenger
+    // pay the residual cash amount like any other held booking.
+    const requireFullCredit = total - Math.min(total, availableCreditBalance) === 0;
     creditApplied = await applyCredits(session.id, booking.id, total, {
       requireFull: requireFullCredit,
     });
     if (requireFullCredit && creditApplied < total) {
-      if (!(await hasStkPaymentMethod())) {
-        let released = false;
-        try {
-          released = await releaseUnpaidBookingReservation(booking.id, allocation.tripId);
-        } catch {
-          // Keep the customer from retrying into a potentially stale seat hold.
-        }
-        if (!released) {
-          return NextResponse.json(
-            {
-              error: "We couldn't safely clear this cab reservation. Check your bookings before trying again.",
-              code: "BOOKING_RESERVATION_REVIEW_REQUIRED",
-            },
-            { status: 503 },
-          );
-        }
-        return NextResponse.json(
-          { error: PAYMENT_UNAVAILABLE_ERROR, code: "PAYMENT_OPTIONS_UNAVAILABLE" },
-          { status: 503 },
-        );
-      }
-      // M-Pesa is ready, so redeem whatever remains under the same row-lock
-      // protection and let the passenger pay the residual cash amount.
       creditApplied = await applyCredits(session.id, booking.id, total);
     }
   }
