@@ -32,7 +32,10 @@ export function SiteHeader({ subtitle = "Mombasa Terminus" }: { subtitle?: strin
   const [aboutOpen, setAboutOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-30 border-b border-border/60 bg-background/90 backdrop-blur-md supports-[backdrop-filter]:bg-background/75">
+    <header
+      className="sticky top-0 z-30 border-b border-border/60 bg-background/90 backdrop-blur-md supports-[backdrop-filter]:bg-background/75"
+      style={{ paddingTop: "env(safe-area-inset-top)" }}
+    >
       <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-2.5 sm:max-w-2xl sm:px-6 lg:max-w-4xl xl:max-w-5xl">
         <div className="flex items-center gap-2.5">
           <Link href="/" aria-label="Mi-Reli home">
@@ -98,7 +101,10 @@ export function SiteNav() {
 
 export function SiteFooter() {
   return (
-    <footer className="mt-auto border-t bg-background/95 backdrop-blur">
+    <footer
+      className="mt-auto border-t bg-background/95 backdrop-blur"
+      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+    >
       <div className="mx-auto w-full max-w-md px-4 py-2 text-center text-[10px] text-muted-foreground sm:max-w-2xl sm:px-6 lg:max-w-4xl xl:max-w-5xl">
         Mi-Reli · Mombasa Terminus · availability is confirmed before checkout
         <div className="mt-1 flex items-center justify-center gap-3">

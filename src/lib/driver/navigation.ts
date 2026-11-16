@@ -110,6 +110,10 @@ export async function requestDriverRoute(driverId:string,input:Record<string,unk
   if(metersBetween(origin,target)>300000)throw new DriverError(400,"ROUTE_TOO_FAR","This route is outside the supported Mombasa service area.");
   await enforceRouteLimit(driverId);
   const avoidFerries = input.avoidFerries === true;
+  return calculateServiceRoute(origin, target, avoidFerries);
+}
+
+export async function calculateServiceRoute(origin: Coordinate, target: Coordinate, avoidFerries: boolean) {
   if (!valhallaConfigured()) return calculateAmazonDriverRoute(origin, target, avoidFerries);
   const endpoint=process.env.VALHALLA_URL!;
   const headers:Record<string,string>={"content-type":"application/json",accept:"application/json"};

@@ -1,5 +1,7 @@
 "use client";
 
+import { PASSENGER_TERMINUS } from "@/lib/passenger-terminus";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MAP_STYLE_URL } from "@/lib/map-proxy";
 
@@ -52,7 +54,7 @@ const EMPTY_CABS: MapCab[] = [];
  * the passenger asks for it.
  */
 export default function PickupMap({
-  origin = { id: "mombasa-terminus", name: "Mombasa Terminus", lat: -4.0214, lng: 39.5802 },
+  origin = PASSENGER_TERMINUS,
   stops = EMPTY_STOPS,
   cabs = EMPTY_CABS,
   cabCount = 0,
@@ -67,12 +69,16 @@ export default function PickupMap({
   const mapRef = useRef<import("maplibre-gl").Map | null>(null);
   const maplibreRef = useRef<typeof import("maplibre-gl") | null>(null);
   const locationMarkerRef = useRef<import("maplibre-gl").Marker | null>(null);
+  const stopMarkersRef = useRef<Map<string, import("maplibre-gl").Marker>>(new Map());
   const liveLayerRef = useRef<
     Map<string, { marker: import("maplibre-gl").Marker; lng: number; lat: number; toLng: number; toLat: number }>
   >(new Map());
   const [nearViewport, setNearViewport] = useState(() => typeof IntersectionObserver === "undefined");
+  const mapReadyRef = useRef(false);
+  const [mapReady, setMapReady] = useState(0);
   const [mapState, setMapState] = useState<"idle" | "loading" | "ready" | "error">("idle");
-  const [locationState, setLocationState] = useState<"idle" | "locating" | "found" | "denied">("idle");
+  const [locationState, setLocationState] = useState<"idle" | "locating" | "found" | "denied" | "unavailable">("idle");
+  const [location, setLocation] = useState<[number, number] | null>(null);
   const [liveCabCount, setLiveCabCount] = useState(0);
 
   useEffect(() => {
@@ -100,6 +106,8 @@ export default function PickupMap({
     let disposed = false;
     let liveTimer: number | undefined;
     let animationFrame: number | undefined;
+    let resizeObserver: ResizeObserver | null = null;
+    let resizeCheck: (() => void) | null = null;
     const markers: import("maplibre-gl").Marker[] = [];
     const cabLayer = liveLayerRef.current;
 
@@ -123,6 +131,17 @@ export default function PickupMap({
         });
         mapRef.current = map;
         map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+        // The container can be laid out before the map measures it (iOS Safari
+        // resizes mid-load); a late ResizeObserver-driven check keeps the canvas
+        // from spilling over the footer controls.
+        const resizeCheck = () => {
+          if (!disposed) map.resize();
+        };
+        resizeCheck();
+        resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(resizeCheck);
+        resizeObserver?.observe(containerRef.current);
+        window.addEventListener("resize", resizeCheck);
+        window.visualViewport?.addEventListener("resize", resizeCheck);
 
         map.on("load", () => {
           if (disposed) return;
@@ -133,18 +152,6 @@ export default function PickupMap({
             .setLngLat([origin.lng, origin.lat])
             .setPopup(new maplibregl.Popup({ offset: 12 }).setText(origin.name))
             .addTo(map));
-
-          for (const stop of stops) {
-            const stopElement = document.createElement("div");
-            stopElement.className = stop.id === selectedStopId
-              ? "mireli-map-marker mireli-map-marker--stop mireli-map-marker--selected"
-              : "mireli-map-marker mireli-map-marker--stop";
-            stopElement.setAttribute("aria-hidden", "true");
-            markers.push(new maplibregl.Marker({ element: stopElement })
-              .setLngLat([stop.lng, stop.lat])
-              .setPopup(new maplibregl.Popup({ offset: 12 }).setText(stop.name))
-              .addTo(map));
-          }
 
           for (const cab of cabs) {
             const cabElement = document.createElement("div");
@@ -157,6 +164,8 @@ export default function PickupMap({
           }
 
           setMapState("ready");
+          mapReadyRef.current = true;
+          setMapReady((ready) => ready + 1);
 
           if (live) {
             const syncCabs = (fixes: LiveCabFix[]) => {
@@ -234,38 +243,90 @@ export default function PickupMap({
       disposed = true;
       if (liveTimer !== undefined) window.clearInterval(liveTimer);
       if (animationFrame !== undefined) cancelAnimationFrame(animationFrame);
+      resizeObserver?.disconnect();
+      if (resizeCheck) {
+        window.removeEventListener("resize", resizeCheck);
+        window.visualViewport?.removeEventListener("resize", resizeCheck);
+      }
       for (const marker of markers) marker.remove();
+      for (const stopMarker of stopMarkersRef.current.values()) stopMarker.remove();
+      stopMarkersRef.current.clear();
       for (const cab of cabLayer.values()) cab.marker.remove();
       cabLayer.clear();
       setLiveCabCount(0);
+      mapReadyRef.current = false;
       locationMarkerRef.current?.remove();
       locationMarkerRef.current = null;
       mapRef.current?.remove();
       mapRef.current = null;
     };
-  }, [nearViewport, origin.id, origin.lat, origin.lng, stops, cabs, selectedStopId, live]);
+  }, [nearViewport, origin.id, origin.lat, origin.lng, cabs, live]);
+
+  // Stop markers are synced in place. The map itself is created once, so the
+  // stops that arrive after the first paint do not trigger a second basemap
+  // load (which used to double the time to a visible map).
+  useEffect(() => {
+    const map = mapRef.current;
+    const maplibregl = maplibreRef.current;
+    if (!map || !maplibregl || !mapReadyRef.current) return;
+
+    const existing = stopMarkersRef.current;
+    const wanted = new Set(stops.map((stop) => stop.id));
+
+    for (const [id, marker] of Array.from(existing)) {
+      if (!wanted.has(id)) {
+        marker.remove();
+        existing.delete(id);
+      }
+    }
+
+    for (const stop of stops) {
+      const isSelected = stop.id === selectedStopId;
+      const current = existing.get(stop.id);
+      if (current) {
+        const element = current.getElement();
+        element.className = isSelected
+          ? "mireli-map-marker mireli-map-marker--stop mireli-map-marker--selected"
+          : "mireli-map-marker mireli-map-marker--stop";
+        continue;
+      }
+      const element = document.createElement("div");
+      element.className = isSelected
+        ? "mireli-map-marker mireli-map-marker--stop mireli-map-marker--selected"
+        : "mireli-map-marker mireli-map-marker--stop";
+      element.setAttribute("aria-hidden", "true");
+      const marker = new maplibregl.Marker({ element })
+        .setLngLat([stop.lng, stop.lat])
+        .setPopup(new maplibregl.Popup({ offset: 12 }).setText(stop.name))
+        .addTo(map);
+      existing.set(stop.id, marker);
+    }
+  }, [stops, selectedStopId, mapReady]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const maplibre = maplibreRef.current;
+    if (!map || !maplibre || !mapReadyRef.current || !location) return;
+    const element = document.createElement("div");
+    element.className = "mireli-map-marker mireli-map-marker--me";
+    element.setAttribute("aria-hidden", "true");
+    locationMarkerRef.current?.remove();
+    locationMarkerRef.current = new maplibre.Marker({ element }).setLngLat(location).addTo(map);
+    map.easeTo({ center: location, duration: 500 });
+  }, [location, mapReady]);
 
   const requestLocation = useCallback(() => {
-    if (typeof navigator === "undefined" || !navigator.geolocation) return;
+    if (!navigator.geolocation) {
+      setLocationState("unavailable");
+      return;
+    }
     setLocationState("locating");
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const maplibregl = maplibreRef.current;
-        const map = mapRef.current;
-        if (!maplibregl || !map) {
-          setLocationState("found");
-          return;
-        }
-        const element = document.createElement("div");
-        element.className = "mireli-map-marker mireli-map-marker--me";
-        element.setAttribute("aria-hidden", "true");
-        locationMarkerRef.current?.remove();
-        locationMarkerRef.current = new maplibregl.Marker({ element })
-          .setLngLat([position.coords.longitude, position.coords.latitude])
-          .addTo(map);
+      position => {
+        setLocation([position.coords.longitude, position.coords.latitude]);
         setLocationState("found");
       },
-      () => setLocationState("denied"),
+      error => setLocationState(error.code === 1 ? "denied" : "unavailable"),
       { enableHighAccuracy: false, timeout: 8000, maximumAge: 120000 },
     );
   }, []);
@@ -277,7 +338,7 @@ export default function PickupMap({
       <div className="relative bg-muted">
         <div
           ref={containerRef}
-          className={`w-full ${heightClassName}`}
+          className={`relative w-full overflow-hidden ${heightClassName}`}
           role="img"
           aria-label={`${caption}. ${stopLabel}.`}
         />
@@ -299,17 +360,23 @@ export default function PickupMap({
           <p className="text-sm font-semibold">{caption}</p>
           <p className="truncate text-xs text-muted-foreground">
             {stopLabel}
-            {locationState === "found" ? " · your location is on the map" : ""}
+
+          </p>
+          <p role="status" className="text-xs text-muted-foreground">
+            {locationState === "denied" && "Allow location in your browser settings, then retry."}
+            {locationState === "unavailable" && "Could not get your location. You can still choose a stop."}
+            {locationState === "found" && (mapState === "ready" ? "Your location is on the map." : "Location found.")}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {showLocation && mapState === "ready" && (locationState === "idle" || locationState === "denied") && (
+          {showLocation && locationState !== "found" && (
             <button
               type="button"
               onClick={requestLocation}
-              className="rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
+              disabled={locationState === "locating"}
+              className="min-h-11 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
             >
-              {locationState === "denied" ? "Retry location" : "Use my location"}
+              {locationState === "locating" ? "Finding location…" : locationState === "idle" ? "Use my location" : "Retry location"}
             </button>
           )}
           <span className="rounded-full bg-secondary px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-secondary-foreground">
