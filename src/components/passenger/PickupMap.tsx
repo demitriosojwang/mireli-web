@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-
-const FALLBACK_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty";
+import { MAP_STYLE_URL } from "@/lib/map-proxy";
 
 export type MapPoint = {
   id: string;
@@ -94,7 +93,7 @@ export default function PickupMap({
 
         const map = new maplibregl.Map({
           container: containerRef.current,
-          style: process.env.NEXT_PUBLIC_MIRELI_MAP_STYLE_URL || FALLBACK_STYLE_URL,
+          style: process.env.NEXT_PUBLIC_MIRELI_MAP_STYLE_URL || MAP_STYLE_URL,
           center: [origin.lng, origin.lat],
           zoom: 12.4,
           scrollZoom: false,
@@ -141,7 +140,7 @@ export default function PickupMap({
         map.on("error", (event) => {
           if (disposed) return;
           const message = event?.error?.message ?? "";
-          if (/style|stylesheet|json|sprite/i.test(message)) setMapState("error");
+          if (!map.isStyleLoaded() || /style|stylesheet|json|sprite/i.test(message)) setMapState("error");
         });
       } catch {
         if (!disposed) setMapState("error");
