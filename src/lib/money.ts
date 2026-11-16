@@ -1,3 +1,4 @@
+import { flagStalePayouts } from "@/lib/payout-recovery";
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import * as daraja from "@/lib/daraja";
@@ -664,6 +665,7 @@ export async function runReconciliationSweep(
     failedPayments: 0,
     completedRefunds: 0,
     flaggedStuckRefunds: 0,
+    flaggedStuckPayouts: 0,
     expiredCredits: 0,
   };
 
@@ -756,6 +758,8 @@ export async function runReconciliationSweep(
       summary.completedRefunds++;
     }
   }
+
+  summary.flaggedStuckPayouts = await flagStalePayouts(now, cfg.stuckPayoutHours);
 
   // 3. Expire stale credits
   summary.expiredCredits = await expireStaleCredits();

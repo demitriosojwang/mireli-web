@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   mpesaTransactionFindMany: vi.fn(),
   bookingFindUnique: vi.fn(),
   bookingUpdate: vi.fn(),
+  payoutRecordUpdateMany: vi.fn(),
   refundRecordFindMany: vi.fn(),
   refundRecordUpdate: vi.fn(),
   ledgerEntryFindUnique: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock("@/lib/db", () => ({
     },
     mpesaTransaction: { findMany: mocks.mpesaTransactionFindMany },
     booking: { findUnique: mocks.bookingFindUnique, update: mocks.bookingUpdate },
+    payoutRecord: { updateMany: mocks.payoutRecordUpdateMany },
     refundRecord: {
       findMany: mocks.refundRecordFindMany,
       update: mocks.refundRecordUpdate,
@@ -61,6 +63,7 @@ beforeEach(() => {
     id: "main",
     sweepPendingMinutes: 5,
     stuckRefundHours: 4,
+    stuckPayoutHours: 24,
     creditValidityDays: 30,
   });
   mocks.transactionQuery.mockResolvedValue([]);
@@ -84,6 +87,7 @@ beforeEach(() => {
     ledgerEntry: null,
   });
   mocks.bookingUpdate.mockResolvedValue({});
+  mocks.payoutRecordUpdateMany.mockResolvedValue({ count: 2 });
   mocks.refundRecordFindMany.mockResolvedValue([pendingRefund]);
   mocks.refundRecordUpdate.mockResolvedValue({});
   mocks.ledgerEntryFindUnique.mockResolvedValue(null);
@@ -105,6 +109,15 @@ describe("refund reconciliation simulation boundary", () => {
 
     const summary = await runReconciliationSweep({ id: "system", name: "Sweep", role: "system" });
 
+    expect(summary.flaggedStuckPayouts).toBe(2);
+    expect(mocks.payoutRecordUpdateMany).toHaveBeenCalledWith({
+      where: {
+        status: { in: ["processing", "ambiguous"] },
+        initiatedAt: { lte: expect.any(Date) },
+        attempts: { none: { updatedAt: { gt: expect.any(Date) } } },
+      },
+      data: { status: "needs_review", failureReason: expect.any(String) },
+    });
     expect(summary.completedRefunds).toBe(0);
     expect(mocks.refundRecordFindMany).toHaveBeenCalledTimes(1);
     expect(mocks.refundRecordUpdate).not.toHaveBeenCalled();

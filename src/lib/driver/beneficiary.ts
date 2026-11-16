@@ -3,12 +3,13 @@ import {DriverError,integer,text} from "./errors";
 import {phoneNumber} from "./auth";
 export async function requestPayoutDestination(driverId:string,body:Record<string,unknown>) {
   const expectedVersion=integer(body.expectedVersion,"Version"),accountName=text(body.accountName,"M-Pesa account name",3,100);
-  if(body.acknowledged!==true)throw new DriverError(400,"ACKNOWLEDGEMENT_REQUIRED","Confirm that your profile phone is your M-Pesa account. Finance must verify ownership before approval.");
+  if(body.acknowledged!==true)throw new DriverError(400,"ACKNOWLEDGEMENT_REQUIRED","Confirm that the payout number belongs to your M-Pesa account. Finance must verify ownership before approval.");
   await db.$transaction(async tx=>{
-    const driver=await tx.driver.findUniqueOrThrow({where:{id:driverId}}),phone=phoneNumber(driver.phone);
+    const driver=await tx.driver.findUniqueOrThrow({where:{id:driverId}});
+    const phone=body.phoneNumber===undefined?phoneNumber(driver.phone):phoneNumber(body.phoneNumber);
     const current=await tx.driverPayoutDestination.findUnique({where:{driverId}});
     if(current?.phone===phone && current.accountName===accountName && ["pending_review","approved"].includes(current.status))return;
-    if(await tx.payoutRecord.count({where:{driverId,status:{in:["processing","ambiguous"]}}}))throw new DriverError(409,"TRANSFER_UNRESOLVED","Finance must reconcile an outstanding transfer before payout details change.");
+    if(await tx.payoutRecord.count({where:{driverId,OR:[{status:{in:["processing","ambiguous"]}},{status:"needs_review",attempts:{some:{state:{in:["submitting","processing","ambiguous"]}}}}]}}))throw new DriverError(409,"TRANSFER_UNRESOLVED","Finance must reconcile an outstanding transfer before payout details change.");
     if(current){
       const updated=await tx.driverPayoutDestination.updateMany({where:{driverId,version:expectedVersion},data:{phone,accountName,status:"pending_review",version:{increment:1},acknowledgedAt:new Date(),reviewedAt:null,reviewedBy:null,reviewNote:null}});
       if(!updated.count)throw new DriverError(409,"DESTINATION_CHANGED","Refresh payout details before requesting a change.");
@@ -26,7 +27,7 @@ export async function reviewPayoutDestination(body:Record<string,unknown>,actor:
     const row=await tx.driverPayoutDestination.findUnique({where:{id},include:{driver:{include:{application:true}}}});
     if(!row || row.status!=="pending_review" || row.version!==version)throw new DriverError(409,"DESTINATION_CHANGED","Refresh the destination before reviewing.");
     if(body.action==="approve" && (row.driver.application?.status!=="approved" || row.driver.status!=="active"))throw new DriverError(409,"APPLICATION_NOT_APPROVED","Approve driver identity evidence before verifying a beneficiary.");
-    if(await tx.payoutRecord.count({where:{driverId:row.driverId,status:{in:["processing","ambiguous"]}}}))throw new DriverError(409,"TRANSFER_UNRESOLVED","Reconcile outstanding transfers before changing a beneficiary.");
+    if(await tx.payoutRecord.count({where:{driverId:row.driverId,OR:[{status:{in:["processing","ambiguous"]}},{status:"needs_review",attempts:{some:{state:{in:["submitting","processing","ambiguous"]}}}}]}}))throw new DriverError(409,"TRANSFER_UNRESOLVED","Reconcile outstanding transfers before changing a beneficiary.");
     const updated=await tx.driverPayoutDestination.updateMany({where:{id,version,status:"pending_review"},data:{status:body.action==="approve"?"approved":"rejected",version:{increment:1},reviewedBy:actor.id,reviewedAt:new Date(),reviewNote:note}});
     if(!updated.count)throw new DriverError(409,"DESTINATION_CHANGED","Another reviewer changed these details.");
     if(body.action==="approve")await tx.driver.update({where:{id:row.driverId},data:{mpesaNumber:row.phone}});
