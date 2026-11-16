@@ -149,7 +149,11 @@ function blankToDefault(d: PassengerDetails): PassengerDetails {
 
 export function BookingSheet(props: Omit<Parameters<typeof BookingSheetContent>[0], "identity">) {
   const identity = useMe();
-  return props.open && props.draft && !identity.loading
+  // Gate only the first identity load. A later refresh (e.g. after a booking
+  // is created) must not unmount the content, or its confirmation state and
+  // pay sheet are lost and the passenger lands back on the blank form.
+  const identityReady = !identity.loading || identity.me !== null || identity.error !== null;
+  return props.open && props.draft && identityReady
     ? <BookingSheetContent key={props.draft.trip.id} {...props} identity={identity} /> : null;
 }
 
