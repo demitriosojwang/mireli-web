@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getBookingCatalogueView, getCabAvailabilityCountLabel, hasPublishedCustomerPoints, shouldLoadTrainTimetable } from "@/lib/booking-catalogue";
+import { getApprovedCabReadinessLabel, getBookingCatalogueView, getCabAvailabilityCountLabel, hasPublishedCustomerPoints, shouldLoadTrainTimetable } from "@/lib/booking-catalogue";
 
 describe("customer booking catalogue state", () => {
   it("shows a compact checking state while approved stops load", () => {
@@ -44,5 +44,13 @@ describe("customer booking catalogue state", () => {
     expect(getCabAvailabilityCountLabel({
       loading: false, status: "loading", hasEligibleDrivers: null, cabCount: 0, hasSelectedPoint: false,
     })).toBe("Choose a stop");
+  });
+
+  it("shows approved pooled cabs while route stops are still unpublished", () => {
+    expect(getApprovedCabReadinessLabel({ hasEligibleDrivers: true, eligibleDriverCount: 1 })).toBe("1 pooled cab");
+    expect(getApprovedCabReadinessLabel({ hasEligibleDrivers: true, eligibleDriverCount: 3 })).toBe("3 pooled cabs");
+    expect(getApprovedCabReadinessLabel({ hasEligibleDrivers: true, eligibleDriverCount: null })).toBe("1 pooled cab");
+    expect(getApprovedCabReadinessLabel({ hasEligibleDrivers: false, eligibleDriverCount: 0 })).toBeNull();
+    expect(getApprovedCabReadinessLabel({ hasEligibleDrivers: null, eligibleDriverCount: null })).toBeNull();
   });
 });

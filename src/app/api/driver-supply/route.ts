@@ -5,7 +5,10 @@ import { getEligibleDriverIds } from "@/lib/driver/availability";
 export async function GET() {
   try {
     const eligibleDriverIds = await getEligibleDriverIds();
-    return NextResponse.json({ hasEligibleDrivers: eligibleDriverIds.length > 0 });
+    return NextResponse.json({
+      hasEligibleDrivers: eligibleDriverIds.length > 0,
+      eligibleDriverCount: eligibleDriverIds.length,
+    });
   } catch (error) {
     const code = typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
       ? error.code

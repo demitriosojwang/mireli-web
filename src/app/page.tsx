@@ -21,7 +21,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { api, useMe } from "@/lib/client";
-import { getBookingCatalogueView, getCabAvailabilityCountLabel, hasPublishedCustomerPoints, shouldLoadTrainTimetable, type CatalogueStatus } from "@/lib/booking-catalogue";
+import { getApprovedCabReadinessLabel, getBookingCatalogueView, getCabAvailabilityCountLabel, hasPublishedCustomerPoints, shouldLoadTrainTimetable, type CatalogueStatus } from "@/lib/booking-catalogue";
 import { fmtTime, ksh } from "@/lib/format";
 import { calculateBookingFeeAmount, calculateSharedFare, DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
 import { addNairobiDays, nairobiNowMinutes, nairobiWeekday } from "@/lib/nairobi-time";
@@ -134,6 +134,7 @@ export default function Home() {
   // or stop. Keep the last known result while the passenger changes filters;
   // availability refreshes it when the selected route is queried.
   const [hasEligibleDrivers, setHasEligibleDrivers] = useState<boolean | null>(null);
+  const [eligibleDriverCount, setEligibleDriverCount] = useState<number | null>(null);
   const [timetable, setTimetable] = useState<TrainRow[]>([]);
   const [timetableStatus, setTimetableStatus] = useState<CatalogueStatus>("loading");
   const [catalogueRetry, setCatalogueRetry] = useState(0);
@@ -262,13 +263,19 @@ export default function Home() {
       .catch(() => {
         if (!controller.signal.aborted) setBookingFeeAmount(DEFAULT_BOOKING_FEE_AMOUNT);
       });
-    api<{ hasEligibleDrivers: boolean }>("/api/driver-supply", {
+    api<{ hasEligibleDrivers: boolean; eligibleDriverCount: number }>("/api/driver-supply", {
       signal: controller.signal,
       timeoutMs: CATALOGUE_TIMEOUT_MS,
     })
-      .then((response) => setHasEligibleDrivers(response.hasEligibleDrivers))
+      .then((response) => {
+        setHasEligibleDrivers(response.hasEligibleDrivers);
+        setEligibleDriverCount(response.eligibleDriverCount);
+      })
       .catch(() => {
-        if (!controller.signal.aborted) setHasEligibleDrivers(null);
+        if (!controller.signal.aborted) {
+          setHasEligibleDrivers(null);
+          setEligibleDriverCount(null);
+        }
       });
     return () => controller.abort();
   }, [catalogueRetry]);
@@ -644,9 +651,9 @@ export default function Home() {
                     <MapPin className="h-5 w-5" />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <h2 id="catalogue-empty-title" className="text-balance text-sm font-semibold">Bookings aren’t open yet</h2>
+                    <h2 id="catalogue-empty-title" className="text-balance text-sm font-semibold">Bookings open once this route is published</h2>
                     <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                      Approved {pointLabelCap.toLowerCase()} stops haven’t been published for this direction. We’ll open bookings when the route is ready.
+                      Approved {pointLabelCap.toLowerCase()} stops for this direction are still being published. Your ride options appear here the moment they go live.
                     </p>
                   </div>
                 </div>
@@ -654,6 +661,14 @@ export default function Home() {
                   <Button type="button" size="sm" variant="outline" onClick={retryCatalogues}>Refresh availability</Button>
                   {hasEligibleDrivers === false && (
                     <p className="text-xs text-muted-foreground"><span className="font-semibold text-foreground">0 pooled cabs</span> · no eligible drivers are available right now</p>
+                  )}
+                  {hasEligibleDrivers === true && (
+                    <p className="text-xs text-muted-foreground">
+                      <span className="font-semibold text-foreground">
+                        {getApprovedCabReadinessLabel({ hasEligibleDrivers, eligibleDriverCount })}
+                      </span>{" "}
+                      · approved and ready to take bookings once stops are published
+                    </p>
                   )}
                 </div>
                 <div className="mt-4 border-t pt-3 lg:hidden" aria-label="Madaraka Express timetable">
