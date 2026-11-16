@@ -1,0 +1,69 @@
+name: Mint staff enrollment code
+
+# One-off ops tool: prints a fresh 30-minute staff setup code for an
+# allowlisted email by executing inside the running production container
+# (which holds STAFF_AUTH_SECRET). Dispatch-only; never runs on push.
+
+on:
+  workflow_dispatch:
+    inputs:
+      email:
+        description: Staff email to mint the setup code for
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mireli-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  mint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+      EC2_INSTANCE_ID: ${{ vars.MIRELI_EC2_INSTANCE_ID }}
+      TARGET_EMAIL: ${{ github.event.inputs.email }}
+    steps:
+      - name: Configure AWS credentials with the deploy user
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_DEPLOY_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_DEPLOY_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Mint the code inside the running app container
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/ssm-parameters.json" <<'PY'
+          {"commands": ["#!/bin/bash\nset -euo pipefail\nC=$(docker ps --format '{{.Names}} {{.Image}}' | awk '/server.js|node/ {print $1; exit}')\n[[ -n \"$C\" ]] || { echo 'No running app container found'; exit 1; }\ndocker exec -e TARGET_EMAIL=\"$TARGET_EMAIL\" \"$C\" node -e '\nconst c = require(\"node:crypto\");\nconst secret = process.env.STAFF_AUTH_SECRET;\nconst email = (process.env.TARGET_EMAIL || \"\").trim().toLowerCase();\nif (!secret || secret.length < 32) { console.error(\"STAFF_AUTH_SECRET not configured\"); process.exit(1); }\nif (!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email)) { console.error(\"Invalid email\"); process.exit(1); }\nconst allow = (process.env.MIRELI_STAFF_EMAILS || \"\").split(\",\").map(s => s.trim().toLowerCase()).filter(Boolean);\nif (!allow.includes(email)) { console.error(\"Email is not on the staff allowlist\"); process.exit(2); }\nconst payload = (Date.now() + 30 * 60 * 1000) + \".\" + c.randomBytes(12).toString(\"base64url\");\nconst sig = c.createHmac(\"sha256\", secret).update(\"staff:enrollment:\" + email + \":\" + payload).digest(\"base64url\");\nconsole.log(payload + \".\" + sig);\n'\n"]}
+          PY
+          command_id=$(aws ssm send-command \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment "Mint staff enrollment code" \
+            --parameters "file://$RUNNER_TEMP/ssm-parameters.json" \
+            --query 'Command.CommandId' \
+            --output text)
+          status=Pending
+          for _ in $(seq 1 30); do
+            if status=$(aws ssm get-command-invocation \
+              --command-id "$command_id" \
+              --instance-id "$EC2_INSTANCE_ID" \
+              --query Status \
+              --output text 2>/dev/null); then
+              case "$status" in Success|Failed|Cancelled|TimedOut|Undeliverable) break ;; esac
+            fi
+            sleep 2
+          done
+          aws ssm get-command-invocation \
+            --command-id "$command_id" \
+            --instance-id "$EC2_INSTANCE_ID" \
+            --query '{status:Status,stdout:StandardOutputContent,stderr:StandardErrorContent}' \
+            --output json
+          [[ "$status" == Success ]]
