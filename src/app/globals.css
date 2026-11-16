@@ -262,6 +262,11 @@
     height: 16px;
     background: oklch(0.62 0.16 250);
   }
+  .mireli-map-marker--live {
+    box-shadow:
+      0 0 0 4px oklch(0.62 0.16 250 / 0.28),
+      0 2px 6px oklch(0.18 0.04 260 / 0.35);
+  }
   .mireli-map-marker--me {
     width: 15px;
     height: 15px;

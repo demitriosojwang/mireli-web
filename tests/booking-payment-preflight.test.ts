@@ -9,13 +9,17 @@ describe("booking payment preflight", () => {
     });
   });
 
-  it("allows a no-STK booking only when travel credit covers the full total", () => {
+  it("lets the booking be created without STK; credit is only auto-selected when it covers the total", () => {
     expect(getBookingPaymentPreflight(2_000, 2_000, false)).toEqual({
       canProceed: true,
       useCredit: true,
     });
     expect(getBookingPaymentPreflight(2_000, 1_999, false)).toEqual({
-      canProceed: false,
+      canProceed: true,
+      useCredit: false,
+    });
+    expect(getBookingPaymentPreflight(2_000, 0, false)).toEqual({
+      canProceed: true,
       useCredit: false,
     });
   });

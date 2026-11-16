@@ -398,14 +398,15 @@ export default function Home() {
     setCheckingPayment(true);
     try {
       let stkAvailable = false;
-      let paymentCheckFailed = false;
       try {
         const options = await api<{ methods?: string[] }>("/api/pay/options", {
           timeoutMs: CATALOGUE_TIMEOUT_MS,
         });
         stkAvailable = Array.isArray(options.methods) && options.methods.includes("mpesa_stk");
       } catch {
-        paymentCheckFailed = true;
+        // Payment discovery must never stop a passenger from booking; the pay
+        // sheet reports checkout availability after the seat is held.
+        stkAvailable = false;
       }
 
       const feeAmount = calculateBookingFeeAmount(trip.platformFeeAmount ?? bookingFeeAmount, seats, charter);
@@ -422,11 +423,7 @@ export default function Home() {
       const preflight = getBookingPaymentPreflight(total, creditBalance, stkAvailable);
 
       if (!preflight.canProceed) {
-        setBookingStartError(
-          paymentCheckFailed
-            ? "We couldn’t confirm M-Pesa checkout. No booking was created; please try again later."
-            : "M-Pesa checkout isn’t available yet. No booking was created. You can book when checkout is ready.",
-        );
+        setBookingStartError("We couldn’t prepare this booking. Please try again.");
         return;
       }
 
