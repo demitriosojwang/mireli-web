@@ -1195,13 +1195,6 @@ export default function Home() {
                 ))}
             </div>}
 
-            {bookingCatalogueView === "booking" && (routesStatus === "ready" || routesStatus === "error") && <details className="rounded-xl border bg-card px-3.5 py-3 text-sm">
-              <summary className="cursor-pointer font-medium">Fare and service details</summary>
-              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                Hailed rides use a designated SGR stage and add KSh 50 to each booked seat for Mireli. Shared door-to-door adds KSh 50 per extra kilometre from the nearest stage, paid in full to the driver; it is not available until verified stage locations and trusted road-distance pricing are configured. Charters reserve the whole cab with no extra-distance fee; Mireli keeps 10% of the charter fare and the driver receives the rest.
-              </p>
-            </details>}
-
             {/* My bookings */}
             {myBookingsLoadError && (
               <Card role="alert">

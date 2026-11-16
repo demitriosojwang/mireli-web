@@ -51,11 +51,11 @@ describe("map asset URL rewriting", () => {
 
     const rewritten = JSON.parse(rewriteMapAssetUrls(style, "https://mireli.online"));
 
-    expect(rewritten.glyphs).toBe("https://mireli.online/api/map-proxy?path=fonts/{fontstack}/{range}.pbf");
-    expect(rewritten.sprite).toBe("https://mireli.online/api/map-proxy?path=sprites/ofm_f384/ofm");
-    expect(rewritten.sources.openmaptiles.url).toBe("https://mireli.online/api/map-proxy?path=planet");
+    expect(rewritten.glyphs).toBe("https://mireli.online/api/map-proxy/fonts/{fontstack}/{range}.pbf");
+    expect(rewritten.sprite).toBe("https://mireli.online/api/map-proxy/sprites/ofm_f384/ofm");
+    expect(rewritten.sources.openmaptiles.url).toBe("https://mireli.online/api/map-proxy/planet");
     expect(rewritten.sources.ne2_shaded.tiles[0]).toBe(
-      "https://mireli.online/api/map-proxy?path=natural_earth/ne2sr/{z}/{x}/{y}.png",
+      "https://mireli.online/api/map-proxy/natural_earth/ne2sr/{z}/{x}/{y}.png",
     );
   });
 
@@ -64,7 +64,7 @@ describe("map asset URL rewriting", () => {
       `{"tiles":["${OPENFREEMAP_ORIGIN}/planet/{z}/{x}/{y}.pbf"]}`,
       "https://mireli.online",
     );
-    expect(rewritten).toContain("path=planet/{z}/{x}/{y}.pbf");
+    expect(rewritten).toContain("/api/map-proxy/planet/{z}/{x}/{y}.pbf");
     expect(rewritten).not.toContain("%7Bz%7D");
   });
 
@@ -77,7 +77,7 @@ describe("map asset URL rewriting", () => {
 describe("passenger map style url", () => {
   it("loads the basemap from the same-origin proxy", () => {
     expect(MAP_PROXY_PATH).toBe("/api/map-proxy");
-    expect(MAP_STYLE_URL).toBe("/api/map-proxy?path=styles/liberty");
+    expect(MAP_STYLE_URL).toBe("/api/map-proxy/styles/liberty");
   });
 });
 

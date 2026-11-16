@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { GET } from "@/app/api/map-proxy/route";
+import { GET } from "@/app/api/map-proxy/[...path]/route";
 
 beforeEach(() => {
   vi.stubEnv("MIRELI_PUBLIC_ORIGIN", "");
@@ -12,13 +12,15 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-const request = (path: string) =>
-  new Request(`https://mireli.online/api/map-proxy?path=${encodeURIComponent(path)}`);
+const request = (path: string[]) =>
+  new Request(`https://mireli.online/api/map-proxy/${path.map(encodeURIComponent).join("/")}`);
+const context = (path: string[]) => ({ params: Promise.resolve({ path }) });
 
 describe("map proxy route", () => {
   it("serves the upstream style with its assets rewritten to this origin", async () => {
     const upstreamStyle = JSON.stringify({
       glyphs: "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
+      sprite: "https://tiles.openfreemap.org/sprites/ofm_f384/ofm",
       sources: { openmaptiles: { url: "https://tiles.openfreemap.org/planet" } },
     });
     const fetchMock = vi.fn().mockResolvedValue({
@@ -29,13 +31,14 @@ describe("map proxy route", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await GET(request("styles/liberty"));
+    const response = await GET(request(["styles", "liberty"]), context(["styles", "liberty"]));
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("application/json");
     const body = await response.json();
-    expect(body.glyphs).toBe("https://mireli.online/api/map-proxy?path=fonts/{fontstack}/{range}.pbf");
-    expect(body.sources.openmaptiles.url).toBe("https://mireli.online/api/map-proxy?path=planet");
+    expect(body.glyphs).toBe("https://mireli.online/api/map-proxy/fonts/{fontstack}/{range}.pbf");
+    expect(body.sprite).toBe("https://mireli.online/api/map-proxy/sprites/ofm_f384/ofm");
+    expect(body.sources.openmaptiles.url).toBe("https://mireli.online/api/map-proxy/planet");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0][0])).toBe("https://tiles.openfreemap.org/styles/liberty");
   });
@@ -50,19 +53,22 @@ describe("map proxy route", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await GET(request("planet/12/2305/1837.pbf"));
+    const response = await GET(
+      request(["planet", "12", "2498", "2093.pbf"]),
+      context(["planet", "12", "2498", "2093.pbf"]),
+    );
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("application/x-protobuf");
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(tile);
-    expect(String(fetchMock.mock.calls[0][0])).toBe("https://tiles.openfreemap.org/planet/12/2305/1837.pbf");
+    expect(String(fetchMock.mock.calls[0][0])).toBe("https://tiles.openfreemap.org/planet/12/2498/2093.pbf");
   });
 
   it("refuses paths outside the basemap tile root", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await GET(request("../../etc/passwd"));
+    const response = await GET(request(["..", "etc", "passwd"]), context(["..", "etc", "passwd"]));
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "Unsupported map asset." });
@@ -72,7 +78,10 @@ describe("map proxy route", () => {
   it("answers 502 without leaking the upstream failure when the tile host is unreachable", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("connect ECONNREFUSED 10.0.0.1:443")));
 
-    const response = await GET(request("planet/12/2305/1837.pbf"));
+    const response = await GET(
+      request(["planet", "12", "2498", "2093.pbf"]),
+      context(["planet", "12", "2498", "2093.pbf"]),
+    );
 
     expect(response.status).toBe(502);
     const body = await response.text();

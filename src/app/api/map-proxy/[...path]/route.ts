@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import {
-  MAP_PROXY_PATH,
   OPENFREEMAP_ORIGIN,
   isAllowedMapAssetPath,
   resolvePublicOrigin,
@@ -10,9 +9,10 @@ import {
 const CACHE_CONTROL = "public, max-age=3600, stale-while-revalidate=86400";
 const NO_STORE = "no-store";
 
-export async function GET(request: Request) {
-  const requestUrl = new URL(request.url);
-  const path = requestUrl.searchParams.get("path") ?? "";
+type Context = { params: Promise<{ path: string[] }> };
+
+export async function GET(request: Request, context: Context) {
+  const path = (await context.params).path.join("/");
 
   if (!isAllowedMapAssetPath(path)) {
     return NextResponse.json(
