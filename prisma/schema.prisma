@@ -311,7 +311,7 @@ model DriverSession {
   driver Driver @relation(fields: [driverId], references: [id])
   tokenHash String @unique
   deviceId String
-  expiresAt DateTime
+  expiresAt DateTime?
   revokedAt DateTime?
   createdAt DateTime @default(now())
   @@index([driverId, expiresAt])

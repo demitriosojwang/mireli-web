@@ -1,0 +1,1 @@
+ALTER TABLE "DriverSession" ALTER COLUMN "expiresAt" DROP NOT NULL;

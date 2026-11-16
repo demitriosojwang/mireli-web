@@ -89,7 +89,7 @@ export async function verifyChallenge(input: Record<string, unknown>) {
   const attempted = await db.driverAuthChallenge.updateMany({where: {id, consumedAt: null, attempts: {lt: 5}, expiresAt: {gt: new Date()}}, data: {attempts: {increment: 1}}});
   if (attempted.count !== 1 || !/^\d{6}$/.test(code) || !matchesChallenge(id, code, challenge.codeHash)) throw denied();
   const token = randomBytes(32).toString("base64url");
-  const expiresAt = new Date(Date.now() + 12 * 3600000);
+  const expiresAt = input.rememberDevice === true && challenge.channel !== "sms" ? null : new Date(Date.now() + 12 * 3600000);
   const driver = await db.$transaction(async tx => {
     const email = challenge.channel === "sms" ? null : challenge.email;
     if(!email && !challenge.phone)throw denied();
@@ -116,6 +116,6 @@ export async function requireDriver(req: Request) {
   const bearer = req.headers.get("authorization") || "";
   if (!/^Bearer [A-Za-z0-9_-]{43}$/.test(bearer)) throw new DriverError(401, "UNAUTHENTICATED", "Sign in to continue.");
   const session = await db.driverSession.findUnique({where: {tokenHash: hashToken(bearer.slice(7))}, include: {driver: true}});
-  if (!session || session.revokedAt || session.expiresAt <= new Date()) throw new DriverError(401, "SESSION_EXPIRED", "Your session has expired. Sign in again.");
+  if (!session || session.revokedAt || (session.expiresAt && session.expiresAt <= new Date())) throw new DriverError(401, "SESSION_EXPIRED", "Your session has expired. Sign in again.");
   return session;
 }

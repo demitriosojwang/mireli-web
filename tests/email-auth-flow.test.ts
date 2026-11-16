@@ -1,11 +1,11 @@
 import {afterEach,beforeEach,describe,expect,it,vi} from "vitest";
-const mocks=vi.hoisted(()=>({rate:vi.fn(),create:vi.fn(),find:vi.fn(),update:vi.fn(),claim:vi.fn(),driverFind:vi.fn(),driverCreate:vi.fn(),driverUpdate:vi.fn(),application:vi.fn(),revoke:vi.fn(),session:vi.fn(),send:vi.fn()}));
+const mocks=vi.hoisted(()=>({rate:vi.fn(),create:vi.fn(),find:vi.fn(),update:vi.fn(),claim:vi.fn(),driverFind:vi.fn(),driverCreate:vi.fn(),driverUpdate:vi.fn(),application:vi.fn(),revoke:vi.fn(),session:vi.fn(),sessionFind:vi.fn(),send:vi.fn()}));
 vi.mock("@/lib/db",()=>{
-  const db={driverRateLimit:{upsert:mocks.rate},driverAuthChallenge:{create:mocks.create,findUnique:mocks.find,update:mocks.update,updateMany:mocks.claim},driver:{findUnique:mocks.driverFind,create:mocks.driverCreate,update:mocks.driverUpdate},driverApplication:{upsert:mocks.application},driverSession:{updateMany:mocks.revoke,create:mocks.session}};
+  const db={driverRateLimit:{upsert:mocks.rate},driverAuthChallenge:{create:mocks.create,findUnique:mocks.find,update:mocks.update,updateMany:mocks.claim},driver:{findUnique:mocks.driverFind,create:mocks.driverCreate,update:mocks.driverUpdate},driverApplication:{upsert:mocks.application},driverSession:{updateMany:mocks.revoke,create:mocks.session,findUnique:mocks.sessionFind}};
   return {db:{...db,$transaction:async(fn:(tx:typeof db)=>unknown)=>fn(db)}};
 });
 vi.mock("@/lib/driver/email",async(importOriginal)=>({...await importOriginal<object>(),sendEmailCode:mocks.send}));
-import {challengeHash,requestEmailChallenge,verifyChallenge} from "@/lib/driver/auth";
+import {challengeHash,requestEmailChallenge,requireDriver,verifyChallenge} from "@/lib/driver/auth";
 beforeEach(()=>{
   vi.clearAllMocks();vi.stubEnv("NODE_ENV","production");vi.stubEnv("DRIVER_AUTH_SECRET","a".repeat(48));vi.stubEnv("BREVO_API_KEY","test-only");vi.stubEnv("BREVO_SENDER_EMAIL","login@example.com");
   mocks.rate.mockResolvedValue({count:1});mocks.create.mockImplementation(async({data})=>data);mocks.send.mockResolvedValue(undefined);mocks.claim.mockResolvedValue({count:1});
@@ -30,8 +30,26 @@ describe("email auth boundaries",()=>{
     mocks.driverFind.mockResolvedValue({id:"driver-id"});mocks.driverUpdate.mockResolvedValue({id:"driver-id",email,name:"Driver",phone:null});
     const result=await verifyChallenge({challengeId:id,code:"123456",deviceId:"device-12345"});
     expect(mocks.driverFind).toHaveBeenCalledWith({where:{email}});expect(mocks.driverCreate).not.toHaveBeenCalled();expect(result.token).toHaveLength(43);
+    expect(result.expiresAt).toBeInstanceOf(Date);
     expect(mocks.claim).toHaveBeenCalledWith(expect.objectContaining({where:expect.objectContaining({consumedAt:null}),data:{consumedAt:expect.any(Date)}}));
   });
+  it("keeps a remembered session valid until it is revoked", async () => {
+    const id = "a".repeat(48);
+    const email = "driver@example.com";
+    mocks.find.mockResolvedValue({ id, email, channel: "driver_sign_in", codeHash: challengeHash(id, "123456"),
+      expiresAt: new Date(Date.now() + 60_000), consumedAt: null, attempts: 0 });
+    mocks.driverFind.mockResolvedValue({ id: "driver-id" });
+    mocks.driverUpdate.mockResolvedValue({ id: "driver-id", email, name: "Driver" });
+    const created = await verifyChallenge({ challengeId: id, code: "123456", deviceId: "device-12345", rememberDevice: true });
+    expect(created.expiresAt).toBeNull();
+    expect(mocks.session).toHaveBeenCalledWith({ data: expect.objectContaining({ expiresAt: null }) });
+    const req = new Request("https://example.com/me", { headers: { authorization: "Bearer " + created.token } });
+    mocks.sessionFind.mockResolvedValueOnce({ expiresAt: null, revokedAt: null });
+    await expect(requireDriver(req)).resolves.toMatchObject({ expiresAt: null });
+    mocks.sessionFind.mockResolvedValueOnce({ expiresAt: null, revokedAt: new Date() });
+    await expect(requireDriver(req)).rejects.toMatchObject({ code: "SESSION_EXPIRED" });
+  });
+
   it("binds sign-in intent to the challenge and never creates a missing account", async () => {
     const { challengeId } = await requestEmailChallenge("driver@example.com", "sign_in");
     const code = mocks.send.mock.calls[0][1];
