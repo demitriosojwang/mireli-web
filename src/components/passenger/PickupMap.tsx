@@ -39,6 +39,10 @@ type LiveCabFix = {
 
 const LIVE_POLL_MS = 5_000;
 
+/** Shared empty defaults: a fresh `[]` literal per render would retrigger the map effect. */
+const EMPTY_STOPS: MapPoint[] = [];
+const EMPTY_CABS: MapCab[] = [];
+
 /**
  * Passenger-side map. It runs on the same MapLibre engine and OpenFreeMap style
  * as the driver app so both products look and behave like one service.
@@ -49,8 +53,8 @@ const LIVE_POLL_MS = 5_000;
  */
 export default function PickupMap({
   origin = { id: "mombasa-terminus", name: "Mombasa Terminus", lat: -4.0214, lng: 39.5802 },
-  stops = [],
-  cabs = [],
+  stops = EMPTY_STOPS,
+  cabs = EMPTY_CABS,
   cabCount = 0,
   selectedStopId = null,
   heightClassName = "h-[220px]",
