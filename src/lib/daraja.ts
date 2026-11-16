@@ -30,7 +30,7 @@ import { db } from "@/lib/db";
  *   MPESA_SHORTCODE           collection (head) shortcode — fares land here
  *   MPESA_PASSKEY             Lipa na M-Pesa Online passkey
  *   MPESA_CALLBACK_BASE_URL   public https base, e.g. https://mireli.co.ke
- *   MPESA_B2C_SHORTCODE       initiator shortcode for B2C/reversal (optional)
+ *   MPESA_B2C_SHORTCODE       B2C shortcode for driver payouts
  *   MPESA_INITIATOR_NAME      API operator username for B2C/reversal
  *   MPESA_INITIATOR_PASSWORD  encrypted with the Safaricom cert at call time
  *   MPESA_SECURITY_CREDENTIAL OR a pre-encrypted security credential
@@ -172,15 +172,19 @@ function envCredentials(): Partial<DarajaCredentials> {
   };
 }
 
-/** Resolve credentials: env vars override the admin-saved ones. */
-export async function resolveDaraja(): Promise<DarajaCredentials> {
+type DarajaConfiguration = Omit<DarajaCredentials, "mode"> & {
+  mode: DarajaCredentials["mode"] | "unconfigured";
+};
+
+/** Inspect configuration before enabling payment operations. */
+export async function readDarajaConfiguration(): Promise<DarajaConfiguration> {
   const cfg = await db.platformConfig.findUnique({ where: { id: "main" } });
   const env = envCredentials();
 
   const pick = (envVal: string | undefined, dbVal: string | undefined | null) =>
     envVal !== undefined && envVal !== "" ? envVal : dbVal || "";
 
-  const creds: DarajaCredentials = {
+  const creds: DarajaConfiguration = {
     source: env.consumerKey ? "environment" : cfg?.mpesaConsumerKey ? "database" : "none",
     mode: "mock", // final value decided below
     environment: (pick(env.environment, cfg?.mpesaEnvironment) || "sandbox") as string,
@@ -199,8 +203,33 @@ export async function resolveDaraja(): Promise<DarajaCredentials> {
   const forcedMock = (process.env.MPESA_MODE || "").trim().toLowerCase() === "mock";
   const complete =
     !!creds.consumerKey && !!creds.consumerSecret && !!creds.shortcode && !!creds.passkey;
-  creds.mode = resolvePaymentMode(complete, forcedMock);
+  try { creds.mode = resolvePaymentMode(complete, forcedMock); }
+  catch { creds.mode = "unconfigured"; }
   return creds;
+}
+
+/** Money operations fail closed outside the local demo when credentials are incomplete. */
+export async function resolveDaraja(): Promise<DarajaCredentials> {
+  const { mode, ...creds } = await readDarajaConfiguration();
+  if (mode === "unconfigured") {
+    throw new Error("M-Pesa is not configured. Simulated payments are restricted to the local demo.");
+  }
+  return { ...creds, mode };
+}
+
+export function driverPayoutConfigurationIssues(creds: DarajaConfiguration): string[] {
+  const issues: string[] = [];
+  if (creds.mode !== "live") issues.push("Configure Daraja consumer credentials and STK collection.");
+  if (!["sandbox", "production"].includes(creds.environment)) issues.push("Choose the Daraja environment.");
+  if (!/^\d{5,9}$/.test(creds.b2cShortcode)) issues.push("Enter the approved B2C shortcode.");
+  if (!creds.initiatorName || !securityCredential(creds)) issues.push("Configure the B2C initiator and security credential.");
+  let callbackOrigin: URL | undefined;
+  try { callbackOrigin = new URL(creds.callbackBaseUrl); } catch { /* Report below. */ }
+  if (!callbackOrigin || callbackOrigin.protocol !== "https:" || callbackOrigin.username ||
+      callbackOrigin.password || callbackOrigin.search || callbackOrigin.hash) {
+    issues.push("Set the public HTTPS callback base URL.");
+  }
+  return issues;
 }
 
 /** Public pay-side facts for the passenger Pay Sheet. */
@@ -232,7 +261,7 @@ export async function getPublicPayOptions(): Promise<{
 }
 
 /** Daraja callback endpoints derived from the configured public base URL. */
-export function callbackUrls(creds: DarajaCredentials) {
+export function callbackUrls(creds: Pick<DarajaCredentials, "callbackBaseUrl">) {
   const base = creds.callbackBaseUrl.replace(/\/+$/, "");
   return {
     base,
@@ -274,7 +303,7 @@ function stkPassword(creds: DarajaCredentials, timestamp: string): string {
 
 /** Security credential for B2C/Reversal: pre-encrypted, or encrypt the
  *  initiator password with the Safaricom public cert (RSA PKCS#1 v1.5). */
-function securityCredential(creds: DarajaCredentials): string | null {
+function securityCredential(creds: Pick<DarajaCredentials, "securityCredential" | "initiatorPassword" | "cert">): string | null {
   if (creds.securityCredential) return creds.securityCredential;
   if (creds.initiatorPassword && creds.cert) {
     try {
@@ -321,10 +350,11 @@ async function darajaFetch(url: string, init: RequestInit): Promise<Response> {
 }
 
 /** OAuth access token — cached until ~60s before expiry. Throws on failure. */
-export async function getAccessToken(creds: DarajaCredentials): Promise<string> {
-  const cacheKey = `${creds.environment}:${creds.consumerKey}`;
+export async function getAccessToken(creds: DarajaCredentials, fresh = false): Promise<string> {
+  const cacheKey = crypto.createHash("sha256")
+    .update(JSON.stringify([creds.environment, creds.consumerKey, creds.consumerSecret])).digest("hex");
   const cached = gToken.__darajaToken;
-  if (cached && cached.key === cacheKey && cached.expiresAt > Date.now()) return cached.token;
+  if (!fresh && cached && cached.key === cacheKey && cached.expiresAt > Date.now()) return cached.token;
 
   const auth = Buffer.from(`${creds.consumerKey}:${creds.consumerSecret}`).toString("base64");
   const res = await darajaFetch(`${apiBase(creds)}/oauth/v1/generate?grant_type=client_credentials`, {
@@ -334,7 +364,8 @@ export async function getAccessToken(creds: DarajaCredentials): Promise<string> 
     const text = await res.text().catch(() => "");
     throw new Error(`Daraja OAuth failed (${res.status}): ${text.slice(0, 200)}`);
   }
-  const data = (await res.json()) as { access_token: string; expires_in: string };
+  const data = (await res.json()) as { access_token?: string; expires_in?: string };
+  if (typeof data.access_token !== "string" || !data.access_token.trim()) throw new Error("Daraja returned no access token.");
   gToken.__darajaToken = {
     key: cacheKey,
     token: data.access_token,
@@ -700,8 +731,8 @@ export async function b2c(params: {
   resultUrl?: string;
   timeoutUrl?: string;
   originatorId?: string;
-}): Promise<DarajaResultCode> {
-  const creds = await resolveDaraja();
+}, configuration?: DarajaCredentials): Promise<DarajaResultCode> {
+  const creds = configuration ?? await resolveDaraja();
   if (creds.mode !== "mock" && (!params.resultUrl || !params.timeoutUrl || !params.originatorId)) {
     throw new Error("B2C requires a durable settlement attempt and correlated callback endpoints.");
   }
@@ -741,7 +772,6 @@ export async function b2c(params: {
       resultDesc: "B2C needs the initiator name + security credential (Admin → Payments)",
     };
   }
-  const urls = callbackUrls(creds);
   try {
     const token = await getAccessToken(creds);
     const res = await darajaFetch(`${apiBase(creds)}/mpesa/b2c/v3/paymentrequest`, {
@@ -790,41 +820,28 @@ export async function b2c(params: {
 
 // ─── Admin connection test ───────────────────────────────────────────────────
 
-export async function testConnection(): Promise<{ ok: boolean; message: string; mode: string }> {
-  const creds = await resolveDaraja();
-  if (creds.mode === "mock") {
-    const missing = [
-      !creds.consumerKey && "Consumer Key",
-      !creds.consumerSecret && "Consumer Secret",
-      !creds.shortcode && "Shortcode (Paybill)",
-      !creds.passkey && "Passkey",
-    ].filter(Boolean) as string[];
+export async function testConnection(): Promise<{ ok: boolean; message: string; mode: DarajaConfiguration["mode"] }> {
+  const { mode, ...configuration } = await readDarajaConfiguration();
+  if (mode !== "live") {
     return {
       ok: false,
-      mode: "mock",
-      message: missing.length
-        ? `Still in demo simulation — missing: ${missing.join(", ")}. Save the credentials, then test again.`
-        : "Forced to demo simulation by MPESA_MODE=mock.",
+      mode,
+      message: mode === "mock"
+        ? "Local payment simulation is active."
+        : "Daraja is unavailable. Check the consumer key, secret, collection shortcode, passkey and payment mode.",
     };
   }
+  const creds = { ...configuration, mode };
   try {
-    const token = await getAccessToken(creds);
-    const urls = callbackUrls(creds);
-    const warnings: string[] = [];
-    if (!urls.base) warnings.push("no callback base URL set (STK push results would be lost — set it before going live)");
-    if (!creds.initiatorName || !securityCredential(creds)) warnings.push("B2C/Reversal initiator not configured (payouts and cash refunds would fail)");
+    await getAccessToken(creds, true);
+    const issues = driverPayoutConfigurationIssues(creds);
     return {
       ok: true,
-      mode: creds.mode,
-      message:
-        `OAuth OK — token acquired from ${creds.environment} (${token.slice(0, 6)}…). ` +
-        (warnings.length ? `Note: ${warnings.join("; ")}.` : "Callbacks and initiator are configured."),
+      mode,
+      message: "OAuth succeeded against Daraja " + creds.environment + ". " +
+        (issues.length ? issues.join(" ") : "Verify B2C delivery and settlement with a controlled transfer."),
     };
-  } catch (e) {
-    return {
-      ok: false,
-      mode: creds.mode,
-      message: `Connection failed: ${e instanceof Error ? e.message : "unknown error"}`,
-    };
+  } catch {
+    return { ok: false, mode, message: "Daraja declined the OAuth check or could not be reached. Check the credentials and environment." };
   }
 }

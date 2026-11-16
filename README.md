@@ -74,6 +74,27 @@ it never connects to the database directly. Give the Android agent
 individual AWS team membership and SSM, not shared SSH keys. The public driver
 URL stays blocked until DNS and TLS work.
 
+## Daraja and the first driver payout
+
+- Deploy the Web API update before using **Earnings › M-Pesa** on the updated
+  Android app. Drivers can enter their registered M-Pesa name and number
+  before Daraja is connected. Configure an authorized admin in
+  `DRIVER_FINANCE_REVIEWERS` to verify ownership in the payout destination screen.
+- In the Web server secret store, configure the issued consumer key and secret,
+  collection shortcode and STK passkey, B2C shortcode, initiator name and
+  encrypted security credential (or initiator password and Safaricom
+  certificate), callback base URL and environment. Use Admin › Payments to
+  check the settings and test OAuth. Environment values override saved fields.
+- Validate collection and B2C in Daraja sandbox. For a controlled production
+  check, use the approved production credentials and public HTTPS callbacks.
+  Enable MPESA_LIVE_PAYOUTS_ENABLED for the approved production payout.
+  Confirm the provider receipt, amount, recipient, ledger and driver's
+  Earnings status before opening the paid workflow.
+- Review existing queued payouts in Admin › Money before enabling production.
+  To release approved payouts already in the queue, use the run batch action
+  after reviewing the queue. Reconcile a timed-out transfer against the
+  provider before retrying it.
+
 ## Customer ticket email
 
 After a booking is confirmed and ledgered, the server sends a branded Brevo

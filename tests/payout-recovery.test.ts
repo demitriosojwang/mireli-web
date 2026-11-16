@@ -47,7 +47,7 @@ const mocks = vi.hoisted(() => {
     status: string;
     application: { status: string } | null;
   };
-  type Ledger = { id: string; status: string; statusChangedAt: Date };
+  type Ledger = { id: string; status: string; statusChangedAt: Date; refunds?: {status: string}[] };
   type Config = {
     id: string;
     payoutMode: string;
@@ -102,6 +102,13 @@ const mocks = vi.hoisted(() => {
         return [...state.payouts.values()].filter((row) => {
           if (where.driverId && row.driverId !== where.driverId) return false;
           if (where.status?.in && !where.status.in.includes(row.status)) return false;
+          if (where.OR && !where.OR.some((clause: { status: string | { in: string[] }; attempts?: { some: { state: { in: string[] } } } }) => {
+            if (typeof clause.status !== "string") return clause.status.in.includes(row.status);
+            const states = clause.attempts?.some.state.in;
+            return clause.status === row.status && (!states || [...state.attempts.values()].some(
+              attempt => attempt.payoutId === row.id && states.includes(attempt.state),
+            ));
+          })) return false;
           return true;
         }).length;
       }),
@@ -126,7 +133,7 @@ const mocks = vi.hoisted(() => {
     payoutAttempt: {
       create: vi.fn(async (args: { data: Omit<Attempt, "id" | "createdAt" | "updatedAt"> }) => {
         const now = new Date();
-        const row: Attempt = { id: id("attempt"), ...args.data, createdAt: now, updatedAt: now };
+        const row: Attempt = { id: id("attempt"), ...args.data, state: args.data.state ?? "submitting", createdAt: now, updatedAt: now };
         state.attempts.set(row.id, row);
         return clone(row);
       }),
@@ -156,11 +163,11 @@ const mocks = vi.hoisted(() => {
         });
         return clone(rows);
       }),
-      findUnique: vi.fn(async (args: { where: { id?: string; callbackHash?: string } }) => {
+      findUnique: vi.fn(async (args: { where: { id?: string; callbackHash?: string }; include?: { payout?: boolean } }) => {
         const row = args.where.id
           ? state.attempts.get(args.where.id)
           : [...state.attempts.values()].find((attempt) => attempt.callbackHash === args.where.callbackHash);
-        return row ? clone(row) : null;
+        return row ? clone(args.include?.payout ? { ...row, payout: state.payouts.get(row.payoutId) } : row) : null;
       }),
       update: vi.fn(async (args: { where: { id: string }; data: Record<string, any> }) => {
         const row = state.attempts.get(args.where.id);
@@ -174,6 +181,7 @@ const mocks = vi.hoisted(() => {
         for (const row of state.attempts.values()) {
           if (args.where.id && row.id !== args.where.id) continue;
           if (args.where.state?.in && !args.where.state.in.includes(row.state)) continue;
+          if (typeof args.where.state === "string" && args.where.state !== row.state) continue;
           Object.assign(row, args.data);
           row.updatedAt = new Date();
           count++;
@@ -205,9 +213,11 @@ const mocks = vi.hoisted(() => {
         let count = 0;
         for (const row of state.destinations.values()) {
           if (args.where.driverId && row.driverId !== args.where.driverId) continue;
+          if (args.where.id && row.id !== args.where.id) continue;
           if (args.where.version !== undefined && row.version !== args.where.version) continue;
-          Object.assign(row, args.data);
-          if (args.data.version?.increment) row.version += args.data.version.increment;
+          const { version, ...data } = args.data;
+          Object.assign(row, data);
+          if (version?.increment) row.version += version.increment;
           count++;
         }
         return { count };
@@ -259,6 +269,7 @@ const mocks = vi.hoisted(() => {
         return clone(args.data);
       }),
     },
+    $queryRaw: vi.fn(async () => []),
     $transaction: vi.fn(async (work: (tx: typeof db) => unknown) => work(db)),
   };
 
@@ -268,6 +279,7 @@ const mocks = vi.hoisted(() => {
     b2c: vi.fn(),
     transactionStatus: vi.fn(),
     resolveDaraja: vi.fn(),
+    driverPayoutConfigurationIssues: vi.fn(),
   };
 });
 
@@ -277,14 +289,14 @@ vi.mock("@/lib/daraja", () => ({
   b2c: mocks.b2c,
   transactionStatus: mocks.transactionStatus,
   resolveDaraja: mocks.resolveDaraja,
+  driverPayoutConfigurationIssues: mocks.driverPayoutConfigurationIssues,
   verifyCallbackToken: (_scope: string, token: string | null) => token === "valid-token",
 }));
 
 import { requestPayoutDestination, reviewPayoutDestination } from "@/lib/driver/beneficiary";
-import { sendPayout } from "@/lib/payout-settlement";
+import { sendPayout, settleCallback } from "@/lib/payout-settlement";
 
 const now = new Date("2026-11-16T12:00:00.000Z");
-const system = { id: "system", name: "Payout recovery", role: "system" as const };
 
 function addDriver(overrides: Partial<{ id: string; phone: string | null; mpesaNumber: string; name: string; status: string }> = {}) {
   const driver = {
@@ -368,6 +380,7 @@ beforeEach(() => {
     lastPayoutRunAt: null,
     lastReconciliationAt: null,
   });
+  mocks.driverPayoutConfigurationIssues.mockReturnValue([]);
   mocks.resolveDaraja.mockResolvedValue({ mode: "mock", callbackBaseUrl: "https://mireli.test" });
   mocks.b2c.mockResolvedValue({ resultCode: "0", resultDesc: "Confirmed", settled: true, receipt: "ABC1234567" });
   mocks.transactionStatus.mockResolvedValue({ pending: true, resultCode: "", resultDesc: "Still processing" });
@@ -402,7 +415,7 @@ describe("driver payout destination", () => {
 
     addPayout({ driverId: driver.id, ledgerEntryId: null });
     await sendPayout("payout-1");
-    expect(mocks.b2c).toHaveBeenCalledWith(expect.objectContaining({ receiverPhone: "+254711111111" }));
+    expect(mocks.b2c).toHaveBeenCalledWith(expect.objectContaining({ receiverPhone: "+254711111111" }), expect.any(Object));
   });
 
   it("uses the authoritative profile phone when the destination phone is absent", async () => {
@@ -439,5 +452,76 @@ describe("driver payout destination", () => {
       accountName: "Changed Name",
       acknowledged: true,
     })).rejects.toMatchObject({ status: 409, code: "DESTINATION_CHANGED" });
+  });
+});
+
+function livePayout() {
+  vi.stubEnv("MIRELI_DEMO_MODE", "false");
+  vi.stubEnv("MPESA_LIVE_PAYOUTS_ENABLED", "true");
+  mocks.resolveDaraja.mockResolvedValue({ mode: "live", callbackBaseUrl: "https://mireli.test" });
+  const driver = addDriver();
+  addApprovedDestination(driver.id, driver.mpesaNumber);
+  const ledger = { id: "ledger-1", status: "driver_payable", statusChangedAt: now, refunds: [] };
+  mocks.state.ledgers.set(ledger.id, ledger);
+  return addPayout({ ledgerEntryId: ledger.id });
+}
+
+describe("live payout boundary using a simulated Daraja responder", () => {
+  it("keeps queued earnings recoverable when B2C setup is incomplete", async () => {
+    const payout = livePayout();
+    mocks.driverPayoutConfigurationIssues.mockReturnValue(["Enter the approved B2C shortcode."]);
+    await expect(sendPayout(payout.id)).rejects.toMatchObject({ code: "PAYOUT_NOT_READY" });
+    expect(payout.status).toBe("queued");
+    expect(mocks.state.attempts.size).toBe(0);
+    expect(mocks.b2c).not.toHaveBeenCalled();
+  });
+
+  it("holds a payout during replacement review and settles once to the verified new number", async () => {
+    const payout = livePayout();
+    const driver = mocks.state.drivers.get(payout.driverId)!;
+    const phone = "+254711111111";
+    await requestPayoutDestination(driver.id, {
+      expectedVersion: 1, accountName: driver.name, phoneNumber: phone, acknowledged: true,
+    });
+    await expect(sendPayout(payout.id)).rejects.toMatchObject({ code: "BENEFICIARY_NOT_APPROVED" });
+    expect(payout.status).toBe("queued");
+    expect(mocks.b2c).not.toHaveBeenCalled();
+
+    await reviewPayoutDestination({
+      id: "destination-1", expectedVersion: 2, action: "approve", note: "Ownership verified",
+    }, { id: "finance-1", name: "Finance" });
+    expect(driver.phone).toBe("+254700000001");
+    mocks.b2c.mockResolvedValue({ resultCode: "ACCEPTED", conversationId: "provider-1" });
+    await expect(sendPayout(payout.id)).resolves.toBe(false);
+    expect(payout.status).toBe("processing");
+    expect(payout.settlementVerified).toBe(false);
+    const transfer = mocks.b2c.mock.calls[0][0];
+    expect(transfer.receiverPhone).toBe(phone);
+    const capability = new URL(transfer.resultUrl).pathname.split("/").at(-1)!;
+    const result = {
+      ResultCode: 0, ConversationID: "provider-1", OriginatorConversationID: transfer.originatorId, TransactionID: "ABC1234567",
+      ResultParameters: { ResultParameter: [{ Key: "TransactionAmount", Value: payout.netPayoutAmount },
+        { Key: "ReceiverPartyPublicName", Value: "254711111111 - Test Driver" }] },
+    };
+    await expect(settleCallback(capability, { ...result, ConversationID: "wrong" })).rejects.toMatchObject({ code: "RESULT_MISMATCH" });
+    await expect(settleCallback(capability, result)).resolves.toEqual({ duplicate: false });
+    await expect(settleCallback(capability, result)).resolves.toEqual({ duplicate: true });
+    expect(payout.status).toBe("completed");
+    expect(payout.settlementVerified).toBe(true);
+    expect(mocks.state.ledgers.get("ledger-1")?.status).toBe("commission_taken");
+    expect(mocks.b2c).toHaveBeenCalledOnce();
+  });
+
+  it("preserves a timeout received before the submission response", async () => {
+    const payout = livePayout();
+    mocks.b2c.mockImplementationOnce(async ({ resultUrl }) => {
+      const capability = new URL(resultUrl).pathname.split("/").at(-1)!;
+      await settleCallback(capability, {}, true);
+      return { resultCode: "ACCEPTED", conversationId: "provider-1" };
+    });
+    await expect(sendPayout(payout.id)).resolves.toBe(false);
+    expect(payout.status).toBe("ambiguous");
+    await expect(sendPayout(payout.id)).resolves.toBe(false);
+    expect(mocks.b2c).toHaveBeenCalledOnce();
   });
 });

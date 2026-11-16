@@ -5,6 +5,7 @@ export async function requestPayoutDestination(driverId:string,body:Record<strin
   const expectedVersion=integer(body.expectedVersion,"Version"),accountName=text(body.accountName,"M-Pesa account name",3,100);
   if(body.acknowledged!==true)throw new DriverError(400,"ACKNOWLEDGEMENT_REQUIRED","Confirm that the payout number belongs to your M-Pesa account. Finance must verify ownership before approval.");
   await db.$transaction(async tx=>{
+    await tx.$queryRaw`SELECT "id" FROM "Driver" WHERE "id" = ${driverId} FOR UPDATE`;
     const driver=await tx.driver.findUniqueOrThrow({where:{id:driverId}});
     const phone=body.phoneNumber===undefined?phoneNumber(driver.phone):phoneNumber(body.phoneNumber);
     const current=await tx.driverPayoutDestination.findUnique({where:{driverId}});
@@ -24,6 +25,9 @@ export async function reviewPayoutDestination(body:Record<string,unknown>,actor:
   const id=text(body.id,"Destination",4,80),version=integer(body.expectedVersion,"Version"),note=text(body.note,"Verification note",5,500);
   if(!["approve","reject"].includes(String(body.action)))throw new DriverError(400,"INVALID_ACTION","Choose approve or reject.");
   await db.$transaction(async tx=>{
+    const owner=await tx.driverPayoutDestination.findUnique({where:{id},select:{driverId:true}});
+    if(!owner)throw new DriverError(409,"DESTINATION_CHANGED","Refresh the destination before reviewing.");
+    await tx.$queryRaw`SELECT "id" FROM "Driver" WHERE "id" = ${owner.driverId} FOR UPDATE`;
     const row=await tx.driverPayoutDestination.findUnique({where:{id},include:{driver:{include:{application:true}}}});
     if(!row || row.status!=="pending_review" || row.version!==version)throw new DriverError(409,"DESTINATION_CHANGED","Refresh the destination before reviewing.");
     if(body.action==="approve" && (row.driver.application?.status!=="approved" || row.driver.status!=="active"))throw new DriverError(409,"APPLICATION_NOT_APPROVED","Approve driver identity evidence before verifying a beneficiary.");

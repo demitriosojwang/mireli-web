@@ -32,7 +32,7 @@ import {
 
 interface PaymentsData {
   status: {
-    mode: "mock" | "live";
+    mode: "unconfigured" | "mock" | "live";
     environment: string;
     source: "environment" | "database" | "none";
     paybill: string | null;
@@ -40,6 +40,7 @@ interface PaymentsData {
     hasCallbackBase: boolean;
     liveRefundsEnabled: boolean;
     livePayoutsEnabled: boolean;
+    payoutIssues: string[];
   };
   saved: {
     environment: string;
@@ -171,7 +172,7 @@ export default function AdminPayments() {
                 live ? "bg-primary text-primary-foreground" : "bg-accent/15 text-accent"
               }`}
             >
-              {live ? `Live · ${status.environment}` : "Demo simulation"}
+              {live ? `Daraja · ${status.environment}` : status.mode === "mock" ? "Demo simulation" : "Not configured"}
             </span>
           </CardTitle>
           <CardDescription>
@@ -190,7 +191,7 @@ export default function AdminPayments() {
             </div>
             <div className="rounded-lg border bg-muted/30 p-2.5">
               <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Passenger options</p>
-              <p className="text-sm font-semibold">{status.paybill ? "STK push + Pay bill" : "STK push"}</p>
+              <p className="text-sm font-semibold">{status.mode === "unconfigured" ? "Unavailable" : status.paybill ? "STK push + Pay bill" : "STK push"}</p>
             </div>
           </div>
           <div className="rounded-lg border bg-muted/30 p-2.5">
@@ -208,6 +209,11 @@ export default function AdminPayments() {
             <p>Live refunds · <strong>{status.liveRefundsEnabled ? "enabled" : "disabled"}</strong></p>
             <p>Live driver payouts · <strong>{status.livePayoutsEnabled ? "enabled" : "disabled"}</strong></p>
           </div>
+          {status.payoutIssues.length > 0 && (
+            <ul className="list-disc space-y-1 rounded-lg border bg-muted/30 p-3 pl-7 text-xs">
+              {status.payoutIssues.map(issue => <li key={issue}>{issue}</li>)}
+            </ul>
+          )}
           {lastTest && (
             <div className="flex items-start gap-2 rounded-lg border bg-muted/30 p-2.5">
               {lastTest.ok ? (
@@ -309,7 +315,7 @@ export default function AdminPayments() {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="p-b2c">B2C shortcode</Label>
-              <Input id="p-b2c" inputMode="numeric" value={form.b2cShortcode} onChange={set("b2cShortcode")} placeholder={hint(saved.b2cShortcode) || "same as Paybill"} />
+              <Input id="p-b2c" inputMode="numeric" value={form.b2cShortcode} onChange={set("b2cShortcode")} placeholder={hint(saved.b2cShortcode) || "Approved B2C shortcode"} />
             </div>
           </div>
           <div className="space-y-1.5">
@@ -361,8 +367,8 @@ export default function AdminPayments() {
               B2C + Reversal, plus the public certificate for encryption.
             </li>
             <li>
-              Register this site&apos;s callback base URL so payment results reach the ledger automatically
-              — the nightly sweep recovers any that slip through.
+              Set the public HTTPS callback base URL. Verify one collection and one B2C payout
+              against the provider receipt before opening the paid workflow.
             </li>
           </ol>
         </CardContent>

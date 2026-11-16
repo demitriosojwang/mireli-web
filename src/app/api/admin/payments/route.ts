@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getAdminSession } from "@/lib/session";
 import { audit } from "@/lib/audit";
-import { callbackUrls, resolveDaraja, testConnection } from "@/lib/daraja";
+import { callbackUrls, driverPayoutConfigurationIssues, readDarajaConfiguration, testConnection } from "@/lib/daraja";
 
 /**
  * Admin → Payments. The plug-and-play surface for M-Pesa Daraja:
@@ -35,8 +35,11 @@ export async function GET() {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const cfg = await currentConfig();
-  const creds = await resolveDaraja();
-  const urls = callbackUrls(creds);
+  const creds = await readDarajaConfiguration();
+  const urls = creds.mode === "unconfigured"
+    ? { base: creds.callbackBaseUrl }
+    : callbackUrls(creds);
+  const payoutIssues = driverPayoutConfigurationIssues(creds);
 
   return NextResponse.json({
     status: {
@@ -47,7 +50,8 @@ export async function GET() {
       callbacks: urls,
       hasCallbackBase: !!urls.base,
       liveRefundsEnabled: creds.mode === "live" && process.env.MPESA_LIVE_REFUNDS_ENABLED === "true",
-      livePayoutsEnabled: creds.mode === "live" && process.env.MPESA_LIVE_PAYOUTS_ENABLED === "true",
+      livePayoutsEnabled: payoutIssues.length === 0 && process.env.MPESA_LIVE_PAYOUTS_ENABLED === "true",
+      payoutIssues,
     },
     saved: {
       environment: cfg.mpesaEnvironment,
@@ -98,7 +102,10 @@ export async function PUT(req: NextRequest) {
     data[`mpesa${field.charAt(0).toUpperCase()}${field.slice(1)}`] = incoming === "__clear__" ? "" : incoming;
   }
 
-  await db.platformConfig.update({ where: { id: cfg.id }, data });
+  await db.platformConfig.update({
+    where: { id: cfg.id },
+    data: { ...data, mpesaLastTestAt: null, mpesaLastTestOk: false, mpesaLastTestMessage: "" },
+  });
   await audit({
     actorId: session.id,
     actorName: session.name,
@@ -113,14 +120,13 @@ export async function PUT(req: NextRequest) {
     },
   });
 
-  const creds = await resolveDaraja();
+  const creds = await readDarajaConfiguration();
   return NextResponse.json({
     ok: true,
     mode: creds.mode,
-    message:
-      creds.mode === "live"
-        ? `Credentials saved — payments are now LIVE against Daraja ${creds.environment}.`
-        : "Credentials saved — still in demo simulation until Consumer Key, Secret, Shortcode and Passkey are all set.",
+    message: creds.mode === "live"
+      ? "Credentials saved. Run the OAuth check and verify provider callbacks before launch."
+      : "Credentials saved. Review the remaining Daraja settings before testing.",
   });
 }
 
@@ -144,6 +150,9 @@ export async function DELETE(req: NextRequest) {
       mpesaInitiatorPassword: "",
       mpesaSecurityCredential: "",
       mpesaCert: "",
+      mpesaLastTestAt: null,
+      mpesaLastTestOk: false,
+      mpesaLastTestMessage: "",
     },
   });
   await audit({
@@ -154,7 +163,7 @@ export async function DELETE(req: NextRequest) {
     entity: "platform_config",
     entityId: "main",
   });
-  return NextResponse.json({ ok: true, message: "Saved credentials cleared — back to demo simulation (env vars still override)." });
+  return NextResponse.json({ ok: true, message: "Saved credentials cleared. Environment settings still apply." });
 }
 
 export async function POST(req: NextRequest) {

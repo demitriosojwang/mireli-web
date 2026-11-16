@@ -33,15 +33,21 @@ export async function sendPayout(payoutId:string):Promise<boolean> {
   if(!["queued","failed"].includes(payout.status))return false;
   if(!Number.isSafeInteger(payout.netPayoutAmount) || payout.netPayoutAmount<1)throw new DriverError(409,"INVALID_PAYOUT","Payout requires finance review.");
   const creds=await daraja.resolveDaraja();
-  const callbackBase=creds.callbackBaseUrl.replace(/\/$/,"");
-  if(creds.mode!=="mock" && (!callbackBase.startsWith("https://") || !payout.ledgerEntryId))throw new DriverError(503,"PAYOUT_NOT_READY","Verified ledger linkage and HTTPS callback configuration are required.");
+  const callbackBase=creds.callbackBaseUrl.replace(/\/+$/,"");
   if(creds.mode!=="mock") {
     if(process.env.MPESA_LIVE_PAYOUTS_ENABLED!=="true")throw new DriverError(503,"LIVE_PAYOUTS_DISABLED","Live payouts require release approval and provider verification.");
-    const ledger=await db.ledgerEntry.findUnique({where:{id:payout.ledgerEntryId!},include:{refunds:true}});
-    if(!ledger || ledger.status!=="driver_payable" || ledger.refunds.some(r=>r.status!=="failed"))throw new DriverError(409,"RECONCILIATION_REQUIRED","Refunds or ledger changes require finance reconciliation before payout.");
+    if(daraja.driverPayoutConfigurationIssues(creds).length)throw new DriverError(503,"PAYOUT_NOT_READY","Complete the B2C setup in Admin Payments before sending driver payouts.");
+    if(!payout.ledgerEntryId)throw new DriverError(409,"RECONCILIATION_REQUIRED","Verified ledger linkage is required for payouts.");
   }
   const capability=randomBytes(32).toString("hex"),originatorId=`MR-${randomBytes(8).toString("hex")}`;
   const attempt=await db.$transaction(async tx=>{
+    // Share the driver lock with beneficiary edits and approvals before binding a recipient.
+    await tx.$queryRaw`SELECT "id" FROM "Driver" WHERE "id" = ${payout.driverId} FOR UPDATE`;
+    if(creds.mode!=="mock") {
+      const ledger=await tx.ledgerEntry.findUnique({where:{id:payout.ledgerEntryId!},include:{refunds:true}});
+      if(!ledger || ledger.status!=="driver_payable" || ledger.refunds.some(r=>r.status!=="failed"))
+        throw new DriverError(409,"RECONCILIATION_REQUIRED","Refunds or ledger changes require finance reconciliation before payout.");
+    }
     const destination=await tx.driverPayoutDestination.findUnique({where:{driverId:payout.driverId}});
     const currentDriver=await tx.driver.findUniqueOrThrow({where:{id:payout.driverId}});
     if(!destination || destination.status!=="approved" || destination.phone!==currentDriver.mpesaNumber)throw new DriverError(409,"BENEFICIARY_NOT_APPROVED","Verify the driver's payout beneficiary before sending funds.");
@@ -52,15 +58,18 @@ export async function sendPayout(payoutId:string):Promise<boolean> {
   if(!attempt)return false;
   let result:daraja.DarajaResultCode;
   try { result=await daraja.b2c({receiverPhone:attempt.receiverPhone,amount:attempt.amount,originatorId,remarks:`Mireli settlement ${payoutId}`,
-    resultUrl:`${callbackBase}/api/pay/mpesa/payout-result/${capability}`,timeoutUrl:`${callbackBase}/api/pay/mpesa/payout-result/${capability}?timeout=1`}); }
+    resultUrl:`${callbackBase}/api/pay/mpesa/payout-result/${capability}`,timeoutUrl:`${callbackBase}/api/pay/mpesa/payout-result/${capability}?timeout=1`}, creds); }
   catch {result={resultCode:"UNKNOWN",resultDesc:"Transfer outcome is unknown. Reconcile before retrying."};}
   const status=classifySubmission(result);
   if(status==="completed" && !isLocalDemoEnabled())throw new Error("Synchronous settlement is restricted to simulation");
   await db.$transaction(async tx=>{
-    // A callback may beat the submission response. Never overwrite a terminal result.
-    const current=await tx.payoutAttempt.findUnique({where:{id:attempt.id}});
-    if(!current || ["confirmed","failed"].includes(current.state))return;
-    await tx.payoutAttempt.update({where:{id:attempt.id},data:{state:status==="completed"?"confirmed":status,conversationId:result.conversationId??null,receipt:result.receipt??null,resultCode:result.resultCode}});
+    // The callback and timeout can both arrive before the submission response.
+    const updated=await tx.payoutAttempt.updateMany({
+      where:{id:attempt.id,state:"submitting"},
+      data:{state:status==="completed"?"confirmed":status,conversationId:result.conversationId??null,
+        receipt:result.receipt??null,resultCode:result.resultCode},
+    });
+    if(!updated.count)return;
     await tx.payoutRecord.update({where:{id:payoutId},data:{status,settlementVerified:status==="completed",mpesaResultCode:result.resultCode,
       failureReason:status==="failed" || status==="ambiguous"?result.resultDesc:null,completedAt:status==="completed"?new Date():null}});
     if(status==="completed" && payout.ledgerEntryId)await tx.ledgerEntry.updateMany({where:{id:payout.ledgerEntryId,status:"driver_payable"},data:{status:"commission_taken",statusChangedAt:new Date()}});
@@ -97,7 +106,7 @@ export async function settleCallback(capability:string,result:CallbackResult,tim
       if(current.resultCode!==code || (code==="0" && current.receipt!==receipt))throw new DriverError(409,"RESULT_CONFLICT","Conflicting result requires reconciliation.");
       return {duplicate:true};
     }
-    const claimed=await tx.payoutAttempt.updateMany({where:{id:attempt.id,state:{in:["submitting","processing","ambiguous"]}},data:{state:code==="0"?"confirmed":"failed",receipt:code==="0"?receipt:null,resultCode:code,conversationId:result.ConversationID??attempt.conversationId}});
+    const claimed=await tx.payoutAttempt.updateMany({where:{id:attempt.id,state:{in:["submitting","processing","ambiguous"]},OR:[{conversationId:null},{conversationId:result.ConversationID??null}]},data:{state:code==="0"?"confirmed":"failed",receipt:code==="0"?receipt:null,resultCode:code,conversationId:result.ConversationID??attempt.conversationId}});
     if(claimed.count!==1)throw new DriverError(409,"RESULT_CONFLICT","Refresh settlement state.");
     await tx.payoutRecord.update({where:{id:attempt.payoutId},data:{status:code==="0"?"completed":"failed",settlementVerified:code==="0",completedAt:code==="0"?new Date():null,mpesaResultCode:code,failureReason:code==="0"?null:"Provider reported transfer failure. Finance review required."}});
     if(code==="0" && attempt.payout.ledgerEntryId)await tx.ledgerEntry.updateMany({where:{id:attempt.payout.ledgerEntryId,status:"driver_payable"},data:{status:"commission_taken",statusChangedAt:new Date()}});
