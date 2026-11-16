@@ -27,7 +27,17 @@ type PickupMapProps = {
   caption?: string;
   detail?: string;
   showLocation?: boolean;
+  /** Poll the newest GPS fix of every active pooled cab and glide the markers to it. */
+  live?: boolean;
 };
+
+type LiveCabFix = {
+  id: string;
+  lat: number;
+  lng: number;
+};
+
+const LIVE_POLL_MS = 5_000;
 
 /**
  * Passenger-side map. It runs on the same MapLibre engine and OpenFreeMap style
@@ -47,14 +57,19 @@ export default function PickupMap({
   caption = "Your pickup area",
   detail = "Mombasa Terminus · Miritini",
   showLocation = true,
+  live = true,
 }: PickupMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<import("maplibre-gl").Map | null>(null);
   const maplibreRef = useRef<typeof import("maplibre-gl") | null>(null);
   const locationMarkerRef = useRef<import("maplibre-gl").Marker | null>(null);
+  const liveLayerRef = useRef<
+    Map<string, { marker: import("maplibre-gl").Marker; lng: number; lat: number; toLng: number; toLat: number }>
+  >(new Map());
   const [nearViewport, setNearViewport] = useState(() => typeof IntersectionObserver === "undefined");
   const [mapState, setMapState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [locationState, setLocationState] = useState<"idle" | "locating" | "found" | "denied">("idle");
+  const [liveCabCount, setLiveCabCount] = useState(0);
 
   useEffect(() => {
     const node = containerRef.current;
@@ -79,7 +94,10 @@ export default function PickupMap({
     if (!container) return;
 
     let disposed = false;
+    let liveTimer: number | undefined;
+    let animationFrame: number | undefined;
     const markers: import("maplibre-gl").Marker[] = [];
+    const cabLayer = liveLayerRef.current;
 
     const start = async () => {
       setMapState("loading");
@@ -135,6 +153,65 @@ export default function PickupMap({
           }
 
           setMapState("ready");
+
+          if (live) {
+            const syncCabs = (fixes: LiveCabFix[]) => {
+              const seen = new Set<string>();
+              for (const fix of fixes) {
+                if (!fix.id || !Number.isFinite(fix.lat) || !Number.isFinite(fix.lng)) continue;
+                seen.add(fix.id);
+                const existing = cabLayer.get(fix.id);
+                if (existing) {
+                  existing.toLng = fix.lng;
+                  existing.toLat = fix.lat;
+                } else {
+                  const element = document.createElement("div");
+                  element.className = "mireli-map-marker mireli-map-marker--cab mireli-map-marker--live";
+                  element.setAttribute("aria-hidden", "true");
+                  const marker = new maplibregl.Marker({ element })
+                    .setLngLat([fix.lng, fix.lat])
+                    .setPopup(new maplibregl.Popup({ offset: 12 }).setText("Pooled cab · on its way"))
+                    .addTo(map);
+                  cabLayer.set(fix.id, { marker, lng: fix.lng, lat: fix.lat, toLng: fix.lng, toLat: fix.lat });
+                }
+              }
+              for (const [id, cab] of Array.from(cabLayer)) {
+                if (!seen.has(id)) {
+                  cab.marker.remove();
+                  cabLayer.delete(id);
+                }
+              }
+              setLiveCabCount(cabLayer.size);
+            };
+
+            const poll = async () => {
+              if (typeof document !== "undefined" && document.hidden) return;
+              try {
+                const response = await fetch("/api/live-cabs", { cache: "no-store" });
+                if (!response.ok || disposed) return;
+                const data = (await response.json()) as { cabs?: LiveCabFix[] };
+                if (!disposed) syncCabs(Array.isArray(data.cabs) ? data.cabs : []);
+              } catch {
+                // The next tick retries; a quiet map beats an error toast.
+              }
+            };
+            void poll();
+            liveTimer = window.setInterval(() => void poll(), LIVE_POLL_MS);
+
+            const glide = () => {
+              if (disposed) return;
+              for (const cab of cabLayer.values()) {
+                const dLng = cab.toLng - cab.lng;
+                const dLat = cab.toLat - cab.lat;
+                if (Math.abs(dLng) < 1e-5 && Math.abs(dLat) < 1e-5) continue;
+                cab.lng += dLng * 0.05;
+                cab.lat += dLat * 0.05;
+                cab.marker.setLngLat([cab.lng, cab.lat]);
+              }
+              animationFrame = requestAnimationFrame(glide);
+            };
+            animationFrame = requestAnimationFrame(glide);
+          }
         });
 
         map.on("error", (event) => {
@@ -151,13 +228,18 @@ export default function PickupMap({
 
     return () => {
       disposed = true;
+      if (liveTimer !== undefined) window.clearInterval(liveTimer);
+      if (animationFrame !== undefined) cancelAnimationFrame(animationFrame);
       for (const marker of markers) marker.remove();
+      for (const cab of cabLayer.values()) cab.marker.remove();
+      cabLayer.clear();
+      setLiveCabCount(0);
       locationMarkerRef.current?.remove();
       locationMarkerRef.current = null;
       mapRef.current?.remove();
       mapRef.current = null;
     };
-  }, [nearViewport, origin.id, origin.lat, origin.lng, stops, cabs, selectedStopId]);
+  }, [nearViewport, origin.id, origin.lat, origin.lng, stops, cabs, selectedStopId, live]);
 
   const requestLocation = useCallback(() => {
     if (typeof navigator === "undefined" || !navigator.geolocation) return;
@@ -227,7 +309,11 @@ export default function PickupMap({
             </button>
           )}
           <span className="rounded-full bg-secondary px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-secondary-foreground">
-            {cabCount > 0 ? `${cabCount} cab${cabCount > 1 ? "s" : ""} ready` : "Mombasa"}
+            {liveCabCount > 0
+              ? `${liveCabCount} live`
+              : cabCount > 0
+                ? `${cabCount} cab${cabCount > 1 ? "s" : ""} ready`
+                : "Mombasa"}
           </span>
         </div>
       </div>

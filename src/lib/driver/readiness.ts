@@ -43,6 +43,7 @@ export function driverServiceStatus() {
   const registrationOpen=driverRegistrationConfigured();
   return {apiVersion: "v1", driverEntryIntent: true, simulation: isLocalDemoEnabled(), phoneSignInOpen,emailSignInOpen, registrationOpen,
     navigationOpen:navigationRoutingConfigured(), destinationSearchOpen:amazonLocationConfigured(), satelliteOpen:amazonLocationConfigured(),
+    trackingOpen: true,
     supportEmail: "mirelisgr001@gmail.com",
     message: !phoneSignInOpen && !emailSignInOpen ? "Driver email sign-in is not configured yet." :
       !registrationOpen ? "Existing drivers can sign in. New driver applications are paused." :

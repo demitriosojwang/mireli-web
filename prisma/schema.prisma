@@ -42,6 +42,7 @@ model Driver {
   rating      Float          @default(4.8)
   createdAt   DateTime       @default(now())
   trips       Trip[]
+  positions   DriverPosition[]
   payouts     PayoutRecord[]
   sessions    DriverSession[]
   application DriverApplication?
@@ -127,7 +128,26 @@ model Trip {
   payouts      PayoutRecord[]
   createdAt    DateTime     @default(now())
   driverProgress DriverTripProgress[]
+  driverPosition DriverPosition?
   @@index([driverId, status, departureAt])
+}
+
+// The latest GPS fix a driver app reported during an active trip. One row per
+// trip: GPS arrives every few seconds, so only the newest fix matters — the
+// passenger map animates toward it instead of replaying the full track.
+model DriverPosition {
+  tripId      String   @id
+  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  driverId    String
+  driver      Driver   @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  lat         Float
+  lng         Float
+  accuracyM   Float?
+  bearingDeg  Float?
+  speedMps    Float?
+  recordedAt  DateTime
+  updatedAt   DateTime @updatedAt
+  @@index([driverId, recordedAt])
 }
 
 model Booking {

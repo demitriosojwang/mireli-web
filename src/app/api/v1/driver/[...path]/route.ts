@@ -10,6 +10,7 @@ import {requestPayoutDestination} from "@/lib/driver/beneficiary";
 import {after} from "next/server";
 import {dispatchInstantPayouts} from "@/lib/money";
 import {driverServiceStatus} from "@/lib/driver/readiness";
+import {reportDriverPosition} from "@/lib/driver/position";
 import {enforceRouteLimit, requestDestinationRoute, requestDriverRoute} from "@/lib/driver/navigation";
 import {amazonLocationConfigured, satelliteTile, searchDriverDestinations} from "@/lib/driver/amazon-location";
 
@@ -58,6 +59,7 @@ async function handler(req:Request,context:Context) {
     else if(path==="earnings" && req.method==="GET") result=await driverEarnings(driverId,new URL(req.url));
     else if(path==="payout-destination" && req.method==="POST")result=await requestPayoutDestination(driverId,await json());
     else if(path==="trips" && req.method==="GET")result=await driverTrips(driverId);
+    else if(path==="position" && req.method==="POST")result=await reportDriverPosition(driverId,await json());
     else if(path==="navigation/route" && req.method==="POST")result=await requestDriverRoute(driverId,await json());
     else if(path==="navigation/search" && req.method==="POST" && amazonLocationConfigured()) {
       await enforceRouteLimit(driverId, "search", 10, 120);
