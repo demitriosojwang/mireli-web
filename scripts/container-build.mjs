@@ -28,6 +28,7 @@ writeFileSync(schemaPath, patched);
 
 const commands = [
   ["node_modules/prisma/build/index.js", ["generate", "--schema", schemaPath]],
+  ["scripts/copy-maplibre-worker.mjs", []],
   ["node_modules/next/dist/bin/next", ["build", "--webpack"]],
 ];
 for (const [command, args] of commands) {
