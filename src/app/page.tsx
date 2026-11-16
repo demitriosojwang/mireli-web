@@ -29,6 +29,7 @@ import { calculateCharterFare } from "@/lib/charter-pricing";
 import { getBookingPaymentPreflight } from "@/lib/booking-payment-preflight";
 import { MAX_STAGE_SEARCH_LENGTH, MIN_STAGE_SEARCH_LENGTH, isStageSearchReady, shouldSearchStagePoints } from "@/lib/stage-search";
 import { SplashScreen, useSplashOnce } from "@/components/app/splash-screen";
+import PickupMap, { type MapPoint } from "@/components/passenger/PickupMap";
 import {
   DatePicker,
   DotBadge,
@@ -135,6 +136,7 @@ export default function Home() {
   // availability refreshes it when the selected route is queried.
   const [hasEligibleDrivers, setHasEligibleDrivers] = useState<boolean | null>(null);
   const [eligibleDriverCount, setEligibleDriverCount] = useState<number | null>(null);
+  const [mapStops, setMapStops] = useState<MapPoint[]>([]);
   const [timetable, setTimetable] = useState<TrainRow[]>([]);
   const [timetableStatus, setTimetableStatus] = useState<CatalogueStatus>("loading");
   const [catalogueRetry, setCatalogueRetry] = useState(0);
@@ -276,6 +278,14 @@ export default function Home() {
           setHasEligibleDrivers(null);
           setEligibleDriverCount(null);
         }
+      });
+    api<{ stops: MapPoint[] }>("/api/route-map", {
+      signal: controller.signal,
+      timeoutMs: CATALOGUE_TIMEOUT_MS,
+    })
+      .then((response) => setMapStops(response.stops ?? []))
+      .catch(() => {
+        if (!controller.signal.aborted) setMapStops([]);
       });
     return () => controller.abort();
   }, [catalogueRetry]);
@@ -599,7 +609,15 @@ export default function Home() {
 
       <main className="mx-auto w-full max-w-md flex-1 px-4 pb-6 sm:max-w-2xl sm:px-6 lg:max-w-5xl">
         <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-6">
-        <div className="min-w-0">
+        <div className="min-w-0 space-y-4">
+        <PickupMap
+          stops={mapStops}
+          cabCount={eligibleDriverCount ?? 0}
+          selectedStopId={selectedPoint?.point.id ?? null}
+          caption="Your pickup area"
+          detail="Mombasa Terminus · Miritini"
+          heightClassName="h-[200px] sm:h-[240px]"
+        />
         <AnimatePresence mode="popLayout">
           <motion.div
             key={direction}
