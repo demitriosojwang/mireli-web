@@ -25,7 +25,6 @@ jobs:
     timeout-minutes: 10
     env:
       AWS_REGION: ${{ vars.AWS_REGION }}
-      AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
       EC2_INSTANCE_ID: ${{ vars.MIRELI_EC2_INSTANCE_ID }}
       TARGET_EMAIL: ${{ github.event.inputs.email }}
     steps:
@@ -40,29 +39,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          $emailJson = ($env:TARGET_EMAIL | ConvertTo-Json -Compress)
-          $script = @"
-#!/bin/bash
-set -euo pipefail
-C=`$(docker ps --format '{{.Names}}' | awk '$1 == "mireli" {print `$1; exit}')
-[[ -n "`$C" ]] || { echo 'No running app container found'; exit 1; }
-docker exec -e TARGET_EMAIL=$emailJson "`$C" node -e '
-const c = require("node:crypto");
-const secret = process.env.STAFF_AUTH_SECRET;
-const email = (process.env.TARGET_EMAIL || "").trim().toLowerCase();
-if (!secret || secret.length < 32) { console.error("STAFF_AUTH_SECRET not configured"); process.exit(1); }
-if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { console.error("Invalid email"); process.exit(1); }
-const allow = (process.env.MIRELI_STAFF_EMAILS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
-if (!allow.includes(email)) { console.error("Email is not on the staff allowlist"); process.exit(2); }
-const payload = (Date.now() + 30 * 60 * 1000) + "." + c.randomBytes(12).toString("base64url");
-const sig = c.createHmac("sha256", secret).update("staff:enrollment:" + email + ":" + payload).digest("base64url");
-console.log(payload + "." + sig);
-'
-"@
-          $script | Set-Content -Path "$env:RUNNER_TEMP/mint.sh" -NoNewline -Encoding ascii
-          $json = @{ commands = @((Get-Content "$env:RUNNER_TEMP/mint.sh" -Raw)) } | ConvertTo-Json -Compress -Depth 3
-          Set-Content -Path "$env:RUNNER_TEMP/ssm-parameters.json" -Value $json -Encoding ascii
-        shell: pwsh
+          python3 - "$TARGET_EMAIL" <<'PY' > "$RUNNER_TEMP/ssm-parameters.json"
+          import json, sys
+          email = sys.argv[1]
+          script = f"""#!/bin/bash
+          set -euo pipefail
+          C=$(docker ps --format '{{{{.Names}}}}' | awk '$1 == "mireli" {{print $1; exit}}')
+          [[ -n "$C" ]] || {{ echo 'No running app container found'; exit 1; }}
+          docker exec -e TARGET_EMAIL={email} "$C" node -e '
+          const c = require("node:crypto");
+          const secret = process.env.STAFF_AUTH_SECRET;
+          const email = (process.env.TARGET_EMAIL || "").trim().toLowerCase();
+          if (!secret || secret.length < 32) {{ console.error("STAFF_AUTH_SECRET not configured"); process.exit(1); }}
+          if (!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email)) {{ console.error("Invalid email"); process.exit(1); }}
+          const allow = (process.env.MIRELI_STAFF_EMAILS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+          if (!allow.includes(email)) {{ console.error("Email is not on the staff allowlist"); process.exit(2); }}
+          const payload = (Date.now() + 30 * 60 * 1000) + "." + c.randomBytes(12).toString("base64url");
+          const sig = c.createHmac("sha256", secret).update("staff:enrollment:" + email + ":" + payload).digest("base64url");
+          console.log(payload + "." + sig);
+          '
+          """
+          print(json.dumps({"commands": [script]}))
+          PY
           command_id=$(aws ssm send-command \
             --instance-ids "$EC2_INSTANCE_ID" \
             --document-name AWS-RunShellScript \
