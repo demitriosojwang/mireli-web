@@ -17,7 +17,7 @@ const request = (eta = false) => GET(new Request(
 ), { params: Promise.resolve({ id: "b1" }) });
 const trip = () => ({
   id: "trip-1", driverId: "driver-1", driver: { status: "active" },
-  status: "scheduled", departureAt: new Date(),
+  status: "scheduled", departureAt: new Date(), driverProgress: [],
   driverPosition: { driverId: "driver-1", lat: -4.05, lng: 39.66, recordedAt: new Date() },
 });
 const booking = (override = {}) => ({
@@ -86,6 +86,16 @@ describe("booking live tracking", () => {
     const assigned = trip();
     mocks.booking.mockResolvedValue(booking({ trip: { ...assigned, driverPosition: { ...assigned.driverPosition, ...override } } }));
     expect(await (await request(true)).json()).toMatchObject({ cab: null, etaSeconds: null });
+  });
+
+  it("only reports boarding after the assigned driver reports arrival", async () => {
+    const lockedTrip = { ...trip(), status: "locked" };
+    mocks.booking.mockResolvedValueOnce(booking({ trip: lockedTrip }));
+    expect(await (await request()).json()).toMatchObject({ phase: "scheduled" });
+    mocks.booking.mockResolvedValueOnce(booking({
+      trip: { ...lockedTrip, driverProgress: [{ driverId: "driver-1" }] },
+    }));
+    expect(await (await request()).json()).toMatchObject({ phase: "boarding" });
   });
 
   it("stops pickup estimates for passengers already on board", async () => {

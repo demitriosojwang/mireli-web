@@ -54,10 +54,15 @@ function TrackingPage({ id, sessionId, meLoading }: { id: string; sessionId?: st
     let timer: number | undefined;
     let etaTimer = 0;
     let etaRequest = 0;
+    let pending: AbortController | undefined;
     const poll = async () => {
+      let timeout: number | undefined;
       try {
         if (document.hidden) return;
-        const res = await fetch(endpoint, { cache: "no-store", signal: controller.signal });
+        pending = new AbortController();
+        const request = pending;
+        timeout = window.setTimeout(() => request.abort(), 12_000);
+        const res = await fetch(endpoint, { cache: "no-store", signal: request.signal });
         if (controller.signal.aborted) return;
         if (res.status === 401 || res.status === 404) {
           setTrack(null);
@@ -93,12 +98,15 @@ function TrackingPage({ id, sessionId, meLoading }: { id: string; sessionId?: st
           setEta(null);
         }
       } finally {
+        if (timeout !== undefined) window.clearTimeout(timeout);
+        pending = undefined;
         if (!controller.signal.aborted) timer = window.setTimeout(() => void poll(), POLL_MS);
       }
     };
     void poll();
     return () => {
       controller.abort();
+      pending?.abort();
       if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [sessionId, id]);

@@ -25,6 +25,7 @@ export async function GET(req: Request, { params }: Params) {
         select: {
           id: true, status: true, departureAt: true, driverId: true,
           driver: { select: { status: true } },
+          driverProgress: { where: { phase: "at_pickup" }, select: { driverId: true } },
           driverPosition: { select: { driverId: true, lat: true, lng: true, recordedAt: true } },
         },
       },
@@ -58,9 +59,10 @@ export async function GET(req: Request, { params }: Params) {
   const etaSeconds = approaching && cab && pickup && new URL(req.url).searchParams.has("eta")
     ? await passengerPickupEta(trip.id, cab, pickup)
     : null;
+  const boarding = trip.driverProgress.some(progress => progress.driverId === trip.driverId);
   return response({
     ...summary, departureAt: trip.departureAt.toISOString(), pickup, cab, etaSeconds,
     canEstimatePickup: Boolean(approaching && cab && pickup),
-    phase: trip.status === "departed" ? "on_the_road" : trip.status === "locked" ? "boarding" : "scheduled",
+    phase: trip.status === "departed" ? "on_the_road" : boarding ? "boarding" : "scheduled",
   });
 }
