@@ -5,7 +5,7 @@ import { getPassengerSession } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import { applyCredits, getConfig, recordCollection } from "@/lib/money";
 import { allocateBooking } from "@/lib/engine";
-import { generateBookingCode, toMpesaMsISDN } from "@/lib/daraja";
+import { generateBookingCode, getPublicPayOptions, toMpesaMsISDN } from "@/lib/daraja";
 import { nairobiDate, nairobiDayRange } from "@/lib/nairobi-time";
 import { isBookingReadyForPayment } from "@/lib/booking-payment-eligibility";
 import { attemptBookingTicketEmail } from "@/lib/booking-ticket-email";

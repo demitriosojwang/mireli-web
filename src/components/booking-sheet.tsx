@@ -699,7 +699,7 @@ function BookingSheetContent({
                   ) : (
                     `Reserve ${draft.seats > 1 ? `${draft.seats} seats` : "seat"} · ${ksh(total)}`
                   )}
-                </>
+                </Button>
               )}
             </SheetFooter>
           )}
