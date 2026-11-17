@@ -131,6 +131,12 @@
       radial-gradient(ellipse at top, oklch(0.96 0.025 75 / 0.6), transparent 60%),
       radial-gradient(ellipse at bottom, oklch(0.95 0.02 258 / 0.3), transparent 50%);
     background-attachment: fixed;
+    /* iOS Safari ignores fixed background attachment and repaints the whole
+       gradient on every scroll frame, which makes the page feel laggy and
+       unresponsive. Scroll with the content there instead. */
+    @supports (-webkit-touch-callout: none) {
+      background-attachment: scroll;
+    }
     /* dvh tracks the collapsing iOS Safari URL bar; 100vh overflows it. */
     min-height: 100vh;
     min-height: 100dvh;

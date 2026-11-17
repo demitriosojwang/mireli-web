@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { LogoTile } from "@/components/site-chrome";
 
 const DISMISS_KEY = "mireli-install-dismissed-at";
-const REMIND_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -19,8 +18,9 @@ type BeforeInstallPromptEvent = Event & {
  * Chromium/Android: captures `beforeinstallprompt` and offers the native
  * install. iOS Safari has no such event, so it shows the Share →
  * "Add to Home Screen" instructions instead. Hidden when already installed
- * (standalone display mode) and for 14 days after a dismissal. Renders
- * nothing on desktop browsers without an install prompt available.
+ * (standalone display mode). A dismissal silences it for the rest of the
+ * visit but it reappears on the next visit until the app is installed.
+ * Renders nothing on desktop browsers without an install prompt available.
  */
 export function InstallPrompt() {
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
@@ -38,8 +38,9 @@ export function InstallPrompt() {
       window.matchMedia("(display-mode: standalone)").matches ||
       (window.navigator as { standalone?: boolean }).standalone === true;
     if (standalone) return;
-    const dismissedAt = Number(localStorage.getItem(DISMISS_KEY) || 0);
-    if (dismissedAt && Date.now() - dismissedAt < REMIND_AFTER_MS) return;
+    // Same-session courtesy: after dismissing, do not re-show until the next
+    // page load / visit. It always returns on a fresh visit until installed.
+    if (sessionStorage.getItem(DISMISS_KEY)) return;
 
     let timer: ReturnType<typeof setTimeout> | undefined;
     const reveal = () => {
@@ -66,6 +67,7 @@ export function InstallPrompt() {
 
   function dismiss() {
     localStorage.setItem(DISMISS_KEY, String(Date.now()));
+    sessionStorage.setItem(DISMISS_KEY, "1");
     setVisible(false);
   }
 
