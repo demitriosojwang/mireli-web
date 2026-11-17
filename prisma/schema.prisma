@@ -150,6 +150,23 @@ model DriverPosition {
   @@index([driverId, recordedAt])
 }
 
+// Passenger feedback from the floating panel: complaints, problems, ideas.
+// Session id is kept so staff can follow up on a specific booking session,
+// but the panel itself never requires login.
+model Feedback {
+  id         String   @id @default(cuid())
+  sessionId  String
+  bookingId  String?
+  category   String // problem | complaint | idea | compliment
+  message    String   @db.Text
+  page       String? // where the passenger was when they wrote it
+  status     String   @default("open") // open | acknowledged | resolved
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([status, createdAt])
+}
+
 model Booking {
   id            String    @id @default(cuid())
   code          String    @unique // MR-XXXXXX
