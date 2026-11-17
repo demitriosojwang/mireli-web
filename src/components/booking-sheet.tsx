@@ -38,7 +38,6 @@ export interface Stage {
   name: string;
   order: number;
   fare: number;
-  homeSurcharge: number;
 }
 
 export interface TrainInfo {
@@ -91,8 +90,12 @@ interface CreateResponse {
     code: string;
     status: string;
     fareAmount: number;
+    baseFareAmount: number;
     isCharter: boolean;
     platformFeeAmount: number;
+    homeSurcharge: number;
+    seats: number;
+    offstageQuote: { nearestStageName: string; distanceMeters: number; surchargePerSeat: number } | null;
     creditApplied: number;
     cashDue: number;
     stageName: string;
@@ -173,6 +176,7 @@ function BookingSheetContent({
   const { me, refresh } = identity;
   const creditBalance = me?.creditBalance || 0;
   const [homeAddress, setHomeAddress] = useState(draft?.homeAddress || "");
+  const [locationQuoteConsent, setLocationQuoteConsent] = useState(false);
   const [useCredit, setUseCredit] = useState(draft?.useCredit || false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -197,6 +201,7 @@ function BookingSheetContent({
 
   const trip = draft?.trip;
   const stage = useMemo(() => trip?.stages.find((s) => s.id === draft?.stageId), [trip, draft?.stageId]);
+  const offstageShared = !!draft?.homePickup && !draft.charter;
 
   const isGuest = me?.passenger?.isGuest ?? true;
   const guestUsed = me?.passenger?.guestUsed ?? false;
@@ -206,10 +211,9 @@ function BookingSheetContent({
       ? calculateCharterFare(trip.capacity, stage.fare)
       : calculateSharedFare(stage.fare, trip.capacity, draft?.seats || 1))
     : 0;
-  const surcharge = draft?.homePickup && !draft?.charter ? (stage?.homeSurcharge || 0) * (draft?.seats || 1) : 0;
   const bookingFeePerSeat = trip?.platformFeeAmount ?? DEFAULT_BOOKING_FEE_AMOUNT;
   const platformFeeAmount = calculateBookingFeeAmount(bookingFeePerSeat, draft?.seats || 1, !!draft?.charter);
-  const total = fare + surcharge + (draft?.charter ? 0 : platformFeeAmount);
+  const total = fare + (draft?.charter ? 0 : platformFeeAmount);
   const creditApplied = useCredit ? Math.min(creditBalance, total) : 0;
   const cashDue = total - creditApplied;
   const detailsOk = detailsComplete(details);
@@ -234,6 +238,7 @@ function BookingSheetContent({
           stageId: draft.stageId,
           homePickup: draft.homePickup,
           homeAddress: draft.homePickup ? homeAddress : undefined,
+          locationQuoteConsent: offstageShared && locationQuoteConsent,
           seats: draft.charter ? 1 : draft.seats,
           isCharter: draft.charter,
           applyCredit: useCredit && creditBalance > 0,
@@ -261,7 +266,7 @@ function BookingSheetContent({
       setCreated(res.booking);
       await refresh();
       onBooked();
-      if (res.booking.cashDue > 0 && !res.booking.paymentNeedsReview) {
+      if (res.booking.cashDue > 0 && !res.booking.paymentNeedsReview && !offstageShared) {
         setPayOpen(true);
       }
     } catch (e) {
@@ -302,15 +307,18 @@ function BookingSheetContent({
               </div>
               <div className="shrink-0 text-right">
                 <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  {isCharter ? "Total fare" : draft.seats > 1 ? `${draft.seats} seats` : "Fare"}
+                  {offstageShared ? "Address quote" : isCharter ? "Total fare" : draft.seats > 1 ? `${draft.seats} seats` : "Fare"}
                 </div>
-                <div className="text-2xl font-bold tabular-nums text-primary">{ksh(total)}</div>
+                <div className="text-lg font-bold tabular-nums text-primary">
+                  {offstageShared ? "Shown before payment" : ksh(total)}
+                </div>
                 <div className="text-[10px] text-muted-foreground">
-                  {isCharter
+                  {offstageShared
+                    ? "Nearest-stage fare + road distance + Mireli fee"
+                    : isCharter
                     ? `${ksh(platformFeeAmount)} fee included in Mireli's 10% share`
                     : `${ksh(bookingFeePerSeat)} × ${draft.seats} seat${draft.seats === 1 ? "" : "s"} Mireli fee`}
                 </div>
-                {surcharge > 0 && <div className="text-[10px] text-muted-foreground">Includes {ksh(surcharge)} door-to-door surcharge</div>}
                 {isCharter && (
                   <div className="text-[10px] text-muted-foreground">
                     {trip.capacity} seats × ({ksh(stage?.fare || 0)} stage fare + KSh 100 per seat)
@@ -340,19 +348,49 @@ function BookingSheetContent({
                   {created.paymentNeedsReview
                     ? "We received payment but need to confirm your driver assignment. Contact Mireli support using the details below; please do not pay again."
                     : created.cashDue > 0
-                    ? `Karibu ${created.passengerName?.split(" ")[0] || ""} — complete the M-Pesa payment to confirm. We assign your driver and vehicle after payment, then send your ticket.`
+                    ? created.offstageQuote
+                      ? `Karibu ${created.passengerName?.split(" ")[0] || ""} — review the distance quote below, then continue to M-Pesa. We assign your driver and vehicle after payment.`
+                      : `Karibu ${created.passengerName?.split(" ")[0] || ""} — complete the M-Pesa payment to confirm. We assign your driver and vehicle after payment, then send your ticket.`
                     : `Karibu ${created.passengerName?.split(" ")[0] || ""} — fully covered by your travel credit, your seat is confirmed.`}
                 </p>
               </div>
               <div className="rounded-lg border bg-muted/40 p-3 text-sm [font-variant-numeric:tabular-nums]">
+                {created.offstageQuote && (
+                  <>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted-foreground">Nearest approved SGR stage</span>
+                      <span className="text-right font-medium">{created.offstageQuote.nearestStageName}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Stage fare · {created.seats} seat{created.seats === 1 ? "" : "s"}</span>
+                      <span className="font-medium">{ksh(created.baseFareAmount)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Road distance</span>
+                      <span className="font-medium">{(created.offstageQuote.distanceMeters / 1000).toFixed(1)} km</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">
+                        Distance surcharge · {ksh(created.offstageQuote.surchargePerSeat)} × {created.seats}
+                      </span>
+                      <span className="font-medium">{ksh(created.homeSurcharge)}</span>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Total fare</span>
+                  <span className="text-muted-foreground">{created.offstageQuote ? "Total before credit" : "Total fare"}</span>
                   <span className="font-medium">{ksh(created.fareAmount)}</span>
                 </div>
                 <div className="flex justify-between text-xs text-muted-foreground">
                   <span>{created.isCharter ? "Mireli fee (inside 10%)" : "Mireli fee"}</span>
                   <span>{ksh(created.platformFeeAmount)}</span>
                 </div>
+                {created.offstageQuote && (
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>Driver share after trip</span>
+                    <span>{ksh(created.baseFareAmount + created.homeSurcharge)}</span>
+                  </div>
+                )}
                 {created.creditApplied > 0 && (
                   <div className="flex justify-between text-emerald-700">
                     <span>Paid with credit</span>
@@ -451,10 +489,28 @@ function BookingSheetContent({
                   <Input
                     id="draft-address"
                     value={homeAddress}
-                    onChange={(e) => setHomeAddress(e.target.value)}
+                    maxLength={200}
+                    autoComplete="street-address"
+                    onChange={(e) => {
+                      setHomeAddress(e.target.value);
+                      setLocationQuoteConsent(false);
+                    }}
                     placeholder="e.g. Near Naivas Bamburi, gate 2"
                     className="h-9"
                   />
+                  {offstageShared && (
+                    <label className="flex items-start gap-2 rounded-lg border bg-card p-2.5 text-[11px] leading-relaxed text-muted-foreground">
+                      <Checkbox
+                        id="location-quote-consent"
+                        checked={locationQuoteConsent}
+                        onCheckedChange={(checked) => setLocationQuoteConsent(checked === true)}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        Send this address to Amazon Location once to find the nearest approved stage and driving distance. Mireli keeps the address with this booking for the driver; the map coordinates are not saved by Mireli.
+                      </span>
+                    </label>
+                  )}
                 </div>
               )}
 
@@ -568,16 +624,27 @@ function BookingSheetContent({
 
               {/* Fare breakdown */}
               <div className="space-y-1.5 rounded-lg border bg-card p-3 text-xs">
+                {offstageShared ? (
+                  <>
+                    <p className="leading-relaxed text-muted-foreground">
+                      We’ll calculate the nearest approved SGR stage and shortest drivable route. The exact total and driver share will appear here after you continue, before you open M-Pesa.
+                    </p>
+                    {creditBalance > 0 && (
+                      <label className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-2">
+                        <Checkbox checked={useCredit} onCheckedChange={(v) => setUseCredit(v === true)} className="mt-0.5" />
+                        <span className="text-emerald-900">
+                          Apply up to {ksh(creditBalance)} travel credit after the quote
+                          <span className="block text-[10px] text-emerald-800">Any unused balance remains valid for 30 days.</span>
+                        </span>
+                      </label>
+                    )}
+                  </>
+                ) : (
+                  <>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">{isCharter ? "Charter fare" : `Fare × ${draft.seats}`}</span>
                   <span className="font-medium tabular-nums">{ksh(fare)}</span>
                 </div>
-                {surcharge > 0 && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Door-to-door surcharge (to driver in full)</span>
-                    <span className="font-medium tabular-nums">+{ksh(surcharge)}</span>
-                  </div>
-                )}
                 {creditBalance > 0 && (
                   <label className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-2">
                     <Checkbox checked={useCredit} onCheckedChange={(v) => setUseCredit(v === true)} className="mt-0.5" />
@@ -602,6 +669,8 @@ function BookingSheetContent({
                     {cashDue > 0 ? ksh(cashDue) : "Nothing — credit covers it"}
                   </span>
                 </div>
+                  </>
+                )}
               </div>
 
               <p className="text-[11px] leading-relaxed text-muted-foreground">
@@ -619,20 +688,16 @@ function BookingSheetContent({
                   Fill in your details, then login or sign up to complete this booking.
                 </p>
               ) : (
-                <>
-                  <Button variant="accent" className="h-11 w-full" disabled={busy || !draft.stageId || !detailsOk} onClick={confirm}>
-                    {busy ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : isCharter ? (
-                      `Book charter · ${ksh(total)}`
-                    ) : (
-                      `Book ${draft.seats > 1 ? `${draft.seats} seats` : "seat"} · ${ksh(total)}`
-                    )}
-                  </Button>
-                  {!detailsOk && (
-                    <p className="text-center text-[11px] text-muted-foreground">
-                      Fill in every passenger detail above to book.
-                    </p>
+                <Button variant="accent" className="h-11 w-full" disabled={busy || !draft.stageId || !detailsOk ||
+                  (draft.homePickup && homeAddress.trim().length < 5) || (offstageShared && !locationQuoteConsent)} onClick={confirm}>
+                  {busy ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : isCharter ? (
+                    `Book charter · ${ksh(total)}`
+                  ) : offstageShared ? (
+                    "Continue · get address quote"
+                  ) : (
+                    `Reserve ${draft.seats > 1 ? `${draft.seats} seats` : "seat"} · ${ksh(total)}`
                   )}
                 </>
               )}

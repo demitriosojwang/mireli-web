@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getPassengerSession } from "@/lib/session";
@@ -9,7 +10,8 @@ import { nairobiDate, nairobiDayRange } from "@/lib/nairobi-time";
 import { isBookingReadyForPayment } from "@/lib/booking-payment-eligibility";
 import { attemptBookingTicketEmail } from "@/lib/booking-ticket-email";
 import { calculateCharterFare, calculateCharterPlatformShare } from "@/lib/charter-pricing";
-import { calculateBookingFeeAmount, calculateSharedFare } from "@/lib/pricing";
+import { calculateBookingFeeAmount, calculateSharedFare, calculateSharedOffstageFare } from "@/lib/pricing";
+import { isOffstageQuoteRouteEnabled, OffstageQuoteError, quoteOffstageAddress } from "@/lib/offstage-quote";
 import { getApprovedStageFare } from "@/lib/fare-catalogue";
 import { expireUnpaidBookingReservations } from "@/lib/unpaid-booking-expiry";
 import { assertPassengerPiiEncryptionReady, encryptPassengerIdNumber } from "@/lib/passenger-pii";
@@ -24,6 +26,44 @@ const GUEST_COUNTING_STATUSES = {
 /** The exact rule copy shown to guests who try to go past the 1-seat limit. */
 const GUEST_LIMIT_ERROR =
   "You can only book up to 1 seat without logging in. Login to book more seats.";
+
+const PAYMENT_UNAVAILABLE_ERROR =
+  "M-Pesa is temporarily unavailable. No booking was created and no payment was requested.";
+
+async function hasStkPaymentMethod(): Promise<boolean> {
+  try {
+    const options = await getPublicPayOptions();
+    return options.methods.includes("mpesa_stk");
+  } catch {
+    return false;
+  }
+}
+
+/** Cost guard for the two paid Location calls needed by an off-stage quote. */
+async function checkOffstageQuoteRateLimit(passengerId: string): Promise<"ok" | "limited"> {
+  const now = Date.now();
+  const windowMs = 60_000;
+  const bucket = Math.floor(now / windowMs);
+  const passengerHash = createHash("sha256").update(passengerId).digest("hex").slice(0, 32);
+  const [passenger, global] = await Promise.all([
+    db.driverRateLimit.upsert({
+      where: { key: `offstage-quote:passenger:${passengerHash}:${bucket}` },
+      create: { key: `offstage-quote:passenger:${passengerHash}:${bucket}`, expiresAt: new Date(now + windowMs) },
+      update: { count: { increment: 1 } },
+    }),
+    db.driverRateLimit.upsert({
+      where: { key: `offstage-quote:global:${bucket}` },
+      create: { key: `offstage-quote:global:${bucket}`, expiresAt: new Date(now + windowMs) },
+      update: { count: { increment: 1 } },
+    }),
+  ]);
+  if (global.count === 1) {
+    await db.driverRateLimit.deleteMany({
+      where: { key: { startsWith: "offstage-quote:" }, expiresAt: { lt: new Date(now - windowMs) } },
+    }).catch(() => undefined);
+  }
+  return passenger.count > 3 || global.count > 60 ? "limited" : "ok";
+}
 
 /** My bookings */
 export async function GET() {
@@ -111,6 +151,7 @@ export async function POST(req: NextRequest) {
     stageId,
     homePickup = false,
     homeAddress,
+    locationQuoteConsent,
     seats = 1,
     isCharter = false,
     applyCredit = false,
@@ -183,6 +224,9 @@ export async function POST(req: NextRequest) {
   if (typeof homePickup !== "boolean" || typeof isCharter !== "boolean" || typeof applyCredit !== "boolean") {
     return NextResponse.json({ error: "Review your ride options and try again." }, { status: 400 });
   }
+  if (locationQuoteConsent !== undefined && typeof locationQuoteConsent !== "boolean") {
+    return NextResponse.json({ error: "Review the location-quote consent and try again." }, { status: 400 });
+  }
   if (!Number.isSafeInteger(seats) || seats < 1 || seats > 6) {
     return NextResponse.json({ error: "Choose between 1 and 6 seats." }, { status: 400 });
   }
@@ -192,23 +236,25 @@ export async function POST(req: NextRequest) {
   if (!route || !route.active) {
     return NextResponse.json({ error: "This route is not currently open for booking." }, { status: 409 });
   }
-  const stage = route.stages.find((s) => s.id === stageId && s.order > 0);
+  let stage = route.stages.find((s) => s.id === stageId && s.order > 0);
   if (!stage) {
     return NextResponse.json({ error: "Choose a published pickup or drop-off stop." }, { status: 409 });
   }
   const stageFare = getApprovedStageFare(stage.name) ?? stage.fare;
-  if (!Number.isSafeInteger(stageFare) || stageFare <= 0 ||
-      !Number.isSafeInteger(stage.homeSurcharge) || stage.homeSurcharge < 0) {
+  if (!Number.isSafeInteger(stageFare) || stageFare <= 0) {
     return NextResponse.json({ error: "This stop's fare is not configured for booking yet." }, { status: 503 });
   }
-  if (homePickup && !isCharter) {
+  if (homePickup && (!homeAddress || typeof homeAddress !== "string" || homeAddress.trim().length < 5 || homeAddress.trim().length > 200)) {
+    return NextResponse.json({ error: "Enter an address between 5 and 200 characters." }, { status: 400 });
+  }
+  if (homePickup && !isCharter && locationQuoteConsent !== true) {
+    return NextResponse.json({ error: "Agree to the one-time location quote to continue with an off-stage shared ride." }, { status: 400 });
+  }
+  if (homePickup && !isCharter && !isOffstageQuoteRouteEnabled(route.id)) {
     return NextResponse.json(
-      { error: "Off-stage shared rides are not available until distance pricing is configured. Choose the designated SGR stage." },
+      { error: "Off-stage shared rides are not enabled for this route yet. Choose the designated SGR stage." },
       { status: 409 },
     );
-  }
-  if (homePickup && (!homeAddress || String(homeAddress).trim().length < 5)) {
-    return NextResponse.json({ error: "Door-to-door service needs a pickup or drop-off address" }, { status: 400 });
   }
 
   // Quote every booking from the exact cab the passenger selected. Shared
@@ -226,14 +272,77 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // An off-stage shared booking without credit will require a cash payment.
+  // Fail before rate-limit writes or paid Location lookups when real M-Pesa is
+  // unavailable; otherwise the passenger gets no quote and Mireli still pays
+  // for geocoding and routing.
+  if (homePickup && !isCharter && !applyCredit && !(await hasStkPaymentMethod())) {
+    return NextResponse.json(
+      { error: PAYMENT_UNAVAILABLE_ERROR, code: "PAYMENT_OPTIONS_UNAVAILABLE" },
+      { status: 503 },
+    );
+  }
+
   const tripSeats = isCharter ? 0 : seats;
-  let fare: number;
-  let platformFeeAmount: number;
+  let fare = 0;
+  let platformFeeAmount = 0;
+  let homeSurcharge = 0;
+  let offstageQuote: { distanceMeters: number; surchargePerSeat: number } | null = null;
+  if (homePickup && !isCharter) {
+    try {
+      if (await checkOffstageQuoteRateLimit(session.id) === "limited") {
+        return NextResponse.json({ error: "Too many address quotes in a short time. Please wait a minute and try again." }, { status: 429 });
+      }
+      const quote = await quoteOffstageAddress(
+        route.id,
+        String(homeAddress).trim(),
+        route.stages,
+        direction,
+      );
+      stage = quote.nearestStage;
+      const nearestStageFare = getApprovedStageFare(stage.name) ?? stage.fare;
+      if (!Number.isSafeInteger(nearestStageFare) || nearestStageFare <= 0) {
+        return NextResponse.json({ error: "The nearest SGR stage does not have an approved fare yet." }, { status: 503 });
+      }
+      const quoteFare = calculateSharedOffstageFare(
+        nearestStageFare,
+        quote.distanceMeters,
+        tripSeats,
+        cfg.bookingFeeAmount,
+      );
+      fare = calculateSharedFare(nearestStageFare, selectedTrip.capacity, tripSeats);
+      platformFeeAmount = quoteFare.platformFeeAmount;
+      homeSurcharge = quoteFare.totalSurcharge;
+      offstageQuote = { distanceMeters: quote.distanceMeters, surchargePerSeat: quoteFare.surchargePerSeat };
+    } catch (error) {
+      if (error instanceof OffstageQuoteError) {
+        const response = error.code === "OFFSTAGE_NOT_ENABLED"
+          ? { status: 409, error: "Off-stage shared rides are not enabled for this route yet. Choose the designated SGR stage." }
+          : error.code === "ADDRESS_NOT_FOUND"
+            ? { status: 400, error: "We couldn't locate that address in the service area. Check it and try again." }
+            : error.code === "NO_DRIVING_ROUTE"
+              ? { status: 422, error: "We couldn't find a drivable route from the nearest SGR stage to that address." }
+              : { status: 503, error: "We couldn't calculate the distance quote. No booking was created; please try again." };
+        return NextResponse.json({ error: response.error }, { status: response.status });
+      }
+      console.error("off-stage booking quote failed", {
+        code: typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+          ? error.code
+          : "UNKNOWN",
+      });
+      return NextResponse.json(
+        { error: "We couldn't calculate the distance quote. No booking was created; please try again." },
+        { status: 503 },
+      );
+    }
+  }
   try {
-    fare = isCharter
-      ? calculateCharterFare(selectedTrip.capacity, stageFare)
-      : calculateSharedFare(stageFare, selectedTrip.capacity, tripSeats);
-    platformFeeAmount = calculateBookingFeeAmount(cfg.bookingFeeAmount, isCharter ? 1 : tripSeats, isCharter);
+    if (!offstageQuote) {
+      fare = isCharter
+        ? calculateCharterFare(selectedTrip.capacity, stageFare)
+        : calculateSharedFare(stageFare, selectedTrip.capacity, tripSeats);
+      platformFeeAmount = calculateBookingFeeAmount(cfg.bookingFeeAmount, isCharter ? 1 : tripSeats, isCharter);
+    }
   } catch {
     return NextResponse.json(
       { error: "We couldn't confirm this cab's fare. No booking was created; please try again." },
@@ -241,9 +350,8 @@ export async function POST(req: NextRequest) {
     );
   }
   // Private charters may use the passenger's desired address without an extra
-  // mileage charge. Shared off-stage pricing fails closed above until it can
-  // quote verified driving distance from the nearest designated stage.
-  const homeSurcharge = 0;
+  // mileage charge. Shared off-stage bookings use a server-only route quote;
+  // ignore the legacy per-stage fixed surcharge because it is not distance-based.
   let total = fare + homeSurcharge + (isCharter ? 0 : platformFeeAmount);
 
   if (isCharter) {
@@ -450,8 +558,14 @@ export async function POST(req: NextRequest) {
       code: fresh!.code,
       status: fresh!.status,
       fareAmount: fresh!.fareAmount,
+      baseFareAmount: fare,
       platformFeeAmount: fresh!.platformFeeAmount,
       homeSurcharge: fresh!.homeSurcharge,
+      offstageQuote: offstageQuote ? {
+        nearestStageName: stage.name,
+        distanceMeters: offstageQuote.distanceMeters,
+        surchargePerSeat: offstageQuote.surchargePerSeat,
+      } : null,
       creditApplied: fresh!.creditApplied,
       cashDue: fresh!.cashDue,
       stageName: fresh!.stageName,

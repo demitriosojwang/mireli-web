@@ -1,9 +1,61 @@
 # Mireli Driver agent: shared VM handoff
 
-Updated 25 October 2026. Use this when connecting the Mireli Driver Android
+Updated 17 November 2026. Use this when connecting the Mireli Driver Android
 project to the same backend used by Mireli Web.
 
-## Latest SSM recovery attempt (25 October 2026)
+## Current evidence snapshot (17 November 2026)
+
+- A pending `aws login` attempt for `mireli` expired before its browser callback.
+  No AWS identity or SSM check is current. Keep SSH closed; do not infer VM
+  access from the public website or local Docker.
+- The current source built successfully in Docker. The test target passed
+  Next.js production compilation, ESLint, TypeScript, and 306 tests across 58
+  files. The full `runner` image target also built successfully.
+- Local Compose replaced only `mireli-app-1`; it is healthy on
+  `mireli-web:latest` at `127.0.0.1:3000`. There is one Mireli app container and
+  one Mireli image tag. The named `mireli_db-data` and `mireli_app-state`
+  volumes were preserved.
+- Read-only local API checks: `/api/health` is OK, `/api/routes` has zero
+  stops, `/api/trains` returns six trains, `/api/stages?q=Mtwapa` has zero
+  points, and `/api/driver-supply` reports no eligible drivers. A real customer
+  route/driver booking cannot pass with this local catalogue and driver supply.
+- Local `.env.docker` explicitly has demo mode and `MPESA_MODE=mock`. The
+  public payment options include simulated M-Pesa only; no real Daraja charge
+  was attempted. Demo `/sitemap.xml` is empty and `/robots.txt` blocks indexing
+  by design.
+- Read-only public production probes on 17 November returned `/api/health` 200,
+  26 stops from `/api/route-map`, six trains, and
+  `/api/driver-supply: hasEligibleDrivers=true`. `/api/pay/options` returned
+  HTTP 503, so paid production checkout is unavailable.
+- The production route-map snapshot is
+  `docs/stage-map-production-snapshot-2026-11-17.csv`. Four pairs of distinct
+  stop names have exact duplicate coordinates; the passenger screenshot also
+  shows orange markers offshore. Review the map audit and correction steps in
+  `docs/STAGE-MAP-MATCHES-DRAFT.md`. No production pins were changed. Preserve
+  stage IDs when applying owner- and driver-approved locations.
+- The public `/api/routes` response is only `{"pointCount":26}` and does not
+  expose off-stage route IDs. Treat live off-stage enablement as unknown until
+  deployment configuration or authenticated admin state is inspected.
+- This checkout is at `29e30e7` with uncommitted changes; the owner-supplied
+  16 November handoff reports production commit `151fb79`, but that deployed
+  SHA remains unverified. This checkout lacks the MapLibre component and
+  `/api/route-map` source. GitHub DNS failed from this workstation, so the
+  current production source could not be synchronized.
+- Shared off-stage quotes follow `(road kilometres ÷ 2) × KSh 50` per seat.
+  At 6 km and a KSh 400 stage fare, the passenger pays KSh 600; the driver
+  receives KSh 550 and Mireli retains KSh 50. The quote code is local and has
+  not been deployed. On 17 November, the owner approved one-time Amazon
+  Location use of a passenger-entered address for geocoding and route distance.
+  The server and UI require express consent; Mireli does not persist the
+  returned coordinates. This approves address processing only, not stage pins
+  or routes. Keep `MIRELI_OFFSTAGE_VERIFIED_ROUTE_IDS` empty until the owner
+  approves the exact passenger stage pins and the production VM policy is
+  verified.
+- The public domain `https://mireli.online` was reachable for GET-based API
+  checks; direct VM identity, TLS configuration, deployment image, and SSM
+  access were not checked.
+
+## Historical SSM recovery attempt (25 October 2026)
 
 Port 22 remains closed. After the owner confirmed the Chrome authorization, the
 read-only `aws sts get-caller-identity --profile mireli --region eu-north-1`
@@ -20,7 +72,7 @@ and attached policies, SSM managed-node status, and the instance's agent and
 outbound path to the regional SSM endpoints. Apply only the least change that
 the evidence supports. Keep SSH closed.
 
-## Latest AWS browser access check (19 October 2026, 22:53 EAT)
+## Historical AWS browser access check (19 October 2026, 22:53 EAT)
 
 The authenticated Chrome AWS console is in project `036834403673`, selected
 Region `eu-north-1`. EC2 confirms `i-097df027e02b0708f`
@@ -48,7 +100,7 @@ regional EC2 Instance Connect range.
 The EC2 console did not provide an interactive shell during this check. The VM
 application, current container, and production APIs were therefore not inspected.
 
-## Current local preview check (19 October 2026, 21:18 EAT)
+## Historical local preview check (19 October 2026, 21:18 EAT)
 
 The local one-container image was rebuilt from the current working tree after
 the previous image was found stale (created 18 October). Its production build
@@ -80,7 +132,7 @@ observations below remain historical until a read-only SSM session is restored.
 - Mireli container image repository:
   `036834403673.dkr.ecr.eu-north-1.amazonaws.com/mireli-sgr-pilot-appimagerepository-juxctzu7badb`
 - Internal web/API origin: `http://127.0.0.1:3000`
-- Intended public origin: `https://mirelisgr.duckdns.org` (DNS and public TLS are not ready)
+- Intended public origin: `https://mireli.online` (last production state is not verified by this session)
 - Web health: `/api/health`
 - Driver API status: `/api/v1/driver/status`
 
@@ -260,11 +312,13 @@ these checks. The SSM Run Command itself is recorded in AWS as an audit event.
   fare sheet is transcribed in `src/lib/fare-catalogue.ts`; shared rides charge
   the listed fare plus KSh 50 per booked seat, which Mireli retains. Charters
   retain the agreed 10% split, including one KSh 50 fee line; the driver
-  receives the remaining charter amount and the full door surcharge. Android
+  receives the remaining charter amount. Charters have no distance surcharge. Android
   must consume server-calculated amounts from `/api/v1/driver/earnings` and
   must not recalculate fares or payouts. The VM's active stage table remains
-  empty, and verified coordinates and surcharge amounts are still needed
-  before the listed stages can be published.
+  empty in the last recorded check. Verified coordinates are still needed
+  before stages can be published; the shared off-stage surcharge is distance
+  based ((road kilometres ÷ 2) × KSh 50), not a per-stage setting. Round
+  fractional results to the nearest whole shilling, with .50 rounding up.
 - `/api/v1/driver/status` reports strict mode (`simulation: false`), but phone
   and email sign-in, registration, and navigation are closed. The response says
   driver email sign-in is not configured. Keep driver sign-in closed until real
@@ -360,10 +414,10 @@ owner verifies DNS, HTTPS, and strict-mode status from outside AWS.
    isolated demo backend uses `true`; pilot/production against strict mode uses
    `false`. A mode mismatch must fail closed.
 4. The app may display only trips returned for the authenticated driver. Do not
-   synthesize vehicles or assignments. The current VM image returns 404 for
-   `/api/driver-supply`, so driver supply is unverified until a reviewed image
-   with the endpoint is deployed. The route and train catalogues are also empty,
-   so no customer trip can currently be matched.
+   synthesize vehicles or assignments. The last recorded VM check found
+   `/api/driver-supply` unavailable and empty route/train catalogues, but that
+   check is historical. Current production driver supply and catalogue must be
+   verified through SSM before claiming that customer trips can be matched.
 5. Coordinate additive API/schema changes with Mireli Web. Do not add a second
    driver or payment database. Keep boarding credentials and passenger identity
    data out of manifests and logs.

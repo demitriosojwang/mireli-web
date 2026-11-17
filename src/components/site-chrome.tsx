@@ -30,6 +30,10 @@ export function LogoTile({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
  */
 export function SiteHeader({ subtitle = "Mombasa Terminus" }: { subtitle?: string }) {
   const [aboutOpen, setAboutOpen] = useState(false);
+  const { me } = useMe();
+  // Login is optional: the link appears only for guests who have not claimed
+  // an account. Signed-in passengers never see it.
+  const showSignIn = !!me && (!me.passenger || me.passenger.isGuest);
 
   return (
     <header
@@ -47,6 +51,14 @@ export function SiteHeader({ subtitle = "Mombasa Terminus" }: { subtitle?: strin
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {showSignIn && (
+            <Link
+              href="/login"
+              className="rounded-lg px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            >
+              Sign in
+            </Link>
+          )}
           <button
             onClick={() => setAboutOpen(true)}
             className="rounded-lg p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
@@ -144,7 +156,7 @@ function AboutSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: b
             <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground">
               <li>Shared rides charge the listed stage fare plus a KSh 50 Mireli fee for each booked seat. Private charters use Mireli&apos;s 10% share.</li>
               <li>Charter total is vehicle seat capacity × (the approved per-seat fare + KSh 100 per seat). The KSh 50 fee is included, not added again.</li>
-              <li>Mireli keeps 10% of the charter total; the remaining 90% goes to the driver. Door-to-door surcharge goes to the driver in full.</li>
+              <li>Mireli keeps 10% of the charter total; the remaining 90% goes to the driver. Charters have no extra-distance surcharge.</li>
             </ul>
           </section>
 

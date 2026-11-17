@@ -7,7 +7,7 @@ export const requirements = [
   {id: "insurance", title: "PSV insurance", expires: true, required: true},
   {id: "inspection", title: "Vehicle inspection certificate", expires: true, required: true},
 ];
-export const maxDocumentBytes = () => process.env.VERCEL ? 2 * 1024 * 1024 : 10 * 1024 * 1024;
+export const maxDocumentBytes = () => 10 * 1024 * 1024;
 export function validFile(mime: string, bytes: Uint8Array) {
   if (mime === "application/pdf") return Buffer.from(bytes.subarray(0, 5)).toString("ascii") === "%PDF-";
   if (mime === "image/jpeg") return bytes.length > 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;

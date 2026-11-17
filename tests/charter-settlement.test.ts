@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { calculateCharterFare, calculateCharterPlatformShare, CHARTER_PER_SEAT_AMOUNT } from "@/lib/charter-pricing";
 import { calculateSettlement } from "@/lib/payout-settlement";
+import { calculateSharedOffstageFare } from "@/lib/pricing";
 
 /**
  * End-to-end charter money math, per the Mireli terms:
@@ -63,5 +64,42 @@ describe("charter fare to settlement, end to end", () => {
     const settlement = calculateSettlement(900, 0, 100, TEN_PERCENT_BPS, false);
     expect(settlement.commission).toBe(0);
     expect(settlement.net).toBe(800);
+  });
+
+  it("pays the entire off-stage surcharge to the driver and retains only the KSh 50 seat fee", () => {
+    const quote = calculateSharedOffstageFare(400, 6_000, 1);
+    const settlement = calculateSettlement(
+      quote.totalAmount,
+      quote.totalSurcharge,
+      quote.platformFeeAmount,
+      TEN_PERCENT_BPS,
+      false,
+    );
+
+    expect(quote.totalAmount).toBe(600);
+    expect(settlement).toEqual({
+      gross: 600,
+      surcharge: 150,
+      platformFee: 50,
+      commission: 0,
+      net: 550,
+    });
+    expect(settlement.net + settlement.platformFee).toBe(settlement.gross);
+  });
+
+  it("scales off-stage driver payout and Mireli fee by the booked seat count", () => {
+    const quote = calculateSharedOffstageFare(400, 6_000, 3);
+    const settlement = calculateSettlement(
+      quote.totalAmount,
+      quote.totalSurcharge,
+      quote.platformFeeAmount,
+      TEN_PERCENT_BPS,
+      false,
+    );
+
+    expect(quote.totalAmount).toBe(1_800);
+    expect(settlement.surcharge).toBe(450);
+    expect(settlement.platformFee).toBe(150);
+    expect(settlement.net).toBe(1_650);
   });
 });

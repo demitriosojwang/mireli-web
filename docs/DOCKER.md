@@ -73,8 +73,29 @@ local defaults except `SESSION_SECRET`, which is marked **REQUIRED**:
 | `MIRELI_APPLY_DATABASE_MIGRATIONS` | `true` (default) applies `prisma/migrations` at container start. |
 | `MIRELI_BOOTSTRAP_PLATFORM_CONFIG` | `true` (default) creates the single operations-settings row on a brand new database, below. |
 | `MIRELI_DEMO_MODE` + `MIRELI_ALLOW_UNSAFE_DEMO` | The prototype boundary, below. |
+| `MIRELI_OFFSTAGE_VERIFIED_ROUTE_IDS` | Comma-separated route IDs allowed to request off-stage shared quotes. Empty by default; only strict production (`MIRELI_DEMO_MODE=false`, `AWS_REGION=eu-north-1`) honors it. |
 | `TZ` | Defaults to `Africa/Nairobi`; statements and trip times use it. |
 | `MPESA_*`, `DRIVER_*`, `AWS_*`, `BREVO_*` | Optional provider credentials — see `.env.docker.example`. |
+
+### Off-stage shared-ride quotes
+
+The customer must opt in before Mireli sends an address for a quote. The server
+uses Amazon Location Places with `IntendedUse=SingleUse` to geocode the address,
+selects the closest valid stage on that route, and asks Routes for the shortest
+drivable distance. It does not write the geocoded coordinates to the database
+or logs; the passenger's address is retained with the booking so the assigned
+driver can complete the door-to-door service. The quote uses `(road metres ÷
+40)` KSh per seat, rounded to the nearest shilling with `.50` rounding up, plus
+the usual KSh 50 Mireli fee per shared seat. The full distance surcharge is
+included in the driver's share.
+
+Leave `MIRELI_OFFSTAGE_VERIFIED_ROUTE_IDS` empty until the route's exact stop
+pins have been reviewed and approved. The API fails closed for routes outside
+this list or when running in demo mode. In AWS eu-north-1 the app instance role
+needs only `geo-places:SearchText` and `geo-routes:CalculateRoutes`; the VM
+CloudFormation policy already scopes these actions to the regional default
+provider resources. Confirm the deployed role has the current policy before
+adding reviewed route IDs.
 
 PostgreSQL applies its identity settings when `db-data` is first initialized.
 Keep the configured user, database, and password aligned with that volume on

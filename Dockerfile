@@ -28,7 +28,9 @@ ENV NEXT_TELEMETRY_DISABLED=1 \
 # Prisma's engine download happens later, explicitly, in the build stage.
 FROM base AS deps
 COPY package.json package-lock.json ./
-RUN npm ci --ignore-scripts --no-audit --no-fund \
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    npm ci --ignore-scripts --no-audit --no-fund \
+      --maxsockets=5 \
       --fetch-retries=5 \
       --fetch-retry-mintimeout=20000 \
       --fetch-retry-maxtimeout=120000 \
@@ -48,11 +50,13 @@ RUN node scripts/container-build.mjs
 # complete and never has to be reconciled with the application's node_modules.
 # The final RUN also downloads the schema engine, so a locked-down VM never
 # needs network access to migrate.
-RUN CLI_VERSION="$(node -p "require('./package.json').devDependencies.prisma")" \
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    CLI_VERSION="$(node -p "require('./package.json').devDependencies.prisma")" \
  && mkdir -p /opt/prisma-cli \
  && cd /opt/prisma-cli \
  && npm init -y > /dev/null \
  && npm install --no-audit --no-fund \
+      --maxsockets=5 \
       --fetch-retries=5 \
       --fetch-retry-mintimeout=20000 \
       --fetch-retry-maxtimeout=120000 \
@@ -62,11 +66,11 @@ RUN CLI_VERSION="$(node -p "require('./package.json').devDependencies.prisma")" 
       --from-empty --to-schema-datamodel /app/prisma/schema.prisma --script > /dev/null
 
 # --- test (optional, not part of the shipped image) -------------------------
-# `docker build --target test .` type-checks and runs the vitest suite inside
-# the same Linux dependency tree the image is built from. Kept before the
-# runtime stage so the default build target stays the runnable image.
+# `docker build --target test .` runs ESLint, TypeScript, and Vitest inside the
+# same Linux dependency tree the image is built from. Kept before the runtime
+# stage so the default build target stays the runnable image.
 FROM build AS test
-RUN npm run typecheck && npm run test
+RUN npm run lint && npm run typecheck && npm run test
 
 # --- runtime ----------------------------------------------------------------
 FROM ${NODE_IMAGE} AS runner

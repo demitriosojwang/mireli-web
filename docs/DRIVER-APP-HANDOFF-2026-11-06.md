@@ -83,8 +83,11 @@ domain cutover it was waiting on is now complete.
      fee). The full listed fare goes to the driver.
    - Charter: capacity × (stage fare + KSh 100/seat). Mireli keeps 10%
      (including the KSh 50 line); the driver gets the rest.
-   - Off-stage surcharge (once enabled): KSh 50/km to the nearest stage, paid
-     to the driver in full. Android must consume server-calculated values from
+   - Shared off-stage surcharge (once enabled): (road kilometres ÷ 2) × KSh 50.
+     For KSh 400 stage fare and 6 km, passenger total is KSh 600 and driver
+     share KSh 550. Round fractional results to the nearest whole shilling,
+     with .50 rounding up. The full surcharge goes to the driver. Android must
+     consume server-calculated values from
      `/api/v1/driver/earnings` and must not recompute fares/commission/net.
    - Unpaid checkouts sit in `Booking.reservationTripId` and never appear in
      driver manifests; only the paid transaction promotes to `Booking.tripId`.

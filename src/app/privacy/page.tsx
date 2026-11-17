@@ -43,7 +43,10 @@ export default function PrivacyPage() {
               purpose. Payment references are shared with our payment provider to verify
               transactions.
             </p>
-            <p>When a driver searches for a destination or requests a route, Mireli shares the search and relevant location with Amazon Location Service to return places and directions. Satellite imagery and routing data are subject to the <a href="https://docs.aws.amazon.com/location/latest/developerguide/data-attribution.html">Amazon Location data attributions</a>.</p>
+            <p>
+              When a driver searches for a destination or requests a route, Mireli shares the search and relevant location with Amazon Location Service to return places and directions. If you choose an off-stage shared ride on an enabled route, Mireli sends your address to Amazon Location Service for a one-time geocode and driving-distance quote. Mireli does not save the resulting map coordinates; your address remains in the booking record and is shared with the assigned driver so they can reach you. Satellite imagery and routing data are subject to the{" "}
+              <a href="https://docs.aws.amazon.com/location/latest/developerguide/data-attribution.html">Amazon Location data attributions</a>.
+            </p>
           </section>
 
           <section>

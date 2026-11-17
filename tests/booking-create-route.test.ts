@@ -20,6 +20,10 @@ const mocks = vi.hoisted(() => ({
   allocateBooking: vi.fn(),
   audit: vi.fn(),
   expireUnpaidBookingReservations: vi.fn(),
+  isOffstageQuoteRouteEnabled: vi.fn(),
+  quoteOffstageAddress: vi.fn(),
+  driverRateLimitUpsert: vi.fn(),
+  driverRateLimitDeleteMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -38,6 +42,10 @@ vi.mock("@/lib/db", () => ({
       delete: mocks.bookingDelete,
     },
     trip: { findUnique: mocks.tripFindUnique },
+    driverRateLimit: {
+      upsert: mocks.driverRateLimitUpsert,
+      deleteMany: mocks.driverRateLimitDeleteMany,
+    },
   },
 }));
 vi.mock("@/lib/session", () => ({ getPassengerSession: mocks.getPassengerSession }));
@@ -55,6 +63,16 @@ vi.mock("@/lib/daraja", () => ({
 vi.mock("@/lib/unpaid-booking-expiry", () => ({
   expireUnpaidBookingReservations: mocks.expireUnpaidBookingReservations,
 }));
+vi.mock("@/lib/offstage-quote", () => {
+  class OffstageQuoteError extends Error {
+    constructor(readonly code: string) { super(code); }
+  }
+  return {
+    isOffstageQuoteRouteEnabled: mocks.isOffstageQuoteRouteEnabled,
+    quoteOffstageAddress: mocks.quoteOffstageAddress,
+    OffstageQuoteError,
+  };
+});
 vi.mock("@/lib/nairobi-time", () => ({
   nairobiDate: (date: Date) => date,
   nairobiDayRange: () => ({
@@ -112,6 +130,13 @@ beforeEach(() => {
   mocks.bookingDelete.mockResolvedValue({ id: "booking-1" });
   mocks.tripFindUnique.mockResolvedValue({ capacity: 4, routeId: "route-1", direction: "FROM_TERMINUS" });
   mocks.allocateBooking.mockResolvedValue({ tripId: null, note: "No eligible drivers." });
+  mocks.isOffstageQuoteRouteEnabled.mockReturnValue(false);
+  mocks.quoteOffstageAddress.mockResolvedValue({
+    nearestStage: { id: "stage-nearest", name: "Nyali Centre", order: 1, fare: 400, homeSurcharge: 0, lat: -4.02, lng: 39.71 },
+    distanceMeters: 6000,
+  });
+  mocks.driverRateLimitUpsert.mockResolvedValue({ count: 1 });
+  mocks.driverRateLimitDeleteMany.mockResolvedValue({ count: 0 });
 });
 
 afterEach(() => {
@@ -273,7 +298,7 @@ describe("booking creation with no driver supply", () => {
     expect(mocks.allocateBooking).not.toHaveBeenCalled();
   });
 
-  it("rejects shared off-stage service until distance pricing is configured", async () => {
+  it("requires address-quote consent before any external location lookup", async () => {
     mocks.routeFindUnique.mockResolvedValue({
       id: "route-1",
       active: true,
@@ -286,10 +311,95 @@ describe("booking creation with no driver supply", () => {
       homeAddress: "12 Green Street, Nyali",
     })));
 
-    expect(response.status).toBe(409);
-    expect((await response.json()).error).toContain("distance pricing is configured");
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain("Agree to the one-time location quote");
+    expect(mocks.quoteOffstageAddress).not.toHaveBeenCalled();
     expect(mocks.bookingCreate).not.toHaveBeenCalled();
     expect(mocks.allocateBooking).not.toHaveBeenCalled();
+  });
+
+  it("keeps off-stage quotes disabled until the route is allowlisted", async () => {
+    const response = await POST(request(validBookingBody({
+      homePickup: true,
+      homeAddress: "12 Green Street, Nyali",
+      locationQuoteConsent: true,
+    })));
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toContain("not enabled for this route yet");
+    expect(mocks.quoteOffstageAddress).not.toHaveBeenCalled();
+    expect(mocks.bookingCreate).not.toHaveBeenCalled();
+  });
+
+  it("rate-limits external off-stage quote calls before sending an address to AWS", async () => {
+    mocks.isOffstageQuoteRouteEnabled.mockReturnValue(true);
+    mocks.driverRateLimitUpsert.mockResolvedValue({ count: 4 });
+
+    const response = await POST(request(validBookingBody({
+      homePickup: true,
+      homeAddress: "12 Green Street, Nyali",
+      locationQuoteConsent: true,
+    })));
+
+    expect(response.status).toBe(429);
+    expect(mocks.quoteOffstageAddress).not.toHaveBeenCalled();
+    expect(mocks.bookingCreate).not.toHaveBeenCalled();
+  });
+
+  it("checks M-Pesa before paid off-stage location lookups when no credit is requested", async () => {
+    mocks.isOffstageQuoteRouteEnabled.mockReturnValue(true);
+    mocks.getPublicPayOptions.mockRejectedValue(new Error("private payment configuration"));
+
+    const response = await POST(request(validBookingBody({
+      homePickup: true,
+      homeAddress: "12 Green Street, Nyali",
+      locationQuoteConsent: true,
+    })));
+
+    expect(response.status).toBe(503);
+    expect((await response.json()).code).toBe("PAYMENT_OPTIONS_UNAVAILABLE");
+    expect(mocks.quoteOffstageAddress).not.toHaveBeenCalled();
+    expect(mocks.driverRateLimitUpsert).not.toHaveBeenCalled();
+    expect(mocks.bookingCreate).not.toHaveBeenCalled();
+  });
+
+  it("uses the nearest stage and passes the full distance surcharge to the driver", async () => {
+    mocks.isOffstageQuoteRouteEnabled.mockReturnValue(true);
+    mocks.routeFindUnique.mockResolvedValue({
+      id: "route-1",
+      active: true,
+      stages: [
+        { id: "stage-selected", name: "Mtwapa", order: 1, fare: 400, homeSurcharge: 0 },
+        { id: "stage-nearest", name: "Nyali Centre", order: 2, fare: 400, homeSurcharge: 0, lat: -4.02, lng: 39.71 },
+      ],
+    });
+
+    const response = await POST(request(validBookingBody({
+      stageId: "stage-selected",
+      homePickup: true,
+      homeAddress: "12 Green Street, Nyali",
+      locationQuoteConsent: true,
+    })));
+
+    expect(response.status).toBe(409); // No driver is assigned in this test fixture.
+    expect((await response.json()).error).toContain("no longer available");
+    expect(mocks.isOffstageQuoteRouteEnabled).toHaveBeenCalledWith("route-1");
+    expect(mocks.quoteOffstageAddress).toHaveBeenCalledWith(
+      "route-1",
+      "12 Green Street, Nyali",
+      expect.any(Array),
+      "FROM_TERMINUS",
+    );
+    expect(mocks.bookingCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        stageId: "stage-nearest",
+        stageName: "Home drop-off · Nyali Centre area",
+        fareAmount: 600,
+        platformFeeAmount: 50,
+        homeSurcharge: 150,
+        seats: 1,
+      }),
+    }));
   });
 
   it("rejects the terminus row because it is not a customer-selectable stop", async () => {

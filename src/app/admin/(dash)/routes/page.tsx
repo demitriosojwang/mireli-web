@@ -19,7 +19,6 @@ type RouteStage = {
   lat: number;
   lng: number;
   fare: number;
-  homeSurcharge: number;
 };
 
 type RouteRow = {
@@ -87,7 +86,7 @@ export default function AdminRoutes() {
       <div>
         <h1 className="text-lg font-semibold tracking-tight">Routes & stops</h1>
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-          Enter only the approved route catalogue. Stops stay hidden from customers until the route is published. Publishing stops does not create or imply cab availability.
+          Enter only approved route stops and fares. Stops stay hidden until the route is published, and publishing does not create or imply cab availability. Shared off-stage rides remain closed until verified stage locations and trusted road-distance quotes are ready; the old fixed per-stop surcharge is not used for bookings.
         </p>
       </div>
 
@@ -220,6 +219,7 @@ function RouteCard({
 
             <form className="space-y-2.5 rounded-xl border bg-muted/20 p-3" onSubmit={(event) => void saveForm(event, "add_stage")}>
               <h3 className="flex items-center gap-1.5 text-sm font-medium"><Plus className="h-4 w-4" /> Add a customer stop</h3>
+              <input type="hidden" name="homeSurcharge" value="0" />
               <div className="space-y-1">
                 <Label htmlFor={`stage-name-${route.id}`}>Stop name</Label>
                 <Input id={`stage-name-${route.id}`} name="name" placeholder="Approved stage name" minLength={2} maxLength={100} required />
@@ -237,12 +237,8 @@ function RouteCard({
                   <Label htmlFor={`stage-fare-${route.id}`}>Fare per seat (KSh)</Label>
                   <Input id={`stage-fare-${route.id}`} name="fare" type="number" min={1} max={100000} step={1} required />
                 </div>
-                <div className="space-y-1">
-                  <Label htmlFor={`stage-surcharge-${route.id}`}>Door surcharge (KSh)</Label>
-                  <Input id={`stage-surcharge-${route.id}`} name="homeSurcharge" type="number" min={0} max={50000} step={1} required />
-                </div>
               </div>
-              <p className="text-[11px] leading-relaxed text-muted-foreground">Coordinates are required for the approved pickup/drop-off stop. The full door surcharge is passed to the driver.</p>
+              <p className="text-[11px] leading-relaxed text-muted-foreground">Coordinates must identify the approved pickup/drop-off point on the correct side of the road. Off-stage pricing is calculated from a trusted road-distance quote and passed to the driver.</p>
               <Button type="submit" size="sm" className="w-full" disabled={busy}>Add stop</Button>
             </form>
           </>
@@ -257,7 +253,7 @@ function RouteCard({
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">{stage.name}</p>
                     <p className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
-                      <MapPin className="h-3 w-3" /> {stage.lat.toFixed(5)}, {stage.lng.toFixed(5)} · {ksh(stage.fare)} / seat · {ksh(stage.homeSurcharge)} door
+                      <MapPin className="h-3 w-3" /> {stage.lat.toFixed(5)}, {stage.lng.toFixed(5)} · {ksh(stage.fare)} / seat
                     </p>
                   </div>
                   {!route.active && (
@@ -272,12 +268,12 @@ function RouteCard({
                     <details className="flex-1">
                       <summary className="w-fit cursor-pointer text-xs font-medium text-primary">Edit stop</summary>
                       <form className="mt-2 space-y-2" onSubmit={(event) => void saveForm(event, "update_stage", stage.id)}>
+                        <input type="hidden" name="homeSurcharge" value="0" />
                         <div className="space-y-1"><Label htmlFor={`edit-name-${stage.id}`}>Stop name</Label><Input id={`edit-name-${stage.id}`} name="name" defaultValue={stage.name} minLength={2} maxLength={100} required /></div>
                         <div className="grid grid-cols-2 gap-2">
                           <div className="space-y-1"><Label htmlFor={`edit-lat-${stage.id}`}>Latitude</Label><Input id={`edit-lat-${stage.id}`} name="lat" type="number" min={-90} max={90} step="any" defaultValue={stage.lat} required /></div>
                           <div className="space-y-1"><Label htmlFor={`edit-lng-${stage.id}`}>Longitude</Label><Input id={`edit-lng-${stage.id}`} name="lng" type="number" min={-180} max={180} step="any" defaultValue={stage.lng} required /></div>
                           <div className="space-y-1"><Label htmlFor={`edit-fare-${stage.id}`}>Fare per seat</Label><Input id={`edit-fare-${stage.id}`} name="fare" type="number" min={1} max={100000} step={1} defaultValue={stage.fare} required /></div>
-                          <div className="space-y-1"><Label htmlFor={`edit-surcharge-${stage.id}`}>Door surcharge</Label><Input id={`edit-surcharge-${stage.id}`} name="homeSurcharge" type="number" min={0} max={50000} step={1} defaultValue={stage.homeSurcharge} required /></div>
                         </div>
                         <Button type="submit" size="sm" variant="outline" disabled={busy}>Save stop</Button>
                       </form>

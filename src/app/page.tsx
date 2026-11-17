@@ -1192,6 +1192,13 @@ export default function Home() {
                 ))}
             </div>}
 
+            {bookingCatalogueView === "booking" && (routesStatus === "ready" || routesStatus === "error") && <details className="rounded-xl border bg-card px-3.5 py-3 text-sm">
+              <summary className="cursor-pointer font-medium">Fare and service details</summary>
+              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                Shared rides use designated SGR stages. Mireli keeps KSh 50 per booked seat, and the driver receives the stage fare. Where enabled after stage-pin review, an off-stage shared quote uses the nearest approved SGR stage and the road distance to your address; the full surcharge goes to the driver. The quote is shown before payment. At 6 km with a KSh 400 stage fare, one seat totals KSh 600: KSh 550 to the driver and KSh 50 to Mireli. Charters can use your address with no extra-distance charge; Mireli keeps 10% of the charter fare and the driver receives the rest.
+              </p>
+            </details>}
+
             {/* My bookings */}
             {myBookingsLoadError && (
               <Card role="alert">

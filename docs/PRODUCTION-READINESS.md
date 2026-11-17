@@ -1,6 +1,69 @@
 # Mireli booking launch checklist
 
 **Status: not ready to accept customer bookings.**
+
+## Current local verification (17 November 2026)
+
+- The local off-stage quote path implements passenger consent, single-use
+  geocoding, server-side nearest-stage/road-distance pricing, a pre-payment
+  breakdown, and rate limits. The approved formula is `(road km ÷ 2) × KSh 50`
+  per seat. At a KSh 400 stage fare and 6 km, the surcharge is KSh 150, the
+  passenger pays KSh 600 per seat, KSh 550 goes to the driver, and Mireli keeps
+  KSh 50. On 17 November, the owner approved sending a passenger-entered
+  address to Amazon Location once for this quote. The form and booking API
+  both require that consent; the geocoded coordinates are not stored by Mireli.
+  This approval does not approve any route or stage pin. No route ID should be
+  enabled until its exact customer pickup/drop-off pins are reviewed.
+- `docker buildx build --target test` passed from this checkout: Next.js
+  production build, ESLint, TypeScript, and 306 Vitest tests across 58 files.
+  `docker buildx build --target runner` also passed. The Docker test stage now
+  runs lint, typecheck, and Vitest. The dependency step uses the lockfile, a
+  BuildKit npm cache mount, and five concurrent registry connections after
+  repeated npm registry idle timeouts.
+- Compose rebuilt and restarted only the local `app` service. The new
+  `mireli-web:latest` container is healthy on `127.0.0.1:3000`; the local
+  inventory has one Mireli app container and one Mireli image tag. Both named
+  volumes (`mireli_db-data`, `mireli_app-state`) were retained.
+- Read-only smoke checks: `/api/health` is OK; `/api/routes` reports zero
+  published stops; `/api/trains` returns six trains; `/api/stages?q=Mtwapa`
+  returns zero points; `/api/driver-supply` reports no eligible drivers.
+  Therefore the local customer cannot complete a real route-and-driver match.
+- The local `.env.docker` has demo mode enabled and `MPESA_MODE=mock`. The
+  public pay-options endpoint lists the simulated M-Pesa method; this is not a
+  Daraja payment. Local `/sitemap.xml` returns 200 with zero URLs and
+  `/robots.txt` disallows indexing, as expected for demo mode.
+- This checkout is `29e30e7` with uncommitted changes. Read-only public probes
+  to `https://mireli.online` returned health 200, 26 stops from `/api/route-map`,
+  six trains, and `hasEligibleDrivers: true`. `/api/pay/options` returned 503,
+  so live paid checkout is unavailable. Four exact duplicate coordinate pairs
+  appear in the production route-map snapshot; the 16 November passenger image
+  shows markers offshore. Review them in
+  `docs/STAGE-MAP-MATCHES-DRAFT.md` and
+  `docs/stage-map-production-snapshot-2026-11-17.csv`. Public `/api/routes`
+  returns only `pointCount: 26` and does not expose off-stage route IDs, so the
+  public API does not establish whether off-stage quoting is enabled. The
+  owner-supplied handoff reports production commit `151fb79`, but the SHA and
+  VM/SSM state remain unverified. GitHub DNS could not be resolved from this
+  workstation; no production pins, DNS, AWS resources, or customer data were
+  changed.
+
+The remaining live gates are approved stage names/IDs/order and safe passenger
+pickup coordinates; at least one fully vetted driver assigned to a trip; live
+Daraja credentials and callback verification; transactional customer email
+credentials and delivery verification; a fresh production SSM/API check; and
+an end-to-end paid customer booking that proves driver assignment and ticket
+delivery. Keep pooled cab availability at zero until eligible drivers exist.
+
+The pending 17 November `aws login` process exited because its authorization
+expired before the callback. No current AWS identity or SSM check could be run.
+Keep SSH closed and use SSM after access is restored.
+
+## Historical production snapshot (6 November 2026)
+
+The 6 November note reported public HTTPS at `https://mireli.online` through
+Cloudflare and release `75cd809-nov06pwa`; it also reported an empty production
+catalogue, unverified driver supply, and missing live payment/email
+credentials. Those facts are historical, not current verification.
 **6 November 2026 update:** public HTTPS at `https://mireli.online` is live
 through the hardened Cloudflare edge, the latest release `75cd809-nov06pwa`
 passes all readiness gates, and the PWA/sitemap work is verified live — but
@@ -26,7 +89,7 @@ Fresh public HTTPS probes from this workstation on 26 October 2026 to
 workstation, so the VM health, route/timetable/driver data, and public sitemap
 are unreachable and unverified.
 
-## Current source validation (26 October 2026)
+## Historical source validation (26 October 2026)
 
 - [x] GitHub Actions passed on commit `c6fddd8` for the branch push and PR #4:
   verification, AWS VM template validation, and AMD64 and ARM64 production
@@ -56,11 +119,11 @@ are unreachable and unverified.
   creation, payment options/preflight, and ticket email. The stop endpoint
   requires a two-character query, caps responses at 12, and returns explicit
   retry/empty states; the page debounces requests and cancels stale searches.
-- [x] Shared off-stage door-to-door service is disabled in the customer UI and
-  rejected by the booking API until the app can securely price it. Changing
-  stops resets the prior door-service selection, so a previous address option
-  cannot carry to another stop. Charter address service remains available with
-  no extra-distance charge.
+- [x] Shared off-stage service has a server-side quote path and a strict-
+  production route allowlist that is empty by default. Address quotes are visible only
+  after consent and route stage coordinates are complete; changing stops resets
+  the prior door-service selection. Charter address service remains available
+  with no extra-distance charge.
 - [x] Customer trip availability no longer queries or serializes driver
   identity, and the pre-payment trip card and checkout sheet cannot render a
   driver name or plate. Paid booking responses remain the source of driver
@@ -83,16 +146,18 @@ are unreachable and unverified.
   booking history. The home-page summary and My rides page keep any loaded data
   and offer a retry action.
 - [ ] Enable shared off-stage pickup/drop-off only after the exact passenger
-  location can be matched to an approved stage and a server-side routing
-  provider can calculate road distance. The agreed surcharge is KSh 50 per
-  extra kilometre and passes to the driver in full. The API must calculate or
-  validate the quote itself; never accept a customer-supplied amount. Confirm
-  the kilometre rounding rule before launch and show the calculated surcharge
-  before payment. Private charters continue to have no extra-distance fee.
-  Current blockers: stage pins in `docs/STAGE-MAP-MATCHES-DRAFT.md` are
-  unapproved, the customer flow has no location/geocoding step, and the
-  configured `VALHALLA_URL`/token are empty. The shared door-to-door choice
-  remains disabled and booking API rejects it until all three are resolved.
+  location and quote behavior have been reviewed against approved stage pins.
+  The server-side Amazon Location quote, address consent, nearest-stage
+  selection, road-distance pricing, rate limit, and pre-payment breakdown are
+  implemented. The owner-approved formula is (road kilometres ÷ 2) × KSh 50.
+  At a KSh 400 stage fare and 6 km, the surcharge is KSh 150, total is KSh 600
+  including Mireli's KSh 50 fee, and the driver receives KSh 550. Round
+  fractional results to the nearest whole shilling, with .50 rounding up. The
+  full surcharge goes to the driver. Private charters continue to have no
+  extra-distance fee. The remaining release gate is owner approval of exact
+  stage pins from `docs/STAGE-MAP-MATCHES-DRAFT.md`, then adding only that
+  verified route ID to `MIRELI_OFFSTAGE_VERIFIED_ROUTE_IDS` and verifying the
+  strict-production VM role. No customer-supplied fare or distance is trusted.
 - [x] Fresh production build on 26 October compiled with Next.js 16.3.4,
   passed the build TypeScript phase, generated all 55 static pages, and
   included the booking, driver, payment, sitemap, and robots routes in the
@@ -130,7 +195,7 @@ are unreachable and unverified.
   invented. Production launch remains blocked by the live catalogue, driver
   onboarding, payment/email, DNS/TLS, and end-to-end booking gates below.
 
-## Current AWS access attempt (25 October 2026)
+## Historical AWS access attempt (25 October 2026)
 
 - [ ] AWS CLI 2.38.1 is installed, but the read-only caller identity check for
   profile `mireli` could not connect to the `eu-north-1.signin.aws.amazon.com`
@@ -143,7 +208,7 @@ are unreachable and unverified.
   were made; keep inbound SSH closed and resume via the AWS console or once
   browser access/CLI credentials are available.
 
-## Latest AWS browser access check (19 October 2026, 22:53 EAT)
+## Historical AWS browser access check (19 October 2026, 22:53 EAT)
 
 - [x] The Chrome AWS console is authenticated to project `036834403673` in
   `eu-north-1`; it confirms the Mireli EC2 instance is Running with 3/3 status
@@ -161,7 +226,7 @@ are unreachable and unverified.
   approval for a narrowly scoped EC2 Instance Connect rule before attempting
   interactive access.
 
-## Local Docker verification (19 October 2026, 21:18 EAT)
+## Historical local Docker verification (19 October 2026, 21:18 EAT)
 
 - [x] Rebuilt `mireli-web:latest` from the current working tree after detecting
   that the prior local image dated 18 October was stale. The production build
@@ -499,8 +564,8 @@ are unreachable and unverified.
 - [ ] Real passenger/driver authentication, M-Pesa callbacks and reconciliation,
   Brevo ticket delivery, and post-trip payouts are not configured on the VM.
 - [ ] The fare catalogue is now transcribed and integrated in source, but the
-  active stage rows, verified coordinates, door-to-door surcharge amounts,
-  route order, and timetable are not loaded on the VM. The current VM image
+  active stage rows, verified coordinates, route order, and timetable are not
+  confirmed by this checkout. The current VM image
   also cannot report eligible driver supply because `/api/driver-supply`
   returns 404. The driver count must be verified through a working endpoint.
   The passenger UI must keep its honest empty state; no customer booking can
@@ -563,8 +628,10 @@ AWS EC2 is the intended web/API host; the local Docker stack is for testing only
 - [x] Keep the stop picker request-free until the passenger enters at least two
   letters; opening it no longer sends a blank query or claims the catalogue is
   empty while only the search prompt is empty.
-- [x] Present stage and door-to-door service as explicit, compact choices;
-  show the door surcharge with its full driver pass-through before booking.
+- [x] Present shared stage and charter address choices compactly. Shared
+  off-stage address quotes require explicit passenger consent, strict
+  production mode, and a verified route allowlist; route coordinates still need
+  owner review before any route is enabled.
 - [x] Remove the unapproved static stop/fare/timetable catalogue and unsupported
   live-payment assurances from customer About/SEO copy. Keep only the approved
   fare model and explain that live booking data is shown when service is open.
@@ -601,9 +668,9 @@ AWS EC2 is the intended web/API host; the local Docker stack is for testing only
   current operating policy.
 - [x] Show the KSh 50 Mireli fee per booked shared seat in the fare preview and checkout total.
 - [x] Price a private charter as vehicle capacity × (selected stage fare +
-  KSh 100 per vehicle seat). Include the KSh 50 booking fee inside Mireli's
-  10% share; pass the rest of the charter fare and the full door-to-door
-  surcharge to the driver.
+  KSh 100 per vehicle seat). Mireli keeps 10% of the total, including the
+  recorded KSh 50 fee line; the driver receives the balance. Charters have no
+  distance surcharge.
 - [x] Create/dispatch a driver payout after trip completion; retain queued and
   failed transfers for recovery.
 - [x] Restrict simulated callback and injected failure controls to local demo
@@ -878,8 +945,10 @@ the Cloudflare edge) unless marked `[ ]`.
 - [ ] Verify completed-trip settlement with real examples: shared ride has no
   percentage commission; a 4-seat charter at KSh 400 per seat totals KSh 2,000,
   including the booking fee; Mireli retains KSh 200 total (including KSh 50 fee)
-  and the driver receives KSh 1,800 plus any full home surcharge. Payout
-  dispatch begins only after trip completion.
+  and the driver receives KSh 1,800 with no extra-distance surcharge. A shared
+  off-stage booking, once enabled, must separately pass the full quoted
+  distance surcharge to the driver. Payout dispatch begins only after trip
+  completion.
 - [ ] Approve and verify each driver's B2C payout destination, then test
   completed, failed, ambiguous, and retried payout outcomes. Keep live payouts
   disabled until reconciliation is proven.
@@ -937,6 +1006,15 @@ the Cloudflare edge) unless marked `[ ]`.
 - [ ] Complete a full customer-to-driver journey in staging: choose route,
   point, date/train and cab; pay; receive confirmation; board with PIN; complete
   trip; confirm driver payout and ledger entries.
+- [ ] Enable shared off-stage bookings only after the passenger address flow,
+  approved stage coordinates, nearest-stage selection, server-side road route
+  quote, nearest-shilling surcharge display, consent copy, and driver pass-through
+  have been reviewed together end to end. The server quote uses Amazon Location
+  `SearchText` with `IntendedUse=SingleUse`, then `CalculateRoutes` for a shortest
+  drivable distance; it rate-limits requests and does not persist coordinates.
+  Release remains fail-closed until exact stage pins are approved, their route IDs
+  are added to `MIRELI_OFFSTAGE_VERIFIED_ROUTE_IDS`, and the VM role is verified.
+  The formula is `(road metres ÷ 40)`, nearest whole shilling (.50 rounds up).
 - [ ] Recheck production route/trains/driver counts, health/logging, and payment
   mode after deployment. Do not announce bookings until one real staging
   journey succeeds end to end.
@@ -961,27 +1039,36 @@ Shika Adabu (Checkpoint) KSh 400, and Diani Naivas KSh 500 per seat.
 
 The owner clarified that shared rides charge the listed fare for every booked
 seat plus KSh 50 per seat for Mireli, regardless of vehicle size. The listed
-stage fare goes to the driver, as does the full door-to-door surcharge. For
-private charters, use vehicle capacity × (listed stage fare + KSh 100 per seat).
-Mireli retains 10% of that charter total, with one KSh 50 fee line inside the
-10% share; the driver receives the rest plus the full surcharge.
+stage fare goes to the driver, as does the full off-stage surcharge. The owner
+approved (road kilometres ÷ 2) × KSh 50: at a KSh 400 stage fare and 6 km, the
+KSh 150 surcharge gives a KSh 600 total and KSh 550 to the driver. Round
+fractional results to the nearest whole shilling, with .50 rounding up. For
+private charters, use
+vehicle capacity × (listed stage fare + KSh 100 per seat). Mireli retains 10%
+of that charter total, with one KSh 50 fee line inside the 10% share; the driver
+receives the rest. Charters have no distance surcharge.
 
 These rules are implemented in `src/lib/pricing.ts`,
 `src/lib/fare-catalogue.ts`, the customer quote, booking API, and settlement
 path. The point picker is a bounded, searchable dropdown and does not load the
-whole network up front. The VM database is still empty, so stage options will
-not appear until an admin loads the stages with verified coordinates and
-surcharge values. Do not run the legacy destructive demo seed against the
-production database.
+whole network up front. The off-stage quote path is implemented with explicit
+passenger consent, server-side nearest-stage and road-distance calculation,
+pre-payment breakdown, and a request-rate limit. It stays disabled unless
+strict production has an explicitly allowlisted route with approved coordinates.
+The production state is not verified by this checkout: the 16 November owner
+handoff reports 26 route stops and a successful deploy on a newer main commit,
+while this local branch is still at `29e30e7` and lacks that handoff's live map
+code. Do not use the legacy seed to change the production database.
 
 Candidate map matches and confidence notes are in
 `docs/STAGE-MAP-MATCHES-DRAFT.md`. They are only a review aid; exact stop pins,
-route order, spelling, and door surcharges are still unapproved and must not be
-published to customers yet.
+route order, and spelling are still unapproved and must not be published to
+customers yet. The draft also lists two large discrepancies between legacy
+seed pins and public map candidates; verify every stop before correcting live
+data.
 
 Before activating routes, verify the Mombasa Terminus origin and route order,
-coordinates, door-to-door surcharge for each stop, handwritten spellings, and
-the current timetable. The fare list does not establish driver availability
+coordinates, handwritten spellings, and the current timetable. The fare list does not establish driver availability
 or a successful booking path.
 
 ## Timetable extracted from the supplied PDF

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { getEnabledOffstageQuoteRouteIds, hasCompleteOffstageStageLocations } from "@/lib/offstage-quote";
 
 function logCatalogueDatabaseError(operation: string, error: unknown) {
   const code =
@@ -23,7 +24,23 @@ export async function GET() {
         route: { is: { active: true } },
       },
     });
-    return NextResponse.json({ pointCount });
+    const configuredOffstageRouteIds = getEnabledOffstageQuoteRouteIds();
+    const routes = configuredOffstageRouteIds.length
+      ? await db.route.findMany({
+          where: { id: { in: configuredOffstageRouteIds }, active: true },
+          select: {
+            id: true,
+            stages: {
+              where: { order: { gt: 0 } },
+              select: { name: true, order: true, lat: true, lng: true, fare: true },
+            },
+          },
+        })
+      : [];
+    const publishableOffstageRouteIds = routes
+      .filter((route) => hasCompleteOffstageStageLocations(route.stages))
+      .map((route) => route.id);
+    return NextResponse.json({ pointCount, offstageQuoteRouteIds: publishableOffstageRouteIds });
   } catch (error) {
     logCatalogueDatabaseError("point count", error);
     return NextResponse.json({ error: "The route catalogue is temporarily unavailable." }, { status: 503 });

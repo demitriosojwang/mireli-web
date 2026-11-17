@@ -19,11 +19,13 @@ VM access, build-flavor, and release rules.
   per vehicle seat). The KSh 50 fee is included inside Mireli's 10% share; it
   is not added again. For a 4-seat vehicle and KSh 400 stage fare, the total is
   KSh 2,000, Mireli's total share is KSh 200, and the driver receives KSh 1,800.
-- Shared off-stage pickup/drop-off, once enabled, adds KSh 50 per extra
-  kilometre from the nearest approved stage; the full surcharge goes to the
-  driver. This option remains closed until approved stage coordinates and a
-  trusted server-side road-distance quote are available. A private charter can
-  use the passenger's address with no extra-distance fee.
+- Shared off-stage pickup/drop-off, once enabled, uses (road kilometres ÷ 2) ×
+  KSh 50. For a KSh 400 stage fare and 6 km, the KSh 150 surcharge makes the
+  passenger total KSh 600 and driver share KSh 550. Round fractional results to
+  the nearest whole shilling, with .50 rounding up. The full surcharge goes to the driver. This
+  option remains closed until approved stage coordinates and a trusted
+  server-side road-distance quote are available. A private charter can use the
+  passenger's address with no extra-distance fee.
 - Driver payout is created and dispatched only after trip completion. The API's
   server-calculated earnings and payout fields are authoritative; Android must
   not recalculate fares, commission, or net payout locally.
