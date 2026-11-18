@@ -327,7 +327,9 @@ export default function PickupMap({
         setLocationState("found");
       },
       error => setLocationState(error.code === 1 ? "denied" : "unavailable"),
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 120000 },
+      // High accuracy is the point: the driver needs the passenger's real
+      // roadside position, not a cell-tower estimate. No cached fixes.
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
     );
   }, []);
 
