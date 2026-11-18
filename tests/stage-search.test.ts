@@ -44,7 +44,7 @@ describe("public stage point search", () => {
     expect(findMany).not.toHaveBeenCalled();
   });
 
-  it("returns suggested stops for an empty query without requiring typed input", async () => {
+  it("suggests published stops only for an entirely empty query parameter", async () => {
     const response = await GET(request("q="));
     const result = await response.json();
 

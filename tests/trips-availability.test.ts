@@ -94,6 +94,9 @@ describe("customer trip availability", () => {
     expect(result.trips[0].train).toMatchObject({ id: "train-1", name: "Night Train", mtmTime: "03:55" });
     expect(result.trips[0]).not.toHaveProperty("stages");
     expect(result.trips[0]).not.toHaveProperty("points");
+    // Vehicle details are customer-facing (cab type and plate), but the
+    // driver's personal identity stays hidden until after payment.
+    expect(result.trips[0].vehicle).toEqual({ cabType: "Van", plate: "KAA 123A" });
     expect(result.trips[0]).not.toHaveProperty("driver");
     expect(mocks.tripFindMany.mock.calls[0][0].where.routeId).toBe("route-1");
     expect(mocks.tripFindMany.mock.calls[0][0].where.trainId).toBe("train-1");
@@ -105,7 +108,7 @@ describe("customer trip availability", () => {
     });
     expect(mocks.tripFindMany.mock.calls[0][0].where.train).toEqual({ is: { active: true } });
     expect(mocks.tripFindMany.mock.calls[0][0].where.driverId.in).toEqual([eligibleDriver.id]);
-    expect(mocks.tripFindMany.mock.calls[0][0].select).not.toHaveProperty("driver");
+    expect(mocks.tripFindMany.mock.calls[0][0].select.driver).toEqual({ select: { cabType: true, plate: true } });
     expect(mocks.driverFindMany.mock.calls[0][0].select.application.select.documents.select)
       .toEqual({ type: true, state: true, scanState: true, expiresAt: true });
     expect(mocks.tripFindMany.mock.calls[0][0].select.route.select).not.toHaveProperty("stages");

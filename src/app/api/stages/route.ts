@@ -9,11 +9,14 @@ const SEARCH_LIMIT = 12;
  *  An empty query returns a bounded set of suggested stops so the picker can show
  *  options immediately, before the passenger types anything. */
 export async function GET(req: NextRequest) {
-  const query = req.nextUrl.searchParams.get("q")?.trim() ?? "";
+  const raw = req.nextUrl.searchParams.get("q") ?? "";
+  const query = raw.trim();
   if (query.length > MAX_STAGE_SEARCH_LENGTH) {
     return NextResponse.json({ error: "Point search is too long." }, { status: 400 });
   }
-  const suggesting = query.length === 0;
+  // Only a truly empty query parameter suggests stops; blank input stays a
+  // no-op so whitespace can never trigger a database read.
+  const suggesting = raw.length === 0;
   if (!suggesting && !isStageSearchReady(query)) {
     return NextResponse.json({ points: [], hasMore: false });
   }
