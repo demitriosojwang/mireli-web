@@ -56,7 +56,6 @@ import {
   Train as TrainIcon,
   Users,
   Zap,
-  Car,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
