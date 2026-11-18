@@ -66,6 +66,7 @@ export interface BookableTrip {
   bookable: boolean;
   lockNote?: string | null;
   pointsLabel: "drop-off" | "pickup";
+  vehicle?: { cabType: string; plate: string } | null;
 }
 
 export interface BookableTripWithStages extends BookableTrip {

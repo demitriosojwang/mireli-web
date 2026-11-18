@@ -27,7 +27,7 @@ import { calculateBookingFeeAmount, calculateSharedFare, DEFAULT_BOOKING_FEE_AMO
 import { addNairobiDays, nairobiNowMinutes, nairobiWeekday } from "@/lib/nairobi-time";
 import { calculateCharterFare } from "@/lib/charter-pricing";
 import { getBookingPaymentPreflight } from "@/lib/booking-payment-preflight";
-import { MAX_STAGE_SEARCH_LENGTH, MIN_STAGE_SEARCH_LENGTH, isStageSearchReady, shouldSearchStagePoints } from "@/lib/stage-search";
+import { MAX_STAGE_SEARCH_LENGTH, MIN_STAGE_SEARCH_LENGTH, isStageSearchReady } from "@/lib/stage-search";
 import { SplashScreen, useSplashOnce } from "@/components/app/splash-screen";
 import PickupMap, { type MapPoint } from "@/components/passenger/PickupMap";
 import {
@@ -56,6 +56,7 @@ import {
   Train as TrainIcon,
   Users,
   Zap,
+  Car,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -315,9 +316,13 @@ export default function Home() {
     const query = pointSearch.trim();
     // The public search endpoint deliberately requires at least two
     // characters and caps its response. Never request the full catalogue when
-    // the picker opens with an empty query.
+    // the picker opens with an empty query. An empty query inside an open
+    // picker asks the endpoint for its bounded suggested-stops slice instead.
     if (routesStatus === "ready" && pointCount === 0) return;
-    if (!shouldSearchStagePoints(query, pointPickerOpen)) return;
+    if (!pointPickerOpen) return;
+    // One typed character is below the search minimum but not empty: keep the
+    // suggestions on screen instead of firing a request that returns nothing.
+    if (query.length === 1) return;
 
     const controller = new AbortController();
     let active = true;
@@ -897,13 +902,13 @@ export default function Home() {
                             setPointSearchStatus(
                               routesStatus === "ready" && pointCount === 0
                                 ? "empty"
-                                : isStageSearchReady(value) ? "loading" : "idle",
+                                : value.trim().length === 0 || isStageSearchReady(value) ? "loading" : "idle",
                             );
                             setPointSearchHasMore(false);
                           }}
                           placeholder={routesStatus === "ready" && pointCount === 0
                             ? "No designated stages published yet"
-                            : `Search ${pointLabelCap.toLowerCase()} stops by name or area`}
+                            : `Search stops or pick a suggested ${pointLabelCap.toLowerCase()} point`}
                         />
                         <CommandList className="max-h-60">
                           {routesStatus === "ready" && pointCount === 0 && (
@@ -911,9 +916,9 @@ export default function Home() {
                               No designated pickup or drop-off stages are published yet. Booking will open when the approved route locations are ready.
                             </p>
                           )}
-                          {!(routesStatus === "ready" && pointCount === 0) && pointSearch.trim().length === 0 && (
+                          {!(routesStatus === "ready" && pointCount === 0) && pointSearch.trim().length === 0 && pointSearchStatus !== "ready" && (
                             <p className="px-3 py-5 text-center text-sm text-muted-foreground" role="status">
-                              Type at least two letters to find a stop.
+                              {pointSearchStatus === "loading" ? "Finding nearby stops…" : "Type at least two letters to find a stop."}
                             </p>
                           )}
                           {!(routesStatus === "ready" && pointCount === 0) && pointSearch.trim().length > 0 && pointSearch.trim().length < MIN_STAGE_SEARCH_LENGTH && (
@@ -937,7 +942,7 @@ export default function Home() {
                           {pointGroups.map(({ route, coast, points }) => (
                             <CommandGroup
                               key={route.id}
-                              heading={`${coast === "south" ? "South Coast" : "North Coast"} · ${route.name.replace("Mombasa Terminus ↔ ", "").replace(" (Mtwapa · Malindi)", "")}`}
+                              heading={`${coast === "south" ? "South Coast" : "North Coast"} · ${route.name.replace("Mombasa Terminus ↔ ", "").replace(" (Mtwapa · Malindi)", "")}${pointSearch.trim().length === 0 ? " · suggested" : ""}`}
                             >
                               {points.map((point) => (
                                 <CommandItem
@@ -1192,13 +1197,6 @@ export default function Home() {
                 ))}
             </div>}
 
-            {bookingCatalogueView === "booking" && (routesStatus === "ready" || routesStatus === "error") && <details className="rounded-xl border bg-card px-3.5 py-3 text-sm">
-              <summary className="cursor-pointer font-medium">Fare and service details</summary>
-              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                Shared rides use designated SGR stages. Mireli keeps KSh 50 per booked seat, and the driver receives the stage fare. Where enabled after stage-pin review, an off-stage shared quote uses the nearest approved SGR stage and the road distance to your address; the full surcharge goes to the driver. The quote is shown before payment. At 6 km with a KSh 400 stage fare, one seat totals KSh 600: KSh 550 to the driver and KSh 50 to Mireli. Charters can use your address with no extra-distance charge; Mireli keeps 10% of the charter fare and the driver receives the rest.
-              </p>
-            </details>}
-
             {/* My bookings */}
             {myBookingsLoadError && (
               <Card role="alert">
@@ -1419,6 +1417,13 @@ function CabCard({
             {trip.direction === "TO_TERMINUS" && (
               <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
                 <Navigation className="h-3 w-3" /> reaches MTM {fmtTime(trip.terminusAt)}
+              </span>
+            )}
+            {trip.vehicle?.cabType && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">
+                <Car className="h-3 w-3" />
+                {trip.vehicle.cabType}
+                {trip.vehicle.plate ? ` · ${trip.vehicle.plate}` : ""}
               </span>
             )}
           </div>

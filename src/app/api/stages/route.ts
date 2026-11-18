@@ -5,13 +5,16 @@ import { getApprovedStageFare } from "@/lib/fare-catalogue";
 
 const SEARCH_LIMIT = 12;
 
-/** Search active route stops on demand instead of sending the whole network to every customer. */
+/** Search active route stops on demand instead of sending the whole network to every customer.
+ *  An empty query returns a bounded set of suggested stops so the picker can show
+ *  options immediately, before the passenger types anything. */
 export async function GET(req: NextRequest) {
   const query = req.nextUrl.searchParams.get("q")?.trim() ?? "";
   if (query.length > MAX_STAGE_SEARCH_LENGTH) {
     return NextResponse.json({ error: "Point search is too long." }, { status: 400 });
   }
-  if (!isStageSearchReady(query)) {
+  const suggesting = query.length === 0;
+  if (!suggesting && !isStageSearchReady(query)) {
     return NextResponse.json({ points: [], hasMore: false });
   }
 
@@ -32,6 +35,17 @@ export async function GET(req: NextRequest) {
         select: { id: true, name: true, charterPrice: true },
       },
     } as const;
+
+    // Suggestion mode: a stable, bounded slice of the published network.
+    if (suggesting) {
+      const suggestions = await db.routeStage.findMany({
+        where: { ...usableStop, route: { is: { active: true } } },
+        orderBy: [{ route: { name: "asc" } }, { order: "asc" }, { name: "asc" }],
+        take: SEARCH_LIMIT,
+        select,
+      });
+      return NextResponse.json({ points: suggestions, hasMore: false });
+    }
 
     // Search stop names first. Route names include area labels (for example,
     // "Mtwapa · Malindi"), so combining both fields in one OR can make a

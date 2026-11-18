@@ -44,6 +44,16 @@ describe("public stage point search", () => {
     expect(findMany).not.toHaveBeenCalled();
   });
 
+  it("returns suggested stops for an empty query without requiring typed input", async () => {
+    const response = await GET(request("q="));
+    const result = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(result.points).toEqual([point(1)]);
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 12 }));
+  });
+
   it("returns an empty search response for blank input without querying the database", async () => {
     const response = await GET(request("q=%20%20"));
 

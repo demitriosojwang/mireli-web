@@ -82,6 +82,9 @@ export async function GET(req: NextRequest) {
         train: {
           select: { id: true, name: true, direction: true, originTime: true, destTime: true },
         },
+        driver: {
+          select: { cabType: true, plate: true },
+        },
         bookings: {
           where: { status: { in: ["awaiting_payment", "confirmed", "boarded", "completed"] } },
           select: { seats: true, isCharter: true },
@@ -148,6 +151,8 @@ export async function GET(req: NextRequest) {
         // The customer-selected stop comes from the bounded /api/stages search;
         // do not repeat route-stop details for each departure card.
         pointsLabel: isFromTerminus ? "drop-off" : "pickup",
+        // Vehicle details so passengers can compare cab types (Uber/Bolt style).
+        vehicle: t.driver ? { cabType: t.driver.cabType, plate: t.driver.plate } : null,
       };
       }),
   });
