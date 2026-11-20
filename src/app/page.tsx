@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence, useAnimationControls } from "framer-motion";
 import { DURATION, EASE_IN_OUT, EASE_OUT, KNOB_STRETCH, LAYOUT_ID, PRESS_SCALE, STAGGER_MS } from "@/lib/motion";
@@ -146,6 +147,7 @@ export default function Home() {
   const [loadedQuery, setLoadedQuery] = useState<string | null>(null);
   const [tripRefreshKey, setTripRefreshKey] = useState(0);
   const [pointPickerOpen, setPointPickerOpen] = useState(false);
+  const pointPickerTrigger = useRef<HTMLButtonElement>(null);
   const [pointSearch, setPointSearch] = useState("");
   const [pointMatches, setPointMatches] = useState<PointSearchResult[]>([]);
   const [pointSearchStatus, setPointSearchStatus] = useState<CatalogueStatus | "idle">("idle");
@@ -869,6 +871,7 @@ export default function Home() {
                   >
                     <PopoverTrigger asChild>
                       <Button
+                        ref={pointPickerTrigger}
                         id="booking-point"
                         type="button"
                         variant="outline"
@@ -1165,9 +1168,12 @@ export default function Home() {
                       <div className="mt-3 flex flex-wrap justify-center gap-2">
                         {alternativeRoutes.map(([routeId, routeName]) => (
                           <Button key={routeId} type="button" size="sm" variant="outline" onClick={() => {
+                            // Restore the visible popover trigger before opening it.
+                            flushSync(() => setJourneyCollapsed(false));
+                            const trigger = pointPickerTrigger.current;
+                            trigger?.focus();
+                            if (trigger?.getAttribute("aria-expanded") === "false") trigger.click();
                             setPointSearch(routeName.slice(0, MAX_STAGE_SEARCH_LENGTH));
-                            setJourneyCollapsed(false);
-                            setPointPickerOpen(true);
                           }}>
                             Stops on {routeName.replace(/^Mombasa Terminus\s*[↔–—-]\s*/, "")}
                           </Button>
