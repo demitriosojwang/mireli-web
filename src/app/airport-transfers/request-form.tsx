@@ -5,7 +5,6 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { nairobiToday } from "@/lib/nairobi-time";
 import { api, useMe } from "@/lib/client";
-import { ksh } from "@/lib/format";
 
 const AIRPORTS = {
   mba: "Moi International Airport (MBA), Mombasa",
@@ -19,14 +18,11 @@ type AirportRequest = {
   address: string;
   pickupAt: string;
   status: string;
-  quoteKes: number | null;
-  quoteExpiresAt: string | null;
   driver: { name: string; plate: string; phone: string | null } | null;
 };
 
 const REQUEST_STATUS: Record<string, string> = {
-  requested: "Awaiting a driver quote",
-  quoted: "Quote ready",
+  requested: "Awaiting driver acceptance",
   confirmed: "Confirmed",
   in_progress: "On the road",
   completed: "Completed",
@@ -118,13 +114,13 @@ export default function AirportRequestForm() {
     }
   }
 
-  async function updateRequest(request: AirportRequest, action: "confirm" | "cancel") {
+  async function cancelRequest(request: AirportRequest) {
     setSaving(true);
     setStatusError("");
     try {
       const { requests, hasAirportDrivers } = await api<{ requests: AirportRequest[]; hasAirportDrivers: boolean }>("/api/airport-transfers", {
         method: "PUT", timeoutMs: 10_000,
-        body: { id: request.id, action, quoteExpiresAt: request.quoteExpiresAt },
+        body: { id: request.id, action: "cancel" },
       });
       requestRevision.current++;
       setRequests(requests);
@@ -144,24 +140,17 @@ export default function AirportRequestForm() {
         <h2 className="text-xl font-semibold">Your airport transfers</h2>
         {statusError && <p role="status" className="text-sm text-destructive">{statusError}</p>}
         {requests.map(request => {
-          const expired = request.status === "quoted" && Date.parse(request.quoteExpiresAt ?? "") <= Date.now();
-          const missed = ["requested", "quoted"].includes(request.status) && Date.parse(request.pickupAt) <= Date.now();
-          const canConfirm = request.status === "quoted" && !expired && !missed;
+          const missed = request.status === "requested" && Date.parse(request.pickupAt) <= Date.now();
           return (
             <article key={request.id} className="grid gap-2 rounded-xl border p-3 text-sm">
               <h3 className="font-semibold">{request.direction === "from" ? "From " : "To "}{AIRPORTS[request.airport]}</h3>
               <p>{request.address} · {pickupFormat.format(new Date(request.pickupAt))} EAT</p>
-              <p role="status" className="text-muted-foreground">{missed ? "Pickup time passed" : expired ? "Awaiting a new quote" : REQUEST_STATUS[request.status]}</p>
-              {(canConfirm || ["confirmed", "in_progress", "completed"].includes(request.status)) && request.quoteKes !== null &&
-                <p className="font-medium">{ksh(request.quoteKes)} total · pay at pickup</p>}
+              <p role="status" className="text-muted-foreground">{missed ? "Pickup time passed" : REQUEST_STATUS[request.status]}</p>
               {request.driver && <p>{request.driver.name} · {request.driver.plate}
                 {request.driver.phone && <> · <a className="underline" href={`tel:${request.driver.phone}`}>Call driver</a></>}
               </p>}
-              {["requested", "quoted", "confirmed"].includes(request.status) && (
-                <div className="flex flex-wrap gap-2">
-                  {canConfirm && <Button disabled={saving} onClick={() => void updateRequest(request, "confirm")}>Accept fare and confirm</Button>}
-                  <Button variant="outline" disabled={saving} onClick={() => void updateRequest(request, "cancel")}>Cancel transfer</Button>
-                </div>
+              {["requested", "confirmed"].includes(request.status) && (
+                <Button variant="outline" className="justify-self-start" disabled={saving} onClick={() => void cancelRequest(request)}>Cancel transfer</Button>
               )}
             </article>
           );
@@ -202,9 +191,9 @@ export default function AirportRequestForm() {
       <label className="text-sm font-medium">Contact number<input name="contactPhone" type="tel" required maxLength={30} className={input} autoComplete="tel" /></label>
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {loading || passengerId
-        ? <Button type="submit" disabled={loading || saving || hasAirportDrivers === false} className="min-h-11 w-full">{saving ? "Sending…" : "Request a driver quote"}</Button>
+        ? <Button type="submit" disabled={loading || saving || hasAirportDrivers === false} className="min-h-11 w-full">{saving ? "Sending…" : "Request airport transfer"}</Button>
         : <Button asChild><Link href="/login?next=%2Fairport-transfers">Sign in to request a transfer</Link></Button>}
-      <p className="text-sm leading-relaxed text-muted-foreground">An approved airport driver can quote your ride. Review and confirm it here, then pay the agreed fare at pickup.</p>
+      <p className="text-sm leading-relaxed text-muted-foreground">Return here to see when an approved airport driver accepts your request.</p>
     </form>
     </div>
   );

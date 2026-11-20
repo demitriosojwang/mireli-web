@@ -15,9 +15,7 @@ CREATE TABLE "AirportTransfer" (
     "flight" TEXT,
     "luggage" TEXT,
     "status" TEXT NOT NULL DEFAULT 'requested'
-        CHECK ("status" IN ('requested', 'quoted', 'confirmed', 'in_progress', 'completed', 'cancelled')),
-    "quoteKes" INTEGER CHECK ("quoteKes" > 0),
-    "quoteExpiresAt" TIMESTAMP(3),
+        CHECK ("status" IN ('requested', 'confirmed', 'in_progress', 'completed', 'cancelled')),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL
 );

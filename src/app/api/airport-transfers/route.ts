@@ -1,4 +1,4 @@
-import { airportPassengerOverview, createAirportTransfer, updatePassengerAirportTransfer } from "@/lib/airport-transfers";
+import { airportPassengerOverview, cancelPassengerAirportTransfer, createAirportTransfer } from "@/lib/airport-transfers";
 import { DriverError, text } from "@/lib/driver/errors";
 import { getPassengerSession } from "@/lib/session";
 
@@ -16,7 +16,10 @@ async function handle(req: Request) {
     }
     const body = await req.json().catch(() => null);
     if (!body || typeof body !== "object" || Array.isArray(body)) return response({ error: "Invalid request." }, 400);
-    if (req.method === "PUT") return response(await updatePassengerAirportTransfer(session.id, text(body.id, "Transfer", 1, 80), body));
+    if (req.method === "PUT") {
+      if (body.action !== "cancel") return response({ error: "Invalid transfer action." }, 400);
+      return response(await cancelPassengerAirportTransfer(session.id, text(body.id, "Transfer", 1, 80)));
+    }
     return response({ transfer: await createAirportTransfer(session.id, body) }, 201);
   } catch (error) {
     if (error instanceof DriverError) return response({ error: error.message }, error.status);

@@ -72,8 +72,6 @@ model AirportTransfer {
   flight          String?
   luggage         String?
   status          String    @default("requested")
-  quoteKes        Int?
-  quoteExpiresAt  DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   @@unique([passengerId, requestKey])

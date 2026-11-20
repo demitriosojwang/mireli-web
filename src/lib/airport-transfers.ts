@@ -7,10 +7,9 @@ import { nairobiDayRange, nairobiEventAt } from "@/lib/nairobi-time";
 import { normalizePhone } from "@/lib/session";
 import { getEligibleDriverIds } from "@/lib/driver/availability";
 
-const QUOTE_MS = 20 * 60_000;
 const airportView = {
   id: true, airport: true, direction: true, address: true, pickupAt: true, passengers: true,
-  flight: true, luggage: true, status: true, quoteKes: true, quoteExpiresAt: true,
+  flight: true, luggage: true, status: true,
 } as const;
 const bookedStatuses = ["awaiting_payment", "confirmed", "boarded"];
 const stale = () => new DriverError(409, "TRANSFER_CHANGED", "This transfer changed. Refresh and try again.");
@@ -55,30 +54,19 @@ export async function driverAirportTransfers(driverId: string) {
   const eligible = evaluateDriverApplication(driver.application, driver.status).eligible;
   const now = new Date();
   const assigned = eligible ? await db.airportTransfer.findMany({
-    where: { driverId, OR: [
-      { status: "quoted", quoteExpiresAt: { gt: now } },
-      { status: { in: ["confirmed", "in_progress"] } },
-    ] },
+    where: { driverId, status: { in: ["confirmed", "in_progress"] } },
     select: { ...airportView, contactPhone: true },
     take: 30, orderBy: { pickupAt: "asc" },
   }) : [];
   const requests = eligible && AIRPORT_SERVICES.includes(driver.rideService) ? await db.airportTransfer.findMany({
     where: {
       pickupAt: { gt: now }, passengers: { lte: driver.capacity },
-      OR: [{ status: "requested" }, { status: "quoted", quoteExpiresAt: { lte: now } }],
+      status: "requested",
     },
     select: airportView,
     take: 30, orderBy: { pickupAt: "asc" },
   }) : [];
-  return {
-    eligible, rideService: driver.rideService,
-    assigned: assigned.map(({ contactPhone, ...transfer }) => ({
-      ...transfer, contactPhone: transfer.status === "quoted" ? null : contactPhone,
-    })),
-    requests: requests.map(request => ({
-      ...request, status: "requested", quoteKes: null, quoteExpiresAt: null,
-    })),
-  };
+  return { eligible, rideService: driver.rideService, assigned, requests };
 }
 
 export async function setDriverRideService(driverId: string, value: unknown) {
@@ -135,7 +123,7 @@ export async function createAirportTransfer(passengerId: string, body: Record<st
     const now = new Date();
     if (pickupAt <= now) throw new DriverError(400, "INVALID_PICKUP", "Choose a pickup date and time in the future.");
     const pending = await tx.airportTransfer.count({ where: {
-      passengerId, pickupAt: { gt: now }, status: { in: ["requested", "quoted", "confirmed"] },
+      passengerId, pickupAt: { gt: now }, status: { in: ["requested", "confirmed"] },
     } });
     if (pending >= 5) throw new DriverError(429, "TRANSFER_LIMIT", "Resolve an existing transfer before sending another request.");
     return tx.airportTransfer.create({
@@ -156,61 +144,32 @@ export async function passengerAirportTransfers(passengerId: string) {
   }));
 }
 
-export async function quoteAirportTransfer(driverId: string, id: string, amount: unknown) {
-  const quoteKes = integer(amount, "Fare in KSh", 1, 1_000_000);
+export async function acceptAirportTransfer(driverId: string, id: string) {
   await db.$transaction(async tx => {
     const driver = await lockDriver(tx, driverId);
     if (!AIRPORT_SERVICES.includes(driver.rideService)) throw new DriverError(403, "AIRPORT_DISABLED", "Enable airport rides first.");
     const now = new Date();
     const ride = await tx.airportTransfer.findFirst({
-      where: { id, pickupAt: { gt: now }, passengers: { lte: driver.capacity }, OR: [
-        { status: "requested" }, { status: "quoted", quoteExpiresAt: { lte: now } },
-      ] },
+      where: { id, status: "requested", pickupAt: { gt: now }, passengers: { lte: driver.capacity } },
       select: { id: true, pickupAt: true },
     });
     if (!ride) throw stale();
     await ensureSlot(tx, driverId, driver.rideService, ride);
     const result = await tx.airportTransfer.updateMany({
-      where: { id, OR: [{ status: "requested" }, { status: "quoted", quoteExpiresAt: { lte: now } }] },
-      data: {
-        driverId, status: "quoted", quoteKes,
-        quoteExpiresAt: new Date(Math.min(Date.now() + QUOTE_MS, ride.pickupAt.getTime())),
-      },
+      where: { id, status: "requested", pickupAt: { gt: new Date() } },
+      data: { driverId, status: "confirmed" },
     });
     if (!result.count) throw stale();
   });
   return driverAirportTransfers(driverId);
 }
 
-export async function updatePassengerAirportTransfer(passengerId: string, id: string, body: Record<string, unknown>) {
-  if (body.action === "cancel") {
-    const result = await db.airportTransfer.updateMany({
-      where: { id, passengerId, status: { in: ["requested", "quoted", "confirmed"] } },
-      data: { status: "cancelled" },
-    });
-    if (!result.count) throw stale();
-  } else if (body.action === "confirm") {
-    await db.$transaction(async tx => {
-      const transfer = await tx.airportTransfer.findFirst({
-        where: { id, passengerId, status: "quoted" },
-        select: { id: true, driverId: true, pickupAt: true, passengers: true, quoteExpiresAt: true },
-      });
-      if (!transfer?.driverId || !transfer.quoteExpiresAt ||
-          transfer.quoteExpiresAt.toISOString() !== body.quoteExpiresAt) throw stale();
-      const driver = await lockDriver(tx, transfer.driverId);
-      if (!AIRPORT_SERVICES.includes(driver.rideService) || driver.capacity < transfer.passengers) throw stale();
-      await ensureSlot(tx, driver.id, driver.rideService, transfer);
-      const now = new Date();
-      if (transfer.quoteExpiresAt <= now || transfer.pickupAt <= now) throw stale();
-      const result = await tx.airportTransfer.updateMany({
-        where: {
-          id, passengerId, status: "quoted", driverId: driver.id, quoteExpiresAt: transfer.quoteExpiresAt,
-        },
-        data: { status: "confirmed" },
-      });
-      if (!result.count) throw stale();
-    });
-  } else throw new DriverError(400, "INVALID_ACTION", "Choose confirm or cancel.");
+export async function cancelPassengerAirportTransfer(passengerId: string, id: string) {
+  const result = await db.airportTransfer.updateMany({
+    where: { id, passengerId, status: { in: ["requested", "confirmed"] } },
+    data: { status: "cancelled" },
+  });
+  if (!result.count) throw stale();
   return airportPassengerOverview(passengerId);
 }
 
@@ -232,12 +191,12 @@ export async function updateDriverAirportTransfer(driverId: string, id: string, 
       status = "in_progress";
     } else if (action === "complete" && ride.status === "in_progress") {
       status = "completed";
-    } else if (action === "cancel" && ["quoted", "confirmed"].includes(ride.status)) {
-      status = ride.status === "quoted" ? "requested" : "cancelled";
+    } else if (action === "cancel" && ride.status === "confirmed") {
+      status = "cancelled";
     } else throw new DriverError(409, "INVALID_ACTION", "This action is unavailable for the current transfer.");
     const result = await tx.airportTransfer.updateMany({
       where: { id, driverId, status: ride.status },
-      data: status === "requested" ? { status, driverId: null, quoteKes: null, quoteExpiresAt: null } : { status },
+      data: { status },
     });
     if (!result.count) throw stale();
   });

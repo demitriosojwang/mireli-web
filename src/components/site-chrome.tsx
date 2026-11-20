@@ -165,8 +165,9 @@ function AboutSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: b
           <section className="space-y-1.5">
             <h3 className="text-base font-semibold">Payment and cancellations</h3>
             <p className="text-xs text-muted-foreground">
-              SGR rides use checkout and are confirmed when the payment provider confirms payment.
-              For a private airport transfer, accept the driver&apos;s quote on the airport page and pay the agreed fare at pickup.
+              The available payment method, total, and cancellation terms are shown before you confirm.
+              A booking is confirmed only after the payment provider confirms it. Never send payment
+              directly to a driver outside checkout.
             </p>
           </section>
 

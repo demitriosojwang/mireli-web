@@ -16,7 +16,7 @@ export async function airportConflict(tx: Prisma.TransactionClient, driverId: st
         { status: "in_progress" },
         {
           pickupAt: { gt: new Date(start.getTime() - AIRPORT_DURATION_MS), lt: new Date(end.getTime() + AIRPORT_LEAD_MS) },
-          OR: [{ status: "confirmed" }, { status: "quoted", quoteExpiresAt: { gt: new Date() } }],
+          status: "confirmed",
         },
       ],
     },
