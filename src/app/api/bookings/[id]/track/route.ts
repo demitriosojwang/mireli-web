@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { getPassengerSession } from "@/lib/session";
 import { PASSENGER_TERMINUS } from "@/lib/passenger-terminus";
 import { passengerTrackingRoute } from "@/lib/passenger-pickup-eta";
+import { isPublishedStagePin } from "@/lib/stage-pin";
 
 type Params = { params: Promise<{ id: string }> };
 const FIX_MAX_AGE_MS = 60_000;
@@ -44,12 +45,14 @@ export async function GET(req: Request, { params }: Params) {
   }
   const fromTerminus = booking.direction === "FROM_TERMINUS";
   const approaching = booking.status === "confirmed" && !(fromTerminus && trip.status === "departed");
-  const stage = (!fromTerminus || !approaching) && !booking.homePickup && booking.stageId
+  const stageRow = (!fromTerminus || !approaching) && !booking.homePickup && booking.stageId
       ? await db.routeStage.findFirst({
           where: { id: booking.stageId, routeId: booking.routeId },
-          select: { name: true, lat: true, lng: true },
+          select: { id: true, name: true, lat: true, lng: true },
         })
       : null;
+  const stage = stageRow && isPublishedStagePin(stageRow)
+    ? { name: stageRow.name, lat: stageRow.lat, lng: stageRow.lng } : null;
   const terminus = { name: PASSENGER_TERMINUS.name, lat: PASSENGER_TERMINUS.lat, lng: PASSENGER_TERMINUS.lng };
   const pickup = fromTerminus ? terminus : stage;
   const target = approaching ? pickup : fromTerminus ? stage : terminus;

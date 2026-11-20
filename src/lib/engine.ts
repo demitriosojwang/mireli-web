@@ -4,6 +4,7 @@ import { getConfig, onTripCompleted, runReconciliationSweep, isPayoutBatchDue, r
 import { audit } from "@/lib/audit";
 import { nairobiDate, nairobiDayRange, nairobiEventAt, nairobiTrainArrivalAt, nairobiWeekday } from "@/lib/nairobi-time";
 import { isLocalDemoEnabled } from "@/lib/runtime-mode";
+import { airportConflict, SGR_SERVICES } from "@/lib/ride-service";
 
 /**
  * The ops engine — everything here runs automatically so the admin's role
@@ -70,7 +71,7 @@ async function createScheduledTrip(params: {
 
       await tx.$queryRaw`SELECT "id" FROM "Driver" WHERE "id" = ${driverId} FOR UPDATE`;
       const driver = await tx.driver.findUnique({
-        where: { id: driverId },
+        where: { id: driverId, rideService: { in: SGR_SERVICES } },
         include: { application: { include: { documents: { where: { state: { not: "replaced" } } } } } },
       });
       if (!driver || !(isLocalDemoEnabled() || evaluateDriverApplication(driver.application, driver.status).eligible)) {
@@ -89,6 +90,7 @@ async function createScheduledTrip(params: {
         trip.departureAt.getTime() + trip.route.durationMinutes * 60 * 1000 > params.departureAt.getTime(),
       );
       if (overlaps) return "busy" as const;
+      if (await airportConflict(tx, driverId, params.departureAt, departureEnd)) return "busy" as const;
 
       await tx.trip.create({
         data: {
@@ -118,7 +120,7 @@ async function createScheduledTrip(params: {
 export async function ensureTrips(): Promise<number> {
   const cfg = await getConfig();
   const routes = await db.route.findMany({ where: { active: true } });
-  const candidates = await db.driver.findMany({ where: { status: "active" }, orderBy: { createdAt: "asc" },include:{application:{include:{documents:{where:{state:{not:"replaced"}}}}}} });
+  const candidates = await db.driver.findMany({ where: { status: "active", rideService: { in: SGR_SERVICES } }, orderBy: { createdAt: "asc" },include:{application:{include:{documents:{where:{state:{not:"replaced"}}}}}} });
   const drivers=candidates.filter(d=>isLocalDemoEnabled() || evaluateDriverApplication(d.application,d.status).eligible);
   if (!drivers.length || !routes.length) return 0;
 
@@ -300,6 +302,7 @@ export async function allocateBooking(params: {
     // instead of trusting bookedSeats: older cancellations did not decrement
     // that cached counter.
     const reservation = await db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "Driver" WHERE "id" = ${t.driverId} FOR UPDATE`;
       await tx.$queryRaw`SELECT "id" FROM "Trip" WHERE "id" = ${t.id} FOR UPDATE`;
       if (t.trainId) {
         await tx.$queryRaw`SELECT "id" FROM "Train" WHERE "id" = ${t.trainId} FOR SHARE`;
@@ -307,6 +310,8 @@ export async function allocateBooking(params: {
       const current = await tx.trip.findUnique({
         where: { id: t.id },
         include: {
+          driver: { select: { rideService: true } },
+          route: { select: { durationMinutes: true } },
           train: { select: { active: true } },
           bookings: {
             where: { status: { in: ["awaiting_payment", "confirmed", "boarded"] } },
@@ -318,7 +323,11 @@ export async function allocateBooking(params: {
           },
         },
       });
-      if (!current || !current.train?.active || !["scheduled", "locked"].includes(current.status)) return null;
+      if (!current || current.driverId !== t.driverId || !current.train?.active || !["scheduled", "locked"].includes(current.status) ||
+          (current.driver && !SGR_SERVICES.includes(current.driver.rideService))) return null;
+      if (t.driverId && await airportConflict(
+        tx, t.driverId, t.departureAt, new Date(t.departureAt.getTime() + current.route.durationMinutes * 60_000),
+      )) return null;
 
       const activeBookings = [...current.bookings, ...current.reservedBookings];
       const hasCharter = activeBookings.some((booking) => booking.isCharter);
@@ -355,7 +364,7 @@ export async function allocateBooking(params: {
   // Lock each candidate driver while checking the day manifest so concurrent
   // requests cannot assign one driver to two extra departures.
   const freeCandidates=await db.driver.findMany({
-    where:{status:"active"},
+    where:{status:"active",rideService:{in:SGR_SERVICES}},
     orderBy:{createdAt:"asc"},
     include:{application:{include:{documents:{where:{state:{not:"replaced"}}}}}}
   });
@@ -367,6 +376,8 @@ export async function allocateBooking(params: {
       if (!params.charter && params.seats > driver.capacity) continue;
       const extraTripId = await db.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT "id" FROM "Driver" WHERE "id" = ${driver.id} FOR UPDATE`;
+        const currentDriver = await tx.driver.findUnique({ where: { id: driver.id }, select: { rideService: true } });
+        if (!currentDriver || !SGR_SERVICES.includes(currentDriver.rideService)) return null;
         const alreadyAssigned = await tx.trip.findFirst({
           where: {
             driverId: driver.id,
@@ -376,6 +387,8 @@ export async function allocateBooking(params: {
           select: { id: true },
         });
         if (alreadyAssigned) return null;
+        const route = await tx.route.findUniqueOrThrow({ where: { id: params.routeId }, select: { durationMinutes: true } });
+        if (await airportConflict(tx, driver.id, dep, new Date(dep.getTime() + route.durationMinutes * 60_000))) return null;
         const trip = await tx.trip.create({
           data: {
             routeId: params.routeId,

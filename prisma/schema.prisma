@@ -22,6 +22,7 @@ model Passenger {
   gender      String?
   createdAt   DateTime @default(now())
   bookings    Booking[]
+  airportTransfers AirportTransfer[]
   credits     Credit[]
 }
 
@@ -38,10 +39,12 @@ model Driver {
   plate       String
   cabType     String
   capacity    Int
+  rideService String         @default("sgr")
   status      String         @default("active") // active | inactive | suspended
   rating      Float          @default(4.8)
   createdAt   DateTime       @default(now())
   trips       Trip[]
+  airportTransfers AirportTransfer[]
   positions   DriverPosition[]
   payouts     PayoutRecord[]
   sessions    DriverSession[]
@@ -51,6 +54,31 @@ model Driver {
   tripActions DriverTripAction[]
   payoutDestination DriverPayoutDestination?
   profilePhoto DriverProfilePhoto?
+}
+
+model AirportTransfer {
+  id              String    @id @default(cuid())
+  passengerId     String
+  passenger       Passenger @relation(fields: [passengerId], references: [id])
+  driverId        String?
+  driver          Driver?   @relation(fields: [driverId], references: [id])
+  requestKey      String
+  airport         String
+  direction       String
+  address         String
+  contactPhone    String
+  pickupAt        DateTime
+  passengers      Int
+  flight          String?
+  luggage         String?
+  status          String    @default("requested")
+  quoteKes        Int?
+  quoteExpiresAt  DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  @@unique([passengerId, requestKey])
+  @@index([status, pickupAt])
+  @@index([driverId, status, pickupAt])
 }
 
 model DriverProfilePhoto {

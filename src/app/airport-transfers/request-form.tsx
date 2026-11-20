@@ -1,29 +1,89 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { MessageCircle } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { nairobiToday } from "@/lib/nairobi-time";
-import { MIRELI_SUPPORT_WHATSAPP_NUMBER } from "@/lib/support";
+import { api, useMe } from "@/lib/client";
+import { fmtDateTime, ksh } from "@/lib/format";
 
 const AIRPORTS = {
   mba: "Moi International Airport (MBA), Mombasa",
   uka: "Ukunda Airstrip (UKA), Diani",
 };
 
+type AirportRequest = {
+  id: string;
+  airport: keyof typeof AIRPORTS;
+  direction: "from" | "to";
+  address: string;
+  pickupAt: string;
+  status: string;
+  quoteKes: number | null;
+  quoteExpiresAt: string | null;
+  driver: { name: string; plate: string; phone: string | null } | null;
+};
+
+const REQUEST_STATUS: Record<string, string> = {
+  requested: "Awaiting a driver quote",
+  quoted: "Quote ready",
+  confirmed: "Confirmed",
+  in_progress: "On the road",
+  completed: "Completed",
+  cancelled: "Cancelled",
+};
+
 export default function AirportRequestForm() {
+  const { me, loading } = useMe();
+  const passengerId = me?.passenger && !me.passenger.isGuest ? me.passenger.id : undefined;
   const [direction, setDirection] = useState<"from" | "to">("from");
   const [error, setError] = useState("");
+  const [statusError, setStatusError] = useState("");
+  const [requests, setRequests] = useState<AirportRequest[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [hasAirportDrivers, setHasAirportDrivers] = useState<boolean | null>(null);
+  const requestKey = useRef<string | null>(null);
+  const requestRevision = useRef(0);
   const fromAirport = direction === "from";
 
-  function requestTransfer(event: FormEvent<HTMLFormElement>) {
+  const refreshRequests = useCallback(async (signal?: AbortSignal) => {
+    const revision = requestRevision.current;
+    const { requests, hasAirportDrivers } = await api<{ requests: AirportRequest[]; hasAirportDrivers: boolean }>(
+      "/api/airport-transfers", { signal, timeoutMs: 8_000 },
+    );
+    if (!signal?.aborted && revision === requestRevision.current) {
+      setRequests(requests);
+      setHasAirportDrivers(hasAirportDrivers);
+      setStatusError("");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!passengerId) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        if (!document.hidden) await refreshRequests(controller.signal);
+      } catch {
+        if (!controller.signal.aborted) setStatusError("Could not refresh transfers. Retrying…");
+      } finally {
+        if (!controller.signal.aborted) timer = setTimeout(poll, 15_000);
+      }
+    };
+    void poll();
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [passengerId, refreshRequests]);
+
+  async function requestTransfer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving || !passengerId) return;
     const form = new FormData(event.currentTarget);
-    const airport = AIRPORTS[String(form.get("airport")) as keyof typeof AIRPORTS];
+    const airport = String(form.get("airport"));
     const address = String(form.get("address") ?? "").trim();
     const date = String(form.get("date") ?? "");
     const time = String(form.get("time") ?? "");
-    if (!airport || !address) {
+    if (!(airport in AIRPORTS) || !address) {
       setError("Choose an airport and enter a hotel or address.");
       return;
     }
@@ -33,26 +93,81 @@ export default function AirportRequestForm() {
       return;
     }
     setError("");
-    const flight = String(form.get("flight") ?? "").trim();
-    const bags = String(form.get("bags") ?? "").trim();
-    const message = [
-      "Hello Mi-Reli, I’d like to request a private airport transfer.",
-      `Pickup: ${fromAirport ? airport : address}`,
-      `Drop-off: ${fromAirport ? address : airport}`,
-      `Pickup date and time: ${date} at ${time} EAT`,
-      `Passengers: ${form.get("passengers")}`,
-      ...(flight ? [`Flight: ${flight}`] : []),
-      ...(bags ? [`Luggage: ${bags}`] : []),
-      "Please confirm availability and the total fare.",
-    ].join("\n");
-    window.location.assign(`https://wa.me/${MIRELI_SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`);
+    setSaving(true);
+    try {
+      requestKey.current ??= crypto.randomUUID();
+      const { transfer } = await api<{ transfer: AirportRequest }>("/api/airport-transfers", {
+        method: "POST", timeoutMs: 10_000,
+        body: {
+          requestKey: requestKey.current, airport, direction, address, date, time,
+          passengers: Number(form.get("passengers")), contactPhone: String(form.get("contactPhone") ?? ""),
+          flight: String(form.get("flight") ?? "").trim(), luggage: String(form.get("bags") ?? "").trim(),
+        },
+      });
+      requestKey.current = null;
+      requestRevision.current++;
+      setRequests(previous => [transfer, ...previous.filter(item => item.id !== transfer.id)]);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not send your transfer request.");
+    } finally {
+      setSaving(false);
+    }
   }
 
+  async function updateRequest(request: AirportRequest, action: "confirm" | "cancel") {
+    setSaving(true);
+    setStatusError("");
+    try {
+      const { requests, hasAirportDrivers } = await api<{ requests: AirportRequest[]; hasAirportDrivers: boolean }>("/api/airport-transfers", {
+        method: "PUT", timeoutMs: 10_000,
+        body: { id: request.id, action, quoteExpiresAt: request.quoteExpiresAt },
+      });
+      requestRevision.current++;
+      setRequests(requests);
+      setHasAirportDrivers(hasAirportDrivers);
+    } catch (error) {
+      setStatusError(error instanceof Error ? error.message : "Could not update your transfer.");
+    } finally {
+      setSaving(false);
+    }
+  }
   const input = "mt-1 block h-11 min-w-0 w-full rounded-lg border border-input bg-background px-3 text-base";
 
   return (
+    <div className="grid min-w-0 gap-4">
+    {passengerId && (statusError || requests.length > 0) && (
+      <section className="grid gap-3 rounded-3xl border bg-card p-5">
+        <h2 className="text-xl font-semibold">Your airport transfers</h2>
+        {statusError && <p role="status" className="text-sm text-destructive">{statusError}</p>}
+        {requests.map(request => {
+          const expired = request.status === "quoted" && Date.parse(request.quoteExpiresAt ?? "") <= Date.now();
+          const missed = ["requested", "quoted"].includes(request.status) && Date.parse(request.pickupAt) <= Date.now();
+          const canConfirm = request.status === "quoted" && !expired && !missed;
+          return (
+            <article key={request.id} className="grid gap-2 rounded-xl border p-3 text-sm">
+              <h3 className="font-semibold">{request.direction === "from" ? "From " : "To "}{AIRPORTS[request.airport]}</h3>
+              <p>{request.address} · {fmtDateTime(request.pickupAt)}</p>
+              <p role="status" className="text-muted-foreground">{missed ? "Pickup time passed" : expired ? "Awaiting a new quote" : REQUEST_STATUS[request.status]}</p>
+              {(canConfirm || ["confirmed", "in_progress", "completed"].includes(request.status)) && request.quoteKes !== null &&
+                <p className="font-medium">{ksh(request.quoteKes)} total · pay at pickup</p>}
+              {request.driver && <p>{request.driver.name} · {request.driver.plate}
+                {request.driver.phone && <> · <a className="underline" href={`tel:${request.driver.phone}`}>Call driver</a></>}
+              </p>}
+              {["requested", "quoted", "confirmed"].includes(request.status) && (
+                <div className="flex flex-wrap gap-2">
+                  {canConfirm && <Button disabled={saving} onClick={() => void updateRequest(request, "confirm")}>Accept fare and confirm</Button>}
+                  <Button variant="outline" disabled={saving} onClick={() => void updateRequest(request, "cancel")}>Cancel transfer</Button>
+                </div>
+              )}
+            </article>
+          );
+        })}
+      </section>
+    )}
     <form onSubmit={requestTransfer} onChange={() => { if (error) setError(""); }} className="grid min-w-0 gap-4 rounded-3xl border bg-card p-5 sm:p-6">
       <h2 className="text-xl font-semibold">Request a transfer</h2>
+      {passengerId && hasAirportDrivers === false &&
+        <p role="status" className="text-sm text-muted-foreground">Airport requests open when an approved driver enables airport rides.</p>}
       <fieldset className="grid grid-cols-2 gap-2">
         <legend className="mb-1 text-sm font-medium">Direction</legend>
         {(["from", "to"] as const).map(value => (
@@ -80,11 +195,13 @@ export default function AirportRequestForm() {
         <label className="min-w-0 text-sm font-medium">Flight no. (optional)<input name="flight" maxLength={20} placeholder="e.g. KQ 612" className={input} /></label>
       </div>
       <label className="text-sm font-medium">Luggage (optional)<input name="bags" maxLength={100} placeholder="e.g. 2 large suitcases" className={input} /></label>
+      <label className="text-sm font-medium">Contact number<input name="contactPhone" type="tel" required maxLength={30} className={input} autoComplete="tel" /></label>
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-      <Button type="submit" className="min-h-11 w-full bg-[#176548] text-white hover:bg-[#124c38]">
-        <MessageCircle aria-hidden="true" className="size-4" /> Continue on WhatsApp
-      </Button>
-      <p className="text-sm leading-relaxed text-muted-foreground">Send the prefilled message so Mi-Reli can confirm your fare and cab availability.</p>
+      {loading || passengerId
+        ? <Button type="submit" disabled={loading || saving || hasAirportDrivers === false} className="min-h-11 w-full">{saving ? "Sending…" : "Request a driver quote"}</Button>
+        : <Button asChild><Link href="/login?next=%2Fairport-transfers">Sign in to request a transfer</Link></Button>}
+      <p className="text-sm leading-relaxed text-muted-foreground">An approved airport driver can quote your ride. Review and confirm it here, then pay the agreed fare at pickup.</p>
     </form>
+    </div>
   );
 }

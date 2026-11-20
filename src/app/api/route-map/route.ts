@@ -1,6 +1,7 @@
 import { PASSENGER_TERMINUS } from "@/lib/passenger-terminus";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { isPublishedStagePin } from "@/lib/stage-pin";
 
 const MAX_STOPS = 240;
 
@@ -32,7 +33,7 @@ export async function GET() {
 
     return NextResponse.json({
       origin: PASSENGER_TERMINUS,
-      stops: stops.map((stop) => ({
+      stops: stops.filter(isPublishedStagePin).map((stop) => ({
         id: stop.id,
         name: stop.name,
         lat: stop.lat,
