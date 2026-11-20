@@ -7,7 +7,7 @@ vi.mock("@/lib/db", () => ({
   db: { booking: { findFirst: mocks.booking }, routeStage: { findFirst: mocks.stage } },
 }));
 vi.mock("@/lib/session", () => ({ getPassengerSession: mocks.session }));
-vi.mock("@/lib/passenger-pickup-eta", () => ({ passengerPickupEta: mocks.eta }));
+vi.mock("@/lib/passenger-pickup-eta", () => ({ passengerTrackingRoute: mocks.eta }));
 
 import { GET } from "@/app/api/bookings/[id]/track/route";
 import { PASSENGER_TERMINUS } from "@/lib/passenger-terminus";
@@ -28,7 +28,7 @@ const booking = (override = {}) => ({
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.session.mockResolvedValue({ id: "passenger-1" });
-  mocks.eta.mockResolvedValue(190);
+  mocks.eta.mockResolvedValue({ durationSeconds: 190, coordinates: [[39.66, -4.05], [39.67, -4.04]] });
 });
 
 describe("booking live tracking", () => {
@@ -59,6 +59,7 @@ describe("booking live tracking", () => {
     expect(mocks.eta).not.toHaveBeenCalled();
     const body = await (await request(true)).json();
     expect(body.etaSeconds).toBe(190);
+    expect(body.route).toEqual([[39.66, -4.05], [39.67, -4.04]]);
     expect(JSON.stringify(body)).not.toMatch(/driver-1|trip-1/);
     expect(mocks.stage).not.toHaveBeenCalled();
   });
@@ -98,9 +99,21 @@ describe("booking live tracking", () => {
     expect(await (await request()).json()).toMatchObject({ phase: "boarding" });
   });
 
-  it("stops pickup estimates for passengers already on board", async () => {
+  it("switches to the booked drop-off and stops pickup estimates when boarded", async () => {
     mocks.booking.mockResolvedValue(booking({ status: "boarded", trip: { ...trip(), status: "departed" } }));
-    expect(await (await request(true)).json()).toMatchObject({ phase: "on_the_road", cab: { lat: -4.05 }, etaSeconds: null });
+    const destination = { name: "Nyali", lat: -4.03, lng: 39.69 };
+    mocks.stage.mockResolvedValue(destination);
+    expect(await (await request(true)).json()).toMatchObject({
+      phase: "on_the_road", cab: { lat: -4.05 }, target: destination,
+      etaSeconds: null, route: [[39.66, -4.05], [39.67, -4.04]],
+    });
+    expect(mocks.eta).toHaveBeenCalledWith("trip-1", expect.objectContaining({ lat: -4.05 }), destination);
+  });
+
+  it("does not route to an unverified home drop-off", async () => {
+    mocks.booking.mockResolvedValue(booking({ homePickup: true, status: "boarded", trip: { ...trip(), status: "departed" } }));
+    expect(await (await request(true)).json()).toMatchObject({ target: null, route: null });
+    expect(mocks.stage).not.toHaveBeenCalled();
     expect(mocks.eta).not.toHaveBeenCalled();
   });
 

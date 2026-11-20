@@ -13,6 +13,7 @@ import {driverServiceStatus} from "@/lib/driver/readiness";
 import {reportDriverPosition} from "@/lib/driver/position";
 import {enforceRouteLimit, requestDestinationRoute, requestDriverRoute} from "@/lib/driver/navigation";
 import {amazonLocationConfigured, satelliteTile, searchDriverDestinations} from "@/lib/driver/amazon-location";
+import {acceptAirportTransfer, driverAirportTransfers, setDriverRideService, updateDriverAirportTransfer} from "@/lib/airport-transfers";
 
 import { driverProfilePhoto, maxProfilePhotoBytes, removeDriverProfilePhoto, saveDriverProfilePhoto } from "@/lib/driver/profile-photo";
 
@@ -59,6 +60,13 @@ async function handler(req:Request,context:Context) {
     else if(path==="earnings" && req.method==="GET") result=await driverEarnings(driverId,new URL(req.url));
     else if(path==="payout-destination" && req.method==="POST")result=await requestPayoutDestination(driverId,await json());
     else if(path==="trips" && req.method==="GET")result=await driverTrips(driverId);
+    else if(path==="airport-transfers" && req.method==="GET")result=await driverAirportTransfers(driverId);
+    else if(path==="ride-service" && req.method==="PUT")result=await setDriverRideService(driverId,(await json()).rideService);
+    else if(/^airport-transfers\/[^/]+\/commands$/.test(path) && req.method==="POST"){
+      const id = path.split("/")[1];
+      const { action } = await json();
+      result = action === "accept" ? await acceptAirportTransfer(driverId, id) : await updateDriverAirportTransfer(driverId, id, action);
+    }
     else if(path==="position" && req.method==="POST")result=await reportDriverPosition(driverId,await json());
     else if(path==="navigation/route" && req.method==="POST")result=await requestDriverRoute(driverId,await json());
     else if(path==="navigation/search" && req.method==="POST" && amazonLocationConfigured()) {

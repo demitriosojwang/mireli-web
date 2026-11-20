@@ -23,7 +23,7 @@ describe("public crawler metadata", () => {
     expect(robots()).toEqual({ rules: { userAgent: "*", disallow: "/" } });
   });
 
-  it("publishes the production homepage and public legal pages but excludes private workflows", async () => {
+  it("publishes public service and legal pages but excludes private workflows", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("VERCEL", "");
     vi.stubEnv("MIRELI_DEMO_MODE", "false");
@@ -42,6 +42,11 @@ describe("public crawler metadata", () => {
         lastModified: expect.any(Date),
         changeFrequency: "weekly",
         priority: 1,
+      },
+      {
+        url: "https://mirelisgr.duckdns.org/airport-transfers",
+        changeFrequency: "monthly",
+        priority: 0.8,
       },
       {
         url: "https://mirelisgr.duckdns.org/terms",

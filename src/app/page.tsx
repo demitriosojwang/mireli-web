@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence, useAnimationControls } from "framer-motion";
 import { DURATION, EASE_IN_OUT, EASE_OUT, KNOB_STRETCH, LAYOUT_ID, PRESS_SCALE, STAGGER_MS } from "@/lib/motion";
@@ -146,6 +147,7 @@ export default function Home() {
   const [loadedQuery, setLoadedQuery] = useState<string | null>(null);
   const [tripRefreshKey, setTripRefreshKey] = useState(0);
   const [pointPickerOpen, setPointPickerOpen] = useState(false);
+  const pointPickerTrigger = useRef<HTMLButtonElement>(null);
   const [pointSearch, setPointSearch] = useState("");
   const [pointMatches, setPointMatches] = useState<PointSearchResult[]>([]);
   const [pointSearchStatus, setPointSearchStatus] = useState<CatalogueStatus | "idle">("idle");
@@ -179,11 +181,10 @@ export default function Home() {
   }, [pickupMode, direction, today, timetable]);
   const trainKey = pickupMode === "now" ? nextTrainKey : scheduledTrainKey;
 
-  // Availability is route-specific and is fetched only after a passenger
-  // chooses a stop. This keeps the initial booking form free of broad trip
-  // queries and lets the stop choice drive the next compact step.
+  // Load the chosen train's departures once so we can show other served routes
+  // if the selected stop has no cab. Checkout still requires a matching route.
   const queryKey = selectedPoint && trainKey
-    ? `${direction}|${date}|${selectedPoint.route.id}|${trainKey}`
+    ? `${direction}|${date}|${trainKey}`
     : null;
   const loading = Boolean(queryKey) && (isRefreshing || loadedQuery !== queryKey);
 
@@ -366,12 +367,12 @@ export default function Home() {
   }, [isAuthed]);
 
   useEffect(() => {
-    if (!splashReady || showSplash || !selectedPoint || !trainKey || !queryKey) return;
+    if (!splashReady || showSplash || !trainKey || !queryKey) return;
     const requestedQueryKey = queryKey;
     const controller = new AbortController();
     let active = true;
     api<{ trips: BookableTrip[]; hasEligibleDrivers: boolean }>(
-      `/api/trips?date=${date}&direction=${direction}&routeId=${encodeURIComponent(selectedPoint.route.id)}&trainId=${encodeURIComponent(trainKey)}`,
+      `/api/trips?date=${date}&direction=${direction}&trainId=${encodeURIComponent(trainKey)}`,
       { signal: controller.signal, timeoutMs: TRIP_AVAILABILITY_TIMEOUT_MS },
     )
       .then((res) => {
@@ -394,7 +395,7 @@ export default function Home() {
       active = false;
       controller.abort();
     };
-  }, [splashReady, showSplash, direction, date, selectedPoint?.route.id, trainKey, queryKey, tripRefreshKey]);
+  }, [splashReady, showSplash, direction, date, trainKey, queryKey, tripRefreshKey]);
 
   async function openBooking(trip: BookableTrip) {
     if (!selectedPoint || !trainKey || trip.train?.id !== trainKey || selectedPoint.route.id !== trip.routeId || checkingPayment) return;
@@ -468,13 +469,11 @@ export default function Home() {
           time: mtmTime,
           name: t.name,
           label: direction === "FROM_TERMINUS" ? "Arrives MTM" : "Departs MTM",
-          gone: !!selectedPoint && !!trainKey && loadedQuery === queryKey && trips !== null && hasEligibleDrivers === true && !(trips || []).some((x) => x.train?.id === key),
         };
       })
       .sort((a, b) => a.time.localeCompare(b.time));
-  }, [timetable, direction, date, trips, hasEligibleDrivers, selectedPoint, loadedQuery, queryKey, trainKey]);
+  }, [timetable, direction, date]);
 
-  const selectedTrainGone = trainKey ? (trainOptions.find((o) => o.key === trainKey)?.gone ?? false) : false;
   const selectedTrain = trainKey ? trainOptions.find((option) => option.key === trainKey) ?? null : null;
   const journeyStepDone = Boolean(selectedPoint && journeyCollapsed);
 
@@ -496,15 +495,16 @@ export default function Home() {
   }, [pointMatches]);
 
   // Trips after train + point filters
-  const visibleTrips = useMemo(() => {
-    if (!selectedPoint || !trainKey) return [];
-    let list = (trips || []).filter((trip) =>
-      trip.bookable && (charter ? trip.seatsLeft === trip.capacity : trip.seatsLeft > 0),
-    );
-    list = list.filter((t) => t.train?.id === trainKey);
-    if (selectedPoint) list = list.filter((t) => t.routeId === selectedPoint.route.id);
-    return list;
-  }, [trips, trainKey, selectedPoint, charter]);
+  const bookableTrips = useMemo(() => (trips ?? []).filter((trip) =>
+    trip.train?.id === trainKey && trip.bookable &&
+    (charter ? trip.seatsLeft === trip.capacity : trip.seatsLeft > 0),
+  ), [trips, trainKey, charter]);
+  const visibleTrips = useMemo(() => queryKey && loadedQuery === queryKey
+    ? bookableTrips.filter(trip => trip.routeId === selectedPoint?.route.id)
+    : [], [bookableTrips, loadedQuery, queryKey, selectedPoint]);
+  const alternativeRoutes = Array.from(new Map(bookableTrips
+    .filter(trip => trip.routeId !== selectedPoint?.route.id)
+    .map(trip => [trip.routeId, trip.routeName])).entries());
 
   // How many seats can actually be booked on the cabs currently listed?
   const seatCap = useMemo(() => {
@@ -817,7 +817,6 @@ export default function Home() {
                     time={t.time}
                     label={t.label}
                     name={t.name}
-                    gone={t.gone}
                     active={trainKey === t.key}
                     onClick={() => {
                       if (pickupMode === "now" && t.key !== trainKey) {
@@ -872,6 +871,7 @@ export default function Home() {
                   >
                     <PopoverTrigger asChild>
                       <Button
+                        ref={pointPickerTrigger}
                         id="booking-point"
                         type="button"
                         variant="outline"
@@ -950,9 +950,6 @@ export default function Home() {
                                   onSelect={() => {
                                     setBookingStartError(null);
                                     setHomePickup(false);
-                                    setTrips(null);
-                                    setTripsStatus("loading");
-                                    setLoadedQuery(null);
                                     setSelectedPoint({
                                       point: {
                                         id: point.id,
@@ -1087,7 +1084,7 @@ export default function Home() {
                   {!selectedPoint
                     ? "Choose a point"
                     : charter && !farePreview.hasCharterCab
-                      ? "No cabs available"
+                      ? "Choose a bookable cab"
                     : (charter && visibleTrips.some((trip) => trip.capacity !== visibleTrips[0]?.capacity)) || farePreview.hasVariableSharedFare
                         ? `From ${ksh(farePreview.total)}`
                         : ksh(farePreview.total)}
@@ -1158,13 +1155,31 @@ export default function Home() {
                   <CardContent className="py-5 text-center text-sm text-muted-foreground">
                     {!trainKey
                       ? "Choose a train to see cabs for your journey."
-                      : selectedTrainGone
-                      ? "No cab is available for this train on the selected day. Choose another train or date."
                       : hasEligibleDrivers === false
                         ? "No eligible drivers are available to serve bookings right now."
                         : !selectedPoint
                         ? `Choose a ${pointLabelCap.toLowerCase()} point to see cabs serving that stop.`
-                        : "No available cabs serve this point for that train. Try another point or date."}
+                        : alternativeRoutes.length
+                          ? "Cabs for this train serve other routes. Choose a stop on one of those routes if it works for you."
+                          : charter
+                            ? "No whole cab is available for this train. Try a shared ride, another train or another date."
+                            : "No bookable cab serves this stop for the selected train. Try another train or date."}
+                    {trainKey && alternativeRoutes.length > 0 && (
+                      <div className="mt-3 flex flex-wrap justify-center gap-2">
+                        {alternativeRoutes.map(([routeId, routeName]) => (
+                          <Button key={routeId} type="button" size="sm" variant="outline" onClick={() => {
+                            // Restore the visible popover trigger before opening it.
+                            flushSync(() => setJourneyCollapsed(false));
+                            const trigger = pointPickerTrigger.current;
+                            trigger?.focus();
+                            if (trigger?.getAttribute("aria-expanded") === "false") trigger.click();
+                            setPointSearch(routeName.slice(0, MAX_STAGE_SEARCH_LENGTH));
+                          }}>
+                            Stops on {routeName.replace(/^Mombasa Terminus\s*[↔–—-]\s*/, "")}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               )}

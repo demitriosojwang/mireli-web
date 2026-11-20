@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Anchor, Info, User, Wallet } from "lucide-react";
+import { Anchor, Info, Plane, User, Wallet } from "lucide-react";
 import { useMe } from "@/lib/client";
 import { cn } from "@/lib/utils";
 
@@ -80,6 +80,7 @@ export function SiteNav() {
 
   const items = [
     { href: "/", label: "Book", icon: Anchor, active: pathname === "/" },
+    { href: "/airport-transfers", label: "Airports", icon: Plane, active: pathname === "/airport-transfers" },
     { href: "/bookings", label: "My rides", icon: User, active: pathname === "/bookings" },
     {
       href: "/credits",
@@ -91,13 +92,14 @@ export function SiteNav() {
 
   return (
     <div className="mx-auto w-full max-w-md px-4 pb-2.5 sm:max-w-2xl sm:px-6 lg:max-w-4xl xl:max-w-5xl">
-      <div className="grid grid-cols-3 gap-1 rounded-2xl bg-secondary/50 p-1 backdrop-blur-sm">
+      <nav aria-label="Passenger" className="grid grid-cols-4 gap-1 rounded-2xl bg-secondary/50 p-1 backdrop-blur-sm">
         {items.map((item) => (
           <Link
             key={item.href}
             href={item.href}
+            aria-current={item.active ? "page" : undefined}
             className={cn(
-              "flex items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-semibold transition-all duration-200",
+              "flex flex-col items-center justify-center gap-1 rounded-xl px-0.5 py-2 text-center text-[11px] font-semibold transition-all duration-200 sm:flex-row sm:gap-1.5 sm:text-xs",
               item.active
                 ? "mireli-pill-active"
                 : "text-muted-foreground hover:bg-accent/10 hover:text-foreground",
@@ -106,19 +108,19 @@ export function SiteNav() {
             <item.icon className="h-4 w-4" /> {item.label}
           </Link>
         ))}
-      </div>
+      </nav>
     </div>
   );
 }
 
-export function SiteFooter() {
+export function SiteFooter({ airportTransfers = false }: { airportTransfers?: boolean } = {}) {
   return (
     <footer
       className="mt-auto border-t bg-background/95 backdrop-blur"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       <div className="mx-auto w-full max-w-md px-4 py-2 text-center text-[10px] text-muted-foreground sm:max-w-2xl sm:px-6 lg:max-w-4xl xl:max-w-5xl">
-        Mi-Reli · Mombasa Terminus · availability is confirmed before checkout
+        {airportTransfers ? "Mi-Reli · Mombasa & Diani" : "Mi-Reli · Mombasa Terminus · availability is confirmed before checkout"}
         <div className="mt-1 flex items-center justify-center gap-3">
           <a href="mailto:mirelisgr001@gmail.com" className="underline underline-offset-2">mirelisgr001@gmail.com</a>
           <Link href="/terms" className="underline underline-offset-2">Terms</Link>
