@@ -20,14 +20,23 @@ type TrackData = {
   etaSeconds: number | null;
   canEstimatePickup: boolean;
   pickup: { name: string; lat: number; lng: number } | null;
+  target: { name: string; lat: number; lng: number } | null;
+  route: number[][] | null;
   cab: {
     lat: number;
     lng: number;
+    bearingDeg: number | null;
     recordedAt: string;
   } | null;
 };
 
 const POLL_MS = 5_000;
+const ROUTE_SOURCE = "passenger-trip-route";
+
+function routeKey(track: TrackData) {
+  const target = track.target;
+  return track.cab && target ? `${target.lng}:${target.lat}:${track.canEstimatePickup}` : null;
+}
 
 /**
  * Bolt-style live tracking for one booking. The map is the same MapLibre
@@ -45,15 +54,16 @@ function TrackingPage({ id, sessionId, meLoading }: { id: string; sessionId?: st
   const [track, setTrack] = useState<TrackData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [eta, setEta] = useState<number | null>(null);
+  const [route, setRoute] = useState<{ key: string; coordinates: TrackData["route"]; eta: number | null } | null>(null);
 
   useEffect(() => {
     if (!sessionId || !id) return;
     const controller = new AbortController();
     const endpoint = "/api/bookings/" + encodeURIComponent(id) + "/track";
     let timer: number | undefined;
-    let etaTimer = 0;
-    let etaRequest = 0;
+    let routeTimer = 0;
+    let routeRequest = 0;
+    let lastRouteKey: string | null = null;
     let pending: AbortController | undefined;
     const poll = async () => {
       let timeout: number | undefined;
@@ -79,23 +89,30 @@ function TrackingPage({ id, sessionId, meLoading }: { id: string; sessionId?: st
           controller.abort();
           return;
         }
-        if (!data.canEstimatePickup) {
-          etaRequest++;
-          etaTimer = 0;
-          setEta(null);
-        } else if (Date.now() >= etaTimer) {
-          etaTimer = Date.now() + 45_000;
-          const requestNumber = ++etaRequest;
+        const key = routeKey(data);
+        if (key !== lastRouteKey) {
+          lastRouteKey = key;
+          routeRequest++;
+          routeTimer = 0;
+          setRoute(null);
+        }
+        if (key && Date.now() >= routeTimer) {
+          routeTimer = Date.now() + 45_000;
+          const requestNumber = ++routeRequest;
           void api<TrackData>(endpoint + "?eta=1", { signal: controller.signal, timeoutMs: 14_000 })
-            .then(estimate => { if (!controller.signal.aborted && requestNumber === etaRequest) setEta(estimate.etaSeconds); })
-            .catch(() => { if (!controller.signal.aborted && requestNumber === etaRequest) setEta(null); });
+            .then(estimate => {
+              if (!controller.signal.aborted && requestNumber === routeRequest) {
+                setRoute(routeKey(estimate) === key ? { key, coordinates: estimate.route, eta: estimate.etaSeconds } : null);
+              }
+            })
+            .catch(() => { if (!controller.signal.aborted && requestNumber === routeRequest) setRoute(null); });
         }
       } catch {
         if (!controller.signal.aborted) {
-          etaRequest++;
-          etaTimer = 0;
+          routeRequest++;
+          routeTimer = 0;
           setError("Could not refresh the cab’s location. Retrying…");
-          setEta(null);
+          setRoute(null);
         }
       } finally {
         if (timeout !== undefined) window.clearTimeout(timeout);
@@ -145,7 +162,10 @@ function TrackingPage({ id, sessionId, meLoading }: { id: string; sessionId?: st
             {track.phase === "unavailable" ? (
               <Card><CardContent className="p-4 text-sm">Live tracking is unavailable for this booking.</CardContent></Card>
             ) : (
-              <TrackView track={error ? { ...track, cab: null } : track} eta={error ? null : eta} />
+              <TrackView
+                track={error ? { ...track, cab: null } : track}
+                route={!error && route?.key === routeKey(track) ? route : null}
+              />
             )}
           </>
         )}
@@ -155,7 +175,7 @@ function TrackingPage({ id, sessionId, meLoading }: { id: string; sessionId?: st
   );
 }
 
-function TrackView({ track, eta }: { track: TrackData; eta: number | null }) {
+function TrackView({ track, route }: { track: TrackData; route: { coordinates: TrackData["route"]; eta: number | null } | null }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<import("maplibre-gl").Map | null>(null);
   const maplibreRef = useRef<typeof import("maplibre-gl") | null>(null);
@@ -166,6 +186,7 @@ function TrackView({ track, eta }: { track: TrackData; eta: number | null }) {
   const [mapFailed, setMapFailed] = useState(false);
 
   const cab = track.cab;
+  const eta = route?.eta ?? null;
 
   // Map lifecycle: created once per mount.
   useEffect(() => {
@@ -202,7 +223,15 @@ function TrackView({ track, eta }: { track: TrackData; eta: number | null }) {
         window.addEventListener("resize", resizeCheck);
         window.visualViewport?.addEventListener("resize", resizeCheck);
         map.on("load", () => {
-          if (!disposed) { setMapReady(true); setMapFailed(false); }
+          if (disposed) return;
+          map.addSource(ROUTE_SOURCE, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+          map.addLayer({
+            id: ROUTE_SOURCE, source: ROUTE_SOURCE, type: "line",
+            layout: { "line-join": "round", "line-cap": "round" },
+            paint: { "line-color": "#168557", "line-width": 5 },
+          });
+          setMapReady(true);
+          setMapFailed(false);
         });
         map.on("error", () => { if (!disposed && !map.isStyleLoaded()) setMapFailed(true); });
         const glide = () => {
@@ -243,32 +272,48 @@ function TrackView({ track, eta }: { track: TrackData; eta: number | null }) {
     };
   }, []);
 
-  const pickupLat = track.pickup?.lat;
-  const pickupLng = track.pickup?.lng;
-  const pickupName = track.pickup?.name;
+  const targetLat = track.target?.lat;
+  const targetLng = track.target?.lng;
+  const targetName = track.target?.name;
+  const coordinates = route?.coordinates;
 
-  // Pickup marker: synced in place.
+  useEffect(() => {
+    if (!mapReady) return;
+    mapRef.current?.getSource<import("maplibre-gl").GeoJSONSource>(ROUTE_SOURCE)?.setData({
+      type: "FeatureCollection",
+      features: coordinates ? [{
+        type: "Feature", properties: {}, geometry: { type: "LineString", coordinates },
+      }] : [],
+    });
+  }, [mapReady, coordinates]);
+
+  // The target switches from pickup to drop-off as the passenger boards.
   useEffect(() => {
     const map = mapRef.current;
     const maplibregl = maplibreRef.current;
     if (!map || !maplibregl || !mapReady) return;
-    if (pickupLng === undefined || pickupLat === undefined || !pickupName) {
+    if (targetLng === undefined || targetLat === undefined || !targetName) {
       pickupMarkerRef.current?.remove();
       pickupMarkerRef.current = null;
       return;
     }
     if (!pickupMarkerRef.current) {
       const element = document.createElement("div");
-      element.className = "mireli-map-marker mireli-map-marker--stop mireli-map-marker--selected";
+      element.className = "size-4 rounded-full border-4 border-[#168557] bg-white shadow";
       element.setAttribute("aria-hidden", "true");
       pickupMarkerRef.current = new maplibregl.Marker({ element })
-        .setLngLat([pickupLng, pickupLat])
+        .setLngLat([targetLng, targetLat])
         .addTo(map);
-      if (!cabMarkerRef.current) map.jumpTo({ center: [pickupLng, pickupLat] });
     }
-    pickupMarkerRef.current.setLngLat([pickupLng, pickupLat])
-      .setPopup(new maplibregl.Popup({ offset: 12 }).setText(pickupName));
-  }, [mapReady, pickupLng, pickupLat, pickupName]);
+    pickupMarkerRef.current.setLngLat([targetLng, targetLat])
+      .setPopup(new maplibregl.Popup({ offset: 12 }).setText(targetName));
+    const cabPoint = cabMarkerRef.current?.getLngLat();
+    if (cabPoint) {
+      map.fitBounds(new maplibregl.LngLatBounds(cabPoint, cabPoint).extend([targetLng, targetLat]), { padding: 48, maxZoom: 15 });
+    } else {
+      map.jumpTo({ center: [targetLng, targetLat] });
+    }
+  }, [mapReady, targetLng, targetLat, targetName]);
 
   // Cab marker: created on first fix, glided on every later fix.
   useEffect(() => {
@@ -283,20 +328,32 @@ function TrackView({ track, eta }: { track: TrackData; eta: number | null }) {
     }
     if (!cabMarkerRef.current) {
       const element = document.createElement("div");
-      element.className = "mireli-map-marker mireli-map-marker--cab mireli-map-marker--live";
+      element.className = "pointer-events-none h-11 w-7 bg-[url('/markers/live-cab.svg')] bg-contain bg-center bg-no-repeat drop-shadow-md";
       element.setAttribute("aria-hidden", "true");
-      cabMarkerRef.current = new maplibregl.Marker({ element })
+      cabMarkerRef.current = new maplibregl.Marker({ element, rotationAlignment: "map" })
         .setLngLat([cab.lng, cab.lat])
         .addTo(map);
       glideRef.current = { lng: cab.lng, lat: cab.lat, toLng: cab.lng, toLat: cab.lat };
-      // Bolt-style camera: follow the cab on first fix.
-      map.easeTo({ center: [cab.lng, cab.lat], zoom: 13.5, duration: 900 });
+      const target = pickupMarkerRef.current?.getLngLat();
+      if (target) {
+        map.fitBounds(new maplibregl.LngLatBounds(target, target).extend([cab.lng, cab.lat]), { padding: 48, maxZoom: 15 });
+      } else {
+        map.easeTo({ center: [cab.lng, cab.lat], zoom: 13.5, duration: 900 });
+      }
     } else {
       const g = glideRef.current;
       if (g) {
+        const north = cab.lat - g.toLat;
+        const east = (cab.lng - g.toLng) * Math.cos(cab.lat * Math.PI / 180);
+        if (cab.bearingDeg == null && Math.hypot(north, east) > 0.00004) {
+          cabMarkerRef.current.setRotation(Math.atan2(east, north) * 180 / Math.PI);
+        }
         g.toLng = cab.lng;
         g.toLat = cab.lat;
       }
+    }
+    if (typeof cab.bearingDeg === "number" && Number.isFinite(cab.bearingDeg)) {
+      cabMarkerRef.current.setRotation(cab.bearingDeg);
     }
   }, [mapReady, cab]);
 
@@ -333,7 +390,7 @@ function TrackView({ track, eta }: { track: TrackData; eta: number | null }) {
           </div>
           <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <MapPin className="h-4 w-4" />
-            {track.pickup ? track.pickup.name : "Pickup point confirmed on your ticket"}
+            {track.target?.name ?? "See your ticket for the agreed pickup or drop-off"}
           </p>
           {track.departureAt && (
             <p className="text-xs text-muted-foreground">
