@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { nairobiToday } from "@/lib/nairobi-time";
 import { api, useMe } from "@/lib/client";
-import { fmtDateTime, ksh } from "@/lib/format";
+import { ksh } from "@/lib/format";
 
 const AIRPORTS = {
   mba: "Moi International Airport (MBA), Mombasa",
@@ -32,6 +32,10 @@ const REQUEST_STATUS: Record<string, string> = {
   completed: "Completed",
   cancelled: "Cancelled",
 };
+const pickupFormat = new Intl.DateTimeFormat("en-KE", {
+  timeZone: "Africa/Nairobi", weekday: "short", day: "numeric", month: "short",
+  hour: "2-digit", minute: "2-digit", hour12: false,
+});
 
 export default function AirportRequestForm() {
   const { me, loading } = useMe();
@@ -146,7 +150,7 @@ export default function AirportRequestForm() {
           return (
             <article key={request.id} className="grid gap-2 rounded-xl border p-3 text-sm">
               <h3 className="font-semibold">{request.direction === "from" ? "From " : "To "}{AIRPORTS[request.airport]}</h3>
-              <p>{request.address} · {fmtDateTime(request.pickupAt)}</p>
+              <p>{request.address} · {pickupFormat.format(new Date(request.pickupAt))} EAT</p>
               <p role="status" className="text-muted-foreground">{missed ? "Pickup time passed" : expired ? "Awaiting a new quote" : REQUEST_STATUS[request.status]}</p>
               {(canConfirm || ["confirmed", "in_progress", "completed"].includes(request.status)) && request.quoteKes !== null &&
                 <p className="font-medium">{ksh(request.quoteKes)} total · pay at pickup</p>}
