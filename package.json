@@ -6,7 +6,7 @@
     "chrome 111",
     "edge 111",
     "firefox 111",
-    "safari >= 15.4"
+    "safari >= 15.0"
   ],
   "scripts": {
     "dev": "next dev -p 3000",
