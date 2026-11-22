@@ -150,6 +150,7 @@ export async function expireStaleCredits(): Promise<number> {
 export async function recordCollection(params: {
   bookingId: string;
   totalAmount: number;
+  vatAmount?: number;
   cashAmount: number;
   creditApplied: number;
   homeSurchargeAmount: number;
@@ -176,6 +177,7 @@ export async function recordCollection(params: {
         bookingId: params.bookingId,
         tripId: booking.tripId,
         totalAmount: params.totalAmount,
+        vatAmount: params.vatAmount ?? 0,
         cashAmount: params.cashAmount,
         creditApplied: params.creditApplied,
         homeSurchargeAmount: params.homeSurchargeAmount,
@@ -445,6 +447,7 @@ export async function executeCancellation(params: {
         entry.platformFeeAmount,
         Math.round(cfgC.commissionRate * 10000),
         booking.isCharter,
+        entry.vatAmount,
       );
       const platformRetained = split.commission + split.platformFee;
       const commissionReversed = booking.isCharter
@@ -573,7 +576,7 @@ export async function settleCompletedTrip(tx:Prisma.TransactionClient,tripId:str
     for(const booking of trip.bookings) {
       const entry=booking.ledgerEntry;
       if(booking.status!=="boarded" || !entry || entry.status!=="held")continue;
-      const split=calculateSettlement(entry.totalAmount,entry.homeSurchargeAmount,entry.platformFeeAmount,Math.round(commissionRate*10000),booking.isCharter);
+      const split=calculateSettlement(entry.totalAmount,entry.homeSurchargeAmount,entry.platformFeeAmount,Math.round(commissionRate*10000),booking.isCharter,entry.vatAmount);
       // A partially boarded party needs an explicit operations decision about its fare.
       // Preserve the held funds and show the unsettled statement without guessing a refund policy.
       const needsReview=booking.noShowSeats>0;
@@ -804,6 +807,7 @@ export async function confirmBookingPayment(
         bookingId: booking.id,
         tripId: booking.tripId,
         totalAmount: booking.fareAmount,
+        vatAmount: booking.vatAmount,
         cashAmount: booking.cashDue,
         creditApplied: booking.creditApplied,
         homeSurchargeAmount: booking.homeSurcharge,

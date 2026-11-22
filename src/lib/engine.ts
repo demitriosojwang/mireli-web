@@ -5,6 +5,7 @@ import { audit } from "@/lib/audit";
 import { nairobiDate, nairobiDayRange, nairobiEventAt, nairobiTrainArrivalAt, nairobiWeekday } from "@/lib/nairobi-time";
 import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 import { airportConflict, SGR_SERVICES } from "@/lib/ride-service";
+import { provisionAirportNetwork } from "@/lib/airport-network";
 
 /**
  * The ops engine — everything here runs automatically so the admin's role
@@ -46,12 +47,13 @@ function dayAt(base: Date, dayOffset: number, hhmm: string): Date {
 async function createScheduledTrip(params: {
   routeId: string;
   direction: string;
-  trainId: string;
-  departureAt: Date;
-  routeDurationMinutes: number;
+  /** Train anchor for SGR feeder trips; airport trips anchor on shuttleSlotId instead. */
+  trainId?: string;
+  departureAt: Date;  routeDurationMinutes: number;
   driverIds: string[];
+  shuttleSlotId?: string;
 }): Promise<boolean> {
-  const slotKey = `${params.routeId}:${params.direction}:${params.trainId}:${params.departureAt.toISOString()}`;
+  const slotKey = `${params.routeId}:${params.direction}:${params.shuttleSlotId ?? params.trainId ?? "none"}:${params.departureAt.toISOString()}`;
   const departureEnd = new Date(params.departureAt.getTime() + params.routeDurationMinutes * 60 * 1000);
 
   for (const driverId of params.driverIds) {
@@ -62,7 +64,7 @@ async function createScheduledTrip(params: {
         where: {
           routeId: params.routeId,
           direction: params.direction,
-          trainId: params.trainId,
+          ...(params.shuttleSlotId ? { shuttleSlotId: params.shuttleSlotId } : { trainId: params.trainId! }),
           departureAt: params.departureAt,
         },
         select: { id: true },
@@ -100,7 +102,8 @@ async function createScheduledTrip(params: {
           departureAt: params.departureAt,
           capacity: driver.capacity,
           source: "schedule",
-          trainId: params.trainId,
+          ...(params.shuttleSlotId ? { shuttleSlotId: params.shuttleSlotId } : { trainId: params.trainId! }),
+          ...(params.shuttleSlotId ? { shuttleSlotId: params.shuttleSlotId } : {}),
         },
       });
       return "created" as const;
@@ -114,11 +117,12 @@ async function createScheduledTrip(params: {
 }
 
 /** Creates scheduled trips for the next `tripHorizonDays`, anchored to the
- *  train timetable, and assigns available drivers. Return shuttles reuse the
- *  outbound driver of the same route + train when feasible. Lazily
- *  self-extending; idempotent. */
+ *  train timetable and airport shuttle slots, and assigns available drivers.
+ *  Return shuttles reuse the outbound driver of the same route + train when
+ *  feasible. Lazily self-extending; idempotent. */
 export async function ensureTrips(): Promise<number> {
   const cfg = await getConfig();
+  await provisionAirportNetwork();
   const routes = await db.route.findMany({ where: { active: true } });
   const candidates = await db.driver.findMany({ where: { status: "active", rideService: { in: SGR_SERVICES } }, orderBy: { createdAt: "asc" },include:{application:{include:{documents:{where:{state:{not:"replaced"}}}}}} });
   const drivers=candidates.filter(d=>isLocalDemoEnabled() || evaluateDriverApplication(d.application,d.status).eligible);
@@ -130,8 +134,7 @@ export async function ensureTrips(): Promise<number> {
     where: { active: true },
     orderBy: [{ direction: "asc" }, { originTime: "asc" }],
   });
-  if (!trains.length) return 0;
-
+  if (!trains.length && !(await db.airportShuttleSlot.count({ where: { active: true } }))) return 0;
   const now = new Date();
   let created = 0;
   let rr = (await db.trip.count()) % Math.max(drivers.length, 1); // round-robin offset
@@ -220,6 +223,37 @@ export async function ensureTrips(): Promise<number> {
       }
     }
   }
+
+  // Airport shuttles — same scheduler, anchored to fixed daily shuttle slots
+  // instead of train events. Airport routes carry serviceKind
+  // "airport_shuttle" and their trips carry a shuttleSlot anchor.
+  const airportRoutes = routes.filter((route) => route.serviceKind === "airport_shuttle");
+  const shuttleSlots = await db.airportShuttleSlot.findMany({ where: { active: true } });
+  for (let dayOffset = 0; dayOffset <= cfg.tripHorizonDays; dayOffset++) {
+    for (const slot of shuttleSlots) {
+      const dep = dayAt(now, dayOffset, slot.departTime);
+      const route = airportRoutes.find((candidate) =>
+        candidate.name.includes(`[${slot.airportCode}]`) && candidate.name.includes(slot.direction),
+      );
+      if (!route || dep.getTime() < now.getTime() - 30 * 60 * 1000) continue;
+      const exists = await db.trip.findFirst({
+        where: { routeId: route.id, direction: slot.direction, shuttleSlotId: slot.id, departureAt: dep },
+      });
+      if (exists) continue;
+      const wasCreated = await createScheduledTrip({
+        routeId: route.id,
+        direction: slot.direction,
+        departureAt: dep,
+        routeDurationMinutes: route.durationMinutes,
+        driverIds: orderedDriverIds(),
+        shuttleSlotId: slot.id,
+      });
+      if (wasCreated) {
+        created++;
+        rr = (rr + 1) % drivers.length;
+      }
+    }
+  }
   return created;
 }
 
@@ -279,7 +313,8 @@ export async function allocateBooking(params: {
   const minDeparture = new Date(now.getTime() + cfg.bookingWindowMinutes * 60 * 1000);
   const from = minDeparture > dayStart ? minDeparture : dayStart;
 
-  // Prefer the earliest feasible departure that fits everyone
+  // Prefer the earliest feasible departure that fits everyone. Airport trips
+  // have no Train row; the train filter must not exclude them.
   const candidates = await db.trip.findMany({
     where: {
       ...(params.selectedTripId ? { id: params.selectedTripId } : {}),
@@ -287,7 +322,7 @@ export async function allocateBooking(params: {
       direction: params.direction,
       departureAt: { gte: from, lt: dayEnd },
       status: { in: ["scheduled", "locked"] },
-      train: { is: { active: true } },
+      OR: [{ train: { is: { active: true } } }, { shuttleSlotId: { not: null } }],
     },
     orderBy: { departureAt: "asc" },
     include: {
@@ -304,7 +339,7 @@ export async function allocateBooking(params: {
     const reservation = await db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT "id" FROM "Driver" WHERE "id" = ${t.driverId} FOR UPDATE`;
       await tx.$queryRaw`SELECT "id" FROM "Trip" WHERE "id" = ${t.id} FOR UPDATE`;
-      if (t.trainId) {
+      if (t.trainId && !t.shuttleSlotId) {
         await tx.$queryRaw`SELECT "id" FROM "Train" WHERE "id" = ${t.trainId} FOR SHARE`;
       }
       const current = await tx.trip.findUnique({
@@ -313,6 +348,7 @@ export async function allocateBooking(params: {
           driver: { select: { rideService: true } },
           route: { select: { durationMinutes: true } },
           train: { select: { active: true } },
+          shuttleSlot: { select: { active: true } },
           bookings: {
             where: { status: { in: ["awaiting_payment", "confirmed", "boarded"] } },
             select: { seats: true, isCharter: true },
@@ -323,8 +359,14 @@ export async function allocateBooking(params: {
           },
         },
       });
-      if (!current || current.driverId !== t.driverId || !current.train?.active || !["scheduled", "locked"].includes(current.status) ||
-          (current.driver && !SGR_SERVICES.includes(current.driver.rideService))) return null;
+      if (!current || current.driverId !== t.driverId || !["scheduled", "locked"].includes(current.status)) return null;
+      // An airport trip is valid when its shuttle slot is active; a train trip
+      // requires its train to still be active.
+      const anchorValid = current.shuttleSlotId
+        ? current.shuttleSlot?.active === true
+        : current.train?.active === true;
+      if (!anchorValid) return null;
+      if (current.driver && !SGR_SERVICES.includes(current.driver.rideService)) return null;
       if (t.driverId && await airportConflict(
         tx, t.driverId, t.departureAt, new Date(t.departureAt.getTime() + current.route.durationMinutes * 60_000),
       )) return null;
@@ -335,9 +377,16 @@ export async function allocateBooking(params: {
       if (params.charter ? activeBookings.length > 0 : hasCharter || occupiedSeats + params.seats > current.capacity) return null;
 
       const nextOccupiedSeats = params.charter ? current.capacity : occupiedSeats + params.seats;
+      const directionLabel = current.direction === "FROM_TERMINUS"
+        ? "from-terminus"
+        : current.direction === "TO_TERMINUS"
+          ? "to-terminus"
+          : current.direction === "FROM_AIRPORT"
+            ? "from-airport"
+            : "to-airport";
       const note = params.charter
-        ? `Charter — whole cab allocated (${current.direction === "FROM_TERMINUS" ? "from-terminus" : "to-terminus"})`
-        : `Auto-allocated to ${current.direction === "FROM_TERMINUS" ? "from-terminus" : "to-terminus"} trip`;
+        ? `Charter — whole cab allocated (${directionLabel})`
+        : `Auto-allocated to ${directionLabel} trip`;
       await tx.trip.update({ where: { id: current.id }, data: { bookedSeats: nextOccupiedSeats } });
       await tx.booking.update({ where: { id: params.bookingId }, data: { reservationTripId: current.id, allocationNote: note } });
       return { tripId: current.id, seatsLeft: current.capacity - nextOccupiedSeats };

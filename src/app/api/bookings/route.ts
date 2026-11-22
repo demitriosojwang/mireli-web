@@ -10,6 +10,7 @@ import { nairobiDate, nairobiDayRange } from "@/lib/nairobi-time";
 import { isBookingReadyForPayment } from "@/lib/booking-payment-eligibility";
 import { attemptBookingTicketEmail } from "@/lib/booking-ticket-email";
 import { calculateCharterFare, calculateCharterPlatformShare } from "@/lib/charter-pricing";
+import { calculateCharterVat, charterTotalWithVat } from "@/lib/charter-vat";
 import { calculateBookingFeeAmount, calculateSharedFare, calculateSharedOffstageFare } from "@/lib/pricing";
 import { isOffstageQuoteRouteEnabled, OffstageQuoteError, quoteOffstageAddress } from "@/lib/offstage-quote";
 import { getApprovedStageFare } from "@/lib/fare-catalogue";
@@ -354,6 +355,9 @@ export async function POST(req: NextRequest) {
   // ignore the legacy per-stage fixed surcharge because it is not distance-based.
   let total = fare + homeSurcharge + (isCharter ? 0 : platformFeeAmount);
 
+  // Charter VAT: the client incurs the 16% VAT on top of the charter fare.
+  // It is recorded separately and never enters the driver's settlement base.
+  let vatAmount = 0;
   if (isCharter) {
     if (calculateCharterPlatformShare(fare, Math.round(cfg.commissionRate * 10000)) < platformFeeAmount) {
       return NextResponse.json(
@@ -361,7 +365,8 @@ export async function POST(req: NextRequest) {
         { status: 409 },
       );
     }
-    total = fare + homeSurcharge;
+    vatAmount = calculateCharterVat(fare + homeSurcharge);
+    total = fare + homeSurcharge + vatAmount;
   }
 
   // ── Guest rule: 1 seat, 1 booking — no login required. Anything more needs
@@ -439,6 +444,7 @@ export async function POST(req: NextRequest) {
       // Charter fare was calculated from the exact selected vehicle before
       // creating the draft; allocation is pinned to that same trip.
       fareAmount: total,
+      vatAmount,
       platformFeeAmount,
       homeSurcharge,
       creditApplied: 0,
@@ -514,7 +520,7 @@ export async function POST(req: NextRequest) {
     action: isCharter ? "booking.create.charter" : "booking.create",
     entity: "booking",
     entityId: booking.id,
-    metadata: { code: booking.code, total, platformFeeAmount, creditApplied, cashDue, allocation: allocation.note, passengerName: fullName, passengerPhone: phone, passengerNationality: nationality, passengerGender: gender },
+    metadata: { code: booking.code, total, platformFeeAmount, vatAmount, creditApplied, cashDue, allocation: allocation.note, passengerName: fullName, passengerPhone: phone, passengerNationality: nationality, passengerGender: gender },
   });
 
   // Fully covered by credit? Confirm immediately — no cash ever moves.
@@ -522,6 +528,7 @@ export async function POST(req: NextRequest) {
     const collection = await recordCollection({
       bookingId: booking.id,
       totalAmount: total,
+      vatAmount,
       cashAmount: 0,
       creditApplied,
       homeSurchargeAmount: homeSurcharge,
@@ -559,6 +566,7 @@ export async function POST(req: NextRequest) {
       status: fresh!.status,
       fareAmount: fresh!.fareAmount,
       baseFareAmount: fare,
+      vatAmount: fresh!.vatAmount,
       platformFeeAmount: fresh!.platformFeeAmount,
       homeSurcharge: fresh!.homeSurcharge,
       offstageQuote: offstageQuote ? {

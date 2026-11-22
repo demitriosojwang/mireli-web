@@ -469,11 +469,12 @@ describe("booking creation with no driver supply", () => {
       id: "booking-1",
       code: "MR-ABC123",
       status: "awaiting_payment",
-      fareAmount: 2000,
+      fareAmount: 2320,
+      vatAmount: 320,
       platformFeeAmount: 50,
       homeSurcharge: 0,
       creditApplied: 0,
-      cashDue: 2000,
+      cashDue: 2320,
       stageName: "Nyali",
       seats: 1,
       isCharter: true,
@@ -502,14 +503,18 @@ describe("booking creation with no driver supply", () => {
 
     expect(response.status).toBe(200);
     const payload = await response.json();
-    expect(payload.booking.fareAmount).toBe(2000);
+    // Charter fare 2000 + 16% VAT (320) charged on top to the client.
+    expect(payload.booking.fareAmount).toBe(2320);
+    expect(payload.booking.vatAmount).toBe(320);
+    expect(payload.booking.baseFareAmount).toBe(2000);
     expect(payload.booking.platformFeeAmount).toBe(50);
-    expect(payload.booking.cashDue).toBe(2000);
+    expect(payload.booking.cashDue).toBe(2320);
     expect(payload.booking.trip.driver).toBeNull();
     expect(mocks.bookingCreate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        fareAmount: 2000,
-        cashDue: 2000,
+        fareAmount: 2320,
+        vatAmount: 320,
+        cashDue: 2320,
         passengerIdNumber: expect.stringMatching(/^mireli-pii:v1:/),
       }),
     }));

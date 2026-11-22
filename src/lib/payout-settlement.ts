@@ -11,16 +11,20 @@ export function classifySubmission(result:daraja.DarajaResultCode):"completed"|"
   if(["1001","2001"].includes(result.resultCode))return "failed";
   return "ambiguous";
 }
-export function calculateSettlement(total:number,surcharge:number,platformFee:number,rateBps:number,isCharter:boolean) {
-  if(!Number.isSafeInteger(total) || total<0 || !Number.isSafeInteger(surcharge) || surcharge<0 || surcharge>total ||
-    !Number.isSafeInteger(platformFee) || platformFee<0 || platformFee>total-surcharge || !Number.isInteger(rateBps) ||
-    rateBps<0 || rateBps>10000 || !Number.isSafeInteger((total-surcharge)*rateBps))
+export function calculateSettlement(total:number,surcharge:number,platformFee:number,rateBps:number,isCharter:boolean,vatAmount=0) {
+  // VAT is collected on top for the client and remitted; it must never enter
+  // the driver's settlement base or the platform's fare share.
+  const fareBase=total-vatAmount;
+  if(!Number.isSafeInteger(total) || total<0 || !Number.isSafeInteger(vatAmount) || vatAmount<0 || vatAmount>total ||
+    !Number.isSafeInteger(surcharge) || surcharge<0 || surcharge>fareBase ||
+    !Number.isSafeInteger(platformFee) || platformFee<0 || platformFee>fareBase-surcharge || !Number.isInteger(rateBps) ||
+    rateBps<0 || rateBps>10000 || !Number.isSafeInteger((fareBase-surcharge)*rateBps))
     throw new DriverError(409,"INVALID_LEDGER","Settlement requires finance review.");
-  const gross=total;
+  const gross=fareBase;
   // The charter's platform share is calculated on the entire charter fare,
   // including one fee line embedded in it. Record the fee separately and
   // deduct it from commission so the passenger is never charged twice.
-  const platformShare=isCharter ? calculateCharterPlatformShare(total-surcharge,rateBps) : platformFee;
+  const platformShare=isCharter ? calculateCharterPlatformShare(fareBase-surcharge,rateBps) : platformFee;
   if(isCharter && platformShare<platformFee)
     throw new DriverError(409,"INVALID_LEDGER","Charter fare is too low to include Mireli's fee within the platform share.");
   const commission=isCharter ? Math.max(0,platformShare-platformFee) : 0;

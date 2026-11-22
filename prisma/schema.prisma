@@ -106,12 +106,33 @@ model Train {
   trips         Trip[]
 }
 
+// Airport shuttle slots anchor airport-feeder departures the same way trains
+// anchor SGR feeder departures. Each row is one scheduled shuttle service per
+// airport and direction; the scheduler turns slots into driver-assigned trips
+// through the same createScheduledTrip path. Airport codes follow IATA:
+// MBA (Moi International), UKA (Diani/Ukunda), MYD (Malindi), LAU (Manda/Lamu),
+// VPG (Vipingo Ridge).
+model AirportShuttleSlot {
+  id          String  @id @default(cuid())
+  airportCode String // MBA | UKA | MYD | LAU | VPG
+  airportName String
+  direction   String // FROM_AIRPORT | TO_AIRPORT
+  departTime  String // "HH:MM" Kenya-time shuttle departure
+  serviceDays Int[]   @default([0, 1, 2, 3, 4, 5, 6])
+  active      Boolean @default(true)
+  trips       Trip[]
+}
+
 model Route {
   id             String       @id @default(cuid())
   name           String
   durationMinutes Int
   charterPrice   Int // Legacy only; customer charter pricing uses assigned capacity and stage fare
   active         Boolean      @default(true)
+  // serviceKind separates SGR feeder shuttles (train-anchored) from airport
+  // shuttles (shuttle-slot anchored). Both share the same trip/allocation
+  // machinery; only the departure anchor differs.
+  serviceKind    String       @default("sgr_feeder") // sgr_feeder | airport_shuttle
   stages         RouteStage[]
   trips          Trip[]
   bookings       Booking[]
@@ -149,6 +170,8 @@ model Trip {
   source       String       @default("schedule") // schedule | auto
   trainId      String?
   train        Train?       @relation(fields: [trainId], references: [id])
+  shuttleSlotId String?
+  shuttleSlot  AirportShuttleSlot? @relation(fields: [shuttleSlotId], references: [id])
   bookings     Booking[] @relation("BookingTrip")
   reservedBookings Booking[] @relation("BookingReservation")
   payouts      PayoutRecord[]
@@ -212,6 +235,7 @@ model Booking {
   seats         Int       @default(1)
   isCharter     Boolean   @default(false)
   fareAmount    Int // total charged: shared fare + surcharge + fee; charter fare + surcharge with fee embedded in platform share
+  vatAmount     Int @default(0) // charter VAT charged on top to the client; never part of the driver's settlement base
   platformFeeAmount Int @default(0) // shared: KSh fee per booked passenger seat; charter: one fee recorded within Mireli's 10% share
   homeSurcharge Int // total home surcharge for this booking
   creditApplied Int // portion covered by travel credit (never cash)
@@ -271,6 +295,7 @@ model LedgerEntry {
   booking             Booking  @relation(fields: [bookingId], references: [id])
   tripId              String?
   totalAmount         Int // full fare value (cash + credit portions)
+  vatAmount           Int @default(0) // charter VAT collected on top; remitted, never driver or platform fare income
   cashAmount          Int // actually collected via STK push
   creditApplied       Int // portion paid with travel credit
   homeSurchargeAmount Int // tracked separately — passes to driver in full

@@ -106,7 +106,11 @@ describe("customer trip availability", () => {
         stages: { some: { order: { gt: 0 }, fare: { gt: 0 }, homeSurcharge: { gte: 0 } } },
       },
     });
-    expect(mocks.tripFindMany.mock.calls[0][0].where.train).toEqual({ is: { active: true } });
+    // Train-anchored queries keep the active-train OR shuttle-slot filter.
+    expect(mocks.tripFindMany.mock.calls[0][0].where.OR).toEqual([
+      { train: { is: { active: true } } },
+      { shuttleSlotId: { not: null } },
+    ]);
     expect(mocks.tripFindMany.mock.calls[0][0].where.driverId.in).toEqual([eligibleDriver.id]);
     expect(mocks.tripFindMany.mock.calls[0][0].select.driver).toEqual({ select: { cabType: true, plate: true } });
     expect(mocks.driverFindMany.mock.calls[0][0].select.application.select.documents.select)
@@ -172,7 +176,7 @@ describe("customer trip availability", () => {
     const response = await GET(request("date=2026-10-11"));
 
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: "Choose a train" });
+    expect(await response.json()).toEqual({ error: "Choose a departure" });
     expect(mocks.driverFindMany).not.toHaveBeenCalled();
   });
 });

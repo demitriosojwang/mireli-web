@@ -49,6 +49,12 @@ describe("public crawler metadata", () => {
         priority: 0.8,
       },
       {
+        url: "https://mirelisgr.duckdns.org/airports",
+        lastModified: expect.any(Date),
+        changeFrequency: "weekly",
+        priority: 0.8,
+      },
+      {
         url: "https://mirelisgr.duckdns.org/terms",
         lastModified: expect.any(Date),
         changeFrequency: "yearly",
