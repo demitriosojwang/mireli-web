@@ -29,12 +29,23 @@ export async function provisionAirportNetwork(): Promise<void> {
 
     const existingRoutes = await db.route.findMany({
       where: { serviceKind: "airport_shuttle" },
-      select: { name: true },
+      select: { id: true, name: true },
     });
+    // Retire any earlier airport routes whose names predate the machine-readable
+    // naming contract (they can never match a slot and only add clutter).
+    const legacyRoutes = existingRoutes.filter((route) => !/\[(MBA|UKA|MYD|LAU|VPG)\].*(FROM_AIRPORT|TO_AIRPORT)/.test(route.name));
+    if (legacyRoutes.length) {
+      await db.route.updateMany({
+        where: { id: { in: legacyRoutes.map((route) => route.id) } },
+        data: { active: false },
+      });
+    }
     const existingRouteNames = new Set(existingRoutes.map((route) => route.name));
     const missingRoutes = AIRPORT_DESTINATIONS.flatMap((airport) =>
       (["FROM_AIRPORT", "TO_AIRPORT"] as const).map((direction) => {
-        const name = `[${airport.code}] ${airport.name} — ${direction === "FROM_AIRPORT" ? "Airport to Terminus" : "Terminus to Airport"}`;
+        // The scheduler matches routes to slots by the literal tokens in the
+        // name: `[<CODE>]` and the direction. Keep both in the display name.
+        const name = `[${airport.code}] ${airport.name} | ${direction}`;
         if (existingRouteNames.has(name)) return null;
         return db.route.create({
           data: {
