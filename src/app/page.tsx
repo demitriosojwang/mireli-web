@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence, useAnimationControls } from "framer-motion";
 import { DURATION, EASE_IN_OUT, EASE_OUT, KNOB_STRETCH, LAYOUT_ID, PRESS_SCALE, STAGGER_MS } from "@/lib/motion";
 import { ACTIVE_BOOKING_STATUSES, INACTIVE_BOOKING_STATUSES } from "@/lib/state-machines";
-import { SiteFooter, SiteHeader, SiteNav } from "@/components/site-chrome";
+import { SiteFooter, SiteHeader, SiteNav, SupportEmailLink } from "@/components/site-chrome";
 import { InstallPrompt } from "@/components/install-prompt";
 import { BookingSheet, BookableTrip, BookingDraft } from "@/components/booking-sheet";
 import { VehicleTypeIcon } from "@/components/vehicle-type-icon";
@@ -1422,9 +1422,7 @@ export default function Home() {
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
               Questions about a ride, a stop, or your booking? Write to us.
             </p>
-            <a href="mailto:mirelisgr001@gmail.com" className="mt-2 inline-block text-xs font-medium text-primary underline underline-offset-2">
-              mirelisgr001@gmail.com
-            </a>
+            <SupportEmailLink variant="help" />
           </section>
         </aside>
         </div>

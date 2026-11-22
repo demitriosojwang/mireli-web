@@ -122,12 +122,31 @@ export function SiteFooter({ airportTransfers = false }: { airportTransfers?: bo
       <div className="mx-auto w-full max-w-md px-4 py-2 text-center text-[10px] text-muted-foreground sm:max-w-2xl sm:px-6 lg:max-w-4xl xl:max-w-5xl">
         {airportTransfers ? "Mi-Reli · Mombasa & Diani" : "Mi-Reli · Mombasa Terminus · availability is confirmed before checkout"}
         <div className="mt-1 flex items-center justify-center gap-3">
-          <a href="mailto:mirelisgr001@gmail.com" className="underline underline-offset-2">mirelisgr001@gmail.com</a>
+          <SupportEmailLink />
           <Link href="/terms" className="underline underline-offset-2">Terms</Link>
           <Link href="/privacy" className="underline underline-offset-2">Privacy</Link>
         </div>
       </div>
     </footer>
+  );
+}
+
+const SUPPORT_EMAIL = "mirelisgr001@gmail.com";
+const SUPPORT_EMAIL_CLASS = {
+  footer: "underline underline-offset-2",
+  help: "mt-2 inline-block text-xs font-medium text-primary underline",
+} as const;
+
+/** Cloudflare's email rewriting changes SSR markup before React can hydrate it. */
+export function SupportEmailLink({ variant = "footer" }: { variant?: keyof typeof SUPPORT_EMAIL_CLASS }) {
+  const className = SUPPORT_EMAIL_CLASS[variant];
+  return (
+    <span
+      className="contents"
+      dangerouslySetInnerHTML={{
+        __html: `<!--email_off--><a href="mailto:${SUPPORT_EMAIL}" class="${className}">${SUPPORT_EMAIL}</a><!--/email_off-->`,
+      }}
+    />
   );
 }
 
