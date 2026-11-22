@@ -47,6 +47,13 @@ interface AirportTripsResponse {
   trips: BookableTrip[];
 }
 
+interface AirportAvailability {
+  key: string;
+  hasEligibleDrivers: boolean;
+  trips: BookableTrip[];
+  error: string | null;
+}
+
 const DIRECTION_LABEL: Record<ShuttleSlot["direction"], string> = {
   FROM_AIRPORT: "Airport to terminus",
   TO_AIRPORT: "Terminus to airport",
@@ -57,9 +64,7 @@ export default function AirportsPage() {
   const [error, setError] = useState<string | null>(null);
   const [travelDate, setTravelDate] = useState(() => nairobiToday());
   const [selection, setSelection] = useState<{ airportCode: string; slotId: string } | null>(null);
-  const [trips, setTrips] = useState<BookableTrip[] | null>(null);
-  const [tripsError, setTripsError] = useState<string | null>(null);
-  const [hasEligibleDrivers, setHasEligibleDrivers] = useState<boolean | null>(null);
+  const [availability, setAvailability] = useState<AirportAvailability | null>(null);
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleCategory | null>(null);
   const [charter, setCharter] = useState(false);
   const [seats, setSeats] = useState(1);
@@ -83,25 +88,21 @@ export default function AirportsPage() {
   const activeSlot = activeAirport?.slots.find((slot) => slot.id === selection?.slotId) ?? null;
   const activeJourney = activeSlot ? activeAirport?.journeys[activeSlot.direction] ?? null : null;
   const selectionKey = `${activeAirport?.code ?? ""}:${activeSlot?.id ?? ""}:${travelDate}`;
-
-  useEffect(() => {
-    setSelectedVehicle(null);
-    setCharter(false);
-    setSeats(1);
-  }, [selectionKey]);
+  const availabilityKey = activeAirport && activeSlot ? `${selectionKey}:${refreshKey}` : null;
+  const activeAvailability = availabilityKey && availability?.key === availabilityKey ? availability : null;
+  const trips = activeAvailability?.trips ?? null;
+  const tripsError = activeSlot && !activeJourney
+    ? "This shuttle is being configured for online booking."
+    : activeAvailability?.error ?? null;
+  const hasEligibleDrivers = activeAvailability?.hasEligibleDrivers ?? null;
 
   useEffect(() => {
     if (!activeAirport || !activeSlot || !activeJourney) {
-      setTrips(null);
-      setHasEligibleDrivers(null);
-      setTripsError(activeSlot && !activeJourney ? "This shuttle is being configured for online booking." : null);
       return;
     }
 
     const controller = new AbortController();
-    setTrips(null);
-    setHasEligibleDrivers(null);
-    setTripsError(null);
+    const requestKey = `${activeAirport.code}:${activeSlot.id}:${travelDate}:${refreshKey}`;
     const params = new URLSearchParams({
       date: travelDate,
       direction: activeSlot.direction,
@@ -111,11 +112,20 @@ export default function AirportsPage() {
     api<AirportTripsResponse>(`/api/trips?${params}`, { signal: controller.signal, timeoutMs: 12_000 })
       .then((data) => {
         if (controller.signal.aborted) return;
-        setHasEligibleDrivers(data.hasEligibleDrivers);
-        setTrips(data.trips.filter((trip) => trip.shuttle?.id === activeSlot.id && trip.routeId === activeJourney.routeId));
+        setAvailability({
+          key: requestKey,
+          hasEligibleDrivers: data.hasEligibleDrivers,
+          trips: data.trips.filter((trip) => trip.shuttle?.id === activeSlot.id && trip.routeId === activeJourney.routeId),
+          error: null,
+        });
       })
       .catch(() => {
-        if (!controller.signal.aborted) setTripsError("Shuttle availability could not load. Try again.");
+        if (!controller.signal.aborted) setAvailability({
+          key: requestKey,
+          hasEligibleDrivers: false,
+          trips: [],
+          error: "Shuttle availability could not load. Try again.",
+        });
       });
     return () => controller.abort();
   }, [activeAirport, activeJourney, activeSlot, refreshKey, travelDate]);
@@ -144,6 +154,9 @@ export default function AirportsPage() {
   );
 
   function chooseSlot(airport: AirportRow, slot: ShuttleSlot) {
+    setSelectedVehicle(null);
+    setCharter(false);
+    setSeats(1);
     setSelection({ airportCode: airport.code, slotId: slot.id });
   }
 
@@ -191,7 +204,12 @@ export default function AirportsPage() {
                 type="date"
                 min={nairobiToday()}
                 value={travelDate}
-                onChange={(event) => setTravelDate(event.target.value)}
+                onChange={(event) => {
+                  setSelectedVehicle(null);
+                  setCharter(false);
+                  setSeats(1);
+                  setTravelDate(event.target.value);
+                }}
                 className="mt-1 block h-9 w-[132px] rounded-lg border border-input bg-background px-2 text-xs text-foreground"
               />
             </label>

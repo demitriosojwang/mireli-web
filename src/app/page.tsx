@@ -163,7 +163,7 @@ export default function Home() {
   const [selectedPoint, setSelectedPoint] = useState<SelectedPoint | null>(null);
   const [homePickup, setHomePickup] = useState(false);
   const [charter, setCharter] = useState(false);
-  const [selectedVehicleCategory, setSelectedVehicleCategory] = useState<VehicleCategory | null>(null);
+  const [vehicleChoice, setVehicleChoice] = useState<{ key: string; category: VehicleCategory } | null>(null);
   const [requestedSeats, setSeats] = useState(1);
   const bookingCatalogueView = getBookingCatalogueView(routesStatus, pointCount);
   const today = todayStr();
@@ -192,9 +192,7 @@ export default function Home() {
     ? `${direction}|${date}|${trainKey}`
     : null;
   const vehicleSelectionKey = selectedPoint && queryKey ? `${queryKey}|${selectedPoint.route.id}` : null;
-  useEffect(() => {
-    setSelectedVehicleCategory(null);
-  }, [vehicleSelectionKey]);
+  const selectedVehicleCategory = vehicleChoice?.key === vehicleSelectionKey ? vehicleChoice.category : null;
   const loading = Boolean(queryKey) && (isRefreshing || loadedQuery !== queryKey);
 
   const [draft, setDraft] = useState<BookingDraft | null>(null);
@@ -1081,7 +1079,7 @@ export default function Home() {
                         disabled={!hasFare}
                         aria-pressed={selectedVehicleCategory === category}
                         onClick={() => {
-                          setSelectedVehicleCategory(category);
+                          if (vehicleSelectionKey) setVehicleChoice({ key: vehicleSelectionKey, category });
                           if (isPerRideVehicle(category)) setCharter(false);
                         }}
                         className={cn(
