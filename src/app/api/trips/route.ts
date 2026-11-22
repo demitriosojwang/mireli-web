@@ -7,6 +7,8 @@ import { getEligibleDriverIds } from "@/lib/driver/availability";
 import { DriverError } from "@/lib/driver/errors";
 import { expireUnpaidBookingReservations } from "@/lib/unpaid-booking-expiry";
 import { describeCancellationCutoff } from "@/lib/cancellation-policy";
+import { bookingFeePerUnit } from "@/lib/vehicle-fares";
+import { vehicleCategoryFromCabType } from "@/lib/vehicle-types";
 
 /** Bookable departures for a date + direction. */
 export async function GET(req: NextRequest) {
@@ -102,7 +104,8 @@ export async function GET(req: NextRequest) {
           select: { id: true, airportCode: true, airportName: true, direction: true, departTime: true },
         },
         driver: {
-          select: { cabType: true, plate: true },
+          // Vehicle registrations are shared only after a booking is confirmed.
+          select: { cabType: true },
         },
         bookings: {
           where: { status: { in: ["awaiting_payment", "confirmed", "boarded", "completed"] } },
@@ -125,6 +128,7 @@ export async function GET(req: NextRequest) {
         ? t.capacity
         : activeBookings.reduce((sum, booking) => sum + booking.seats, 0);
       const seatsLeft = Math.max(t.capacity - relevantBooked, 0);
+      const vehicleCategory = vehicleCategoryFromCabType(t.driver?.cabType);
       const isFromTerminus = t.direction === "FROM_TERMINUS";
       const isAirport = !!t.shuttleSlot;
       const train = t.train && !isAirport
@@ -143,7 +147,7 @@ export async function GET(req: NextRequest) {
         routeName: t.route.name,
         durationMinutes: t.route.durationMinutes,
         charterPrice: t.route.charterPrice,
-        platformFeeAmount: cfg.bookingFeeAmount,
+        platformFeeAmount: bookingFeePerUnit(vehicleCategory, cfg.bookingFeeAmount),
         cancellationCutoffMinutes: cfg.fullRefundCutoffMinutes,
         direction: t.direction,
         departureAt: t.departureAt,
@@ -184,7 +188,7 @@ export async function GET(req: NextRequest) {
         // do not repeat route-stop details for each departure card.
         pointsLabel: isFromTerminus ? "drop-off" : "pickup",
         // Vehicle details so passengers can compare cab types (Uber/Bolt style).
-        vehicle: t.driver ? { cabType: t.driver.cabType, plate: t.driver.plate } : null,
+        vehicle: t.driver ? { cabType: t.driver.cabType } : null,
       };
       }),
   });

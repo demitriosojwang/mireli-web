@@ -16,7 +16,7 @@ describe("shared ride fare and Mireli fee", () => {
     expect(calculateSharedFare(400, 10, 3)).toBe(1200);
   });
 
-  it("charges Mireli KSh 50 per shared seat and only one recorded fee inside a charter share", () => {
+  it("multiplies the configured fee by shared seats and records one fee inside a charter share", () => {
     expect(calculateBookingFeeAmount(50, 3)).toBe(150);
     expect(calculateBookingFeeAmount(50, 4, true)).toBe(50);
   });
@@ -39,15 +39,15 @@ describe("shared off-stage surcharge", () => {
     expect(calculateSharedOffstageFare(400, 6_000, 1)).toEqual({
       surchargePerSeat: 150,
       totalSurcharge: 150,
-      platformFeeAmount: 50,
+      platformFeeAmount: 60,
       driverPayoutAmount: 550,
-      totalAmount: 600,
+      totalAmount: 610,
     });
     expect(calculateSharedOffstageFare(400, 6_000, 3)).toMatchObject({
       totalSurcharge: 450,
-      platformFeeAmount: 150,
+      platformFeeAmount: 180,
       driverPayoutAmount: 1_650,
-      totalAmount: 1_800,
+      totalAmount: 1_830,
     });
   });
 

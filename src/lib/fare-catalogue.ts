@@ -3,8 +3,8 @@
  *  catalogue because the sheet does not specify them.
  *
  *  The sheet prices each stop as the **driver fare per seat**. Mi-Reli adds a
- *  separate KSh 50 platform fee per seat (PlatformConfig.bookingFeeAmount), so
- *  the passenger total for one seat is the listed fare plus KSh 50. */
+ *  separate KSh 60 platform fee per seat (PlatformConfig.bookingFeeAmount), so
+ *  the passenger total for one seat is the listed fare plus KSh 60. */
 export const APPROVED_STAGE_FARES = [
   { coast: "north", name: "Kiembeni Mwisho", fare: 400 },
   { coast: "north", name: "Kiembeni Police", fare: 400 },

@@ -44,11 +44,6 @@ describe("public crawler metadata", () => {
         priority: 1,
       },
       {
-        url: "https://mirelisgr.duckdns.org/airport-transfers",
-        changeFrequency: "monthly",
-        priority: 0.8,
-      },
-      {
         url: "https://mirelisgr.duckdns.org/airports",
         lastModified: expect.any(Date),
         changeFrequency: "weekly",

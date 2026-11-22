@@ -31,7 +31,7 @@ export default function TermsPage() {
             <ul className="list-disc space-y-0.5 pl-4">
               <li>The full fare and fee breakdown is shown before you confirm a booking.</li>
               <li>A booking is confirmed only after payment is confirmed by the payment provider.</li>
-              <li>Shared rides add a KSh 50 Mireli fee per booked seat; charters use Mireli&apos;s 10% share.</li>
+              <li>Shared hailed rides add a KSh 60 Mi-Reli fee per booked seat. Motorbike rides add a KSh 100 fee per ride; charters use Mi-Reli&apos;s 10% share and 16% VAT is added on top.</li>
               <li>Availability is checked at checkout. If a listed cab cannot serve your journey, we show alternatives or an open state.</li>
             </ul>
           </section>

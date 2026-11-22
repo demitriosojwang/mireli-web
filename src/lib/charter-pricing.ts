@@ -3,7 +3,7 @@ export const CHARTER_PER_SEAT_AMOUNT = 100;
 
 /**
  * A charter reserves every seat in the assigned vehicle. The configured stage
- * fare is per seat; KSh 100 is added per vehicle seat. One KSh 50 Mireli fee
+ * fare is per seat; KSh 100 is added per vehicle seat. One KSh 60 Mi-Reli fee
  * line is accounted for inside the 10% share and is not added again here.
  */
 export function calculateCharterFare(capacity: number, stageFare: number): number {

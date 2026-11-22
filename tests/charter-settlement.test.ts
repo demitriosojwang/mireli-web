@@ -29,44 +29,44 @@ describe("charter fare to settlement, end to end", () => {
     const total = calculateCharterFare(4, 400);
     const share = calculateCharterPlatformShare(total, TEN_PERCENT_BPS);
     expect(share).toBe(200);
-    // Settlement: the embedded KSh 50 fee line is recorded separately and
+    // Settlement: the embedded KSh 60 fee line is recorded separately and
     // deducted from the share, so the passenger is never charged it twice.
-    const settlement = calculateSettlement(total, 0, 50, TEN_PERCENT_BPS, true);
+    const settlement = calculateSettlement(total, 0, 60, TEN_PERCENT_BPS, true);
     expect(settlement.gross).toBe(2000);
-    expect(settlement.commission).toBe(150); // 200 share - 50 embedded fee
-    expect(settlement.platformFee).toBe(50);
+    expect(settlement.commission).toBe(140); // 200 share - 60 embedded fee
+    expect(settlement.platformFee).toBe(60);
     expect(settlement.net).toBe(1800); // driver receives stage fares: 4 x 400 + 200 charter uplift - fee
     expect(settlement.commission + settlement.platformFee + settlement.net).toBe(settlement.gross);
   });
 
   it("splits a 7-seater charter without losing a shilling", () => {
     const total = calculateCharterFare(7, 500); // 7 x 600 = 4200
-    const settlement = calculateSettlement(total, 0, 50, TEN_PERCENT_BPS, true);
+    const settlement = calculateSettlement(total, 0, 60, TEN_PERCENT_BPS, true);
     expect(settlement.gross).toBe(4200);
-    expect(settlement.commission).toBe(370); // 420 - 50
+    expect(settlement.commission).toBe(360); // 420 - 60
     expect(settlement.net).toBe(3780);
     expect(settlement.commission + settlement.platformFee + settlement.net).toBe(settlement.gross);
   });
 
   it("never lets the commission go negative on a minimum fare", () => {
-    // Stage fare 0: total 400 (4 seats x 100 uplift). Share 40 < fee 50 -> rejected upstream.
+    // Stage fare 0: total 400 (4 seats x 100 uplift). Share 40 < fee 60 -> rejected upstream.
     const total = calculateCharterFare(4, 0);
-    expect(() => calculateSettlement(total, 0, 50, TEN_PERCENT_BPS, true)).toThrow();
+    expect(() => calculateSettlement(total, 0, 60, TEN_PERCENT_BPS, true)).toThrow();
   });
 
   it("rejects a charter fare too low to carry the embedded fee", () => {
-    // 1 seat, stage fare 0: total 100, share 10 < fee 50.
-    expect(() => calculateSettlement(calculateCharterFare(1, 0), 0, 50, TEN_PERCENT_BPS, true)).toThrow();
+    // 1 seat, stage fare 0: total 100, share 10 < fee 60.
+    expect(() => calculateSettlement(calculateCharterFare(1, 0), 0, 60, TEN_PERCENT_BPS, true)).toThrow();
   });
 
   it("does not apply charter share logic to hailed bookings", () => {
-    // Hailed: 900 total (2 seats x (400 + 50 fee)), no commission, driver gets the rest.
-    const settlement = calculateSettlement(900, 0, 100, TEN_PERCENT_BPS, false);
+    // Hailed: 920 total (2 seats x (400 + 60 fee)), no commission, driver gets the rest.
+    const settlement = calculateSettlement(920, 0, 120, TEN_PERCENT_BPS, false);
     expect(settlement.commission).toBe(0);
     expect(settlement.net).toBe(800);
   });
 
-  it("pays the entire off-stage surcharge to the driver and retains only the KSh 50 seat fee", () => {
+  it("pays the entire off-stage surcharge to the driver and retains only the KSh 60 seat fee", () => {
     const quote = calculateSharedOffstageFare(400, 6_000, 1);
     const settlement = calculateSettlement(
       quote.totalAmount,
@@ -76,11 +76,11 @@ describe("charter fare to settlement, end to end", () => {
       false,
     );
 
-    expect(quote.totalAmount).toBe(600);
+    expect(quote.totalAmount).toBe(610);
     expect(settlement).toEqual({
-      gross: 600,
+      gross: 610,
       surcharge: 150,
-      platformFee: 50,
+      platformFee: 60,
       commission: 0,
       net: 550,
     });
@@ -97,9 +97,9 @@ describe("charter fare to settlement, end to end", () => {
       false,
     );
 
-    expect(quote.totalAmount).toBe(1_800);
+    expect(quote.totalAmount).toBe(1_830);
     expect(settlement.surcharge).toBe(450);
-    expect(settlement.platformFee).toBe(150);
+    expect(settlement.platformFee).toBe(180);
     expect(settlement.net).toBe(1_650);
   });
 });

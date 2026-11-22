@@ -15,6 +15,16 @@ export function calculateCharterVat(charterFare: number): number {
   return vat;
 }
 
+/** Extract VAT already included in the supplied gross fare (16 / 116). */
+export function calculateIncludedVat(grossFare: number): number {
+  if (!Number.isSafeInteger(grossFare) || grossFare < 0) {
+    throw new RangeError("Included VAT requires a valid gross fare.");
+  }
+  const vat = Math.round(grossFare * CHARTER_VAT_RATE / (1 + CHARTER_VAT_RATE));
+  if (!Number.isSafeInteger(vat)) throw new RangeError("Included VAT exceeds the supported amount.");
+  return vat;
+}
+
 /** Passenger total for a charter: fare + VAT on top. */
 export function charterTotalWithVat(charterFare: number): number {
   const vat = calculateCharterVat(charterFare);

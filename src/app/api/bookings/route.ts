@@ -10,10 +10,12 @@ import { nairobiDate, nairobiDayRange } from "@/lib/nairobi-time";
 import { isBookingReadyForPayment } from "@/lib/booking-payment-eligibility";
 import { attemptBookingTicketEmail } from "@/lib/booking-ticket-email";
 import { calculateCharterFare, calculateCharterPlatformShare } from "@/lib/charter-pricing";
-import { calculateCharterVat, charterTotalWithVat } from "@/lib/charter-vat";
+import { calculateCharterVat, calculateIncludedVat } from "@/lib/charter-vat";
 import { calculateBookingFeeAmount, calculateSharedFare, calculateSharedOffstageFare } from "@/lib/pricing";
 import { isOffstageQuoteRouteEnabled, OffstageQuoteError, quoteOffstageAddress } from "@/lib/offstage-quote";
 import { getApprovedStageFare } from "@/lib/fare-catalogue";
+import { bookingFeePerUnit, bookingFeeUnits, getStageFareForVehicle, isPerRideVehicle } from "@/lib/vehicle-fares";
+import { vehicleCategoryFromCabType } from "@/lib/vehicle-types";
 import { expireUnpaidBookingReservations } from "@/lib/unpaid-booking-expiry";
 import { assertPassengerPiiEncryptionReady, encryptPassengerIdNumber } from "@/lib/passenger-pii";
 import { MIRELI_SUPPORT_PHONE_E164 } from "@/lib/support";
@@ -168,7 +170,7 @@ export async function POST(req: NextRequest) {
   let travelDateDate: Date;
   try { travelDateDate = nairobiDayRange(travelDate ?? nairobiDate(new Date())).start; }
   catch { return NextResponse.json({ error: "Invalid travel date" }, { status: 400 }); }
-  if (!["FROM_TERMINUS", "TO_TERMINUS"].includes(direction)) return NextResponse.json({ error: "Invalid direction" }, { status: 400 });
+  if (!["FROM_TERMINUS", "TO_TERMINUS", "FROM_AIRPORT", "TO_AIRPORT"].includes(direction)) return NextResponse.json({ error: "Invalid direction" }, { status: 400 });
 
   // ── Primary passenger details (required for every booking) ────────────────
   const fullName = String(passengerName || "").trim();
@@ -241,12 +243,11 @@ export async function POST(req: NextRequest) {
   if (!stage) {
     return NextResponse.json({ error: "Choose a published pickup or drop-off stop." }, { status: 409 });
   }
-  const stageFare = getApprovedStageFare(stage.name) ?? stage.fare;
-  if (!Number.isSafeInteger(stageFare) || stageFare <= 0) {
-    return NextResponse.json({ error: "This stop's fare is not configured for booking yet." }, { status: 503 });
-  }
   if (homePickup && (!homeAddress || typeof homeAddress !== "string" || homeAddress.trim().length < 5 || homeAddress.trim().length > 200)) {
     return NextResponse.json({ error: "Enter an address between 5 and 200 characters." }, { status: 400 });
+  }
+  if (homePickup && direction.endsWith("_AIRPORT")) {
+    return NextResponse.json({ error: "Address pickup is not available for scheduled airport shuttles." }, { status: 409 });
   }
   if (homePickup && !isCharter && locationQuoteConsent !== true) {
     return NextResponse.json({ error: "Agree to the one-time location quote to continue with an off-stage shared ride." }, { status: 400 });
@@ -258,20 +259,49 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Quote every booking from the exact cab the passenger selected. Shared
-  // fares use the listed stage fare for every cab size; the separate KSh 50
-  // fee is added to each booked seat. Charters use the listed base fare and 10% split.
+  // Quote from the exact selected cab. Motorbikes use the per-ride fare and
+  // KSh 100 ride fee; the hailed schedule is per seat with a KSh 60 fee.
   const selectedTrip = await db.trip.findUnique({
     where: { id: tripId },
-    select: { capacity: true, routeId: true, direction: true },
+    select: {
+      capacity: true,
+      routeId: true,
+      direction: true,
+      trainId: true,
+      shuttleSlotId: true,
+      driver: { select: { cabType: true } },
+    },
   });
+  const airportDirection = direction.endsWith("_AIRPORT");
   if (!selectedTrip || selectedTrip.routeId !== route.id || selectedTrip.direction !== direction ||
+      (airportDirection ? !selectedTrip.shuttleSlotId : !selectedTrip.trainId) ||
+      (airportDirection !== (route.serviceKind === "airport_shuttle")) ||
       !Number.isSafeInteger(selectedTrip.capacity) || selectedTrip.capacity < 1) {
     return NextResponse.json(
       { error: "That cab is no longer available. Refresh the list and choose another cab or date." },
       { status: 409 },
     );
   }
+  const vehicleCategory = vehicleCategoryFromCabType(selectedTrip.driver?.cabType);
+  const usesPerRideSchedule = route.serviceKind !== "airport_shuttle" && isPerRideVehicle(vehicleCategory);
+  if (usesPerRideSchedule && isCharter) {
+    return NextResponse.json({ error: "Motorbike and tuk-tuk bookings use per-ride fares. Choose a shared ride." }, { status: 409 });
+  }
+  if (usesPerRideSchedule && !isCharter && seats !== 1) {
+    return NextResponse.json({ error: "This motorbike or tuk-tuk booking covers one passenger ride." }, { status: 400 });
+  }
+  const configuredStageFare = getApprovedStageFare(stage.name) ?? stage.fare;
+  const stageFare = getStageFareForVehicle({
+    stageName: stage.name,
+    cabType: selectedTrip.driver?.cabType,
+    capacity: selectedTrip.capacity,
+    fallbackFare: configuredStageFare,
+    airportShuttle: route.serviceKind === "airport_shuttle",
+  });
+  if (stageFare === null || !Number.isSafeInteger(stageFare) || stageFare <= 0) {
+    return NextResponse.json({ error: "Pricing for this vehicle type is not configured at this stop yet." }, { status: 409 });
+  }
+  const feePerUnit = bookingFeePerUnit(vehicleCategory, cfg.bookingFeeAmount);
 
   // An off-stage shared booking without credit will require a cash payment.
   // Fail before rate-limit writes or paid Location lookups when real M-Pesa is
@@ -301,15 +331,20 @@ export async function POST(req: NextRequest) {
         direction,
       );
       stage = quote.nearestStage;
-      const nearestStageFare = getApprovedStageFare(stage.name) ?? stage.fare;
-      if (!Number.isSafeInteger(nearestStageFare) || nearestStageFare <= 0) {
+      const nearestStageFare = getStageFareForVehicle({
+        stageName: stage.name,
+        cabType: selectedTrip.driver?.cabType,
+        capacity: selectedTrip.capacity,
+        fallbackFare: getApprovedStageFare(stage.name) ?? stage.fare,
+      });
+      if (nearestStageFare === null || !Number.isSafeInteger(nearestStageFare) || nearestStageFare <= 0) {
         return NextResponse.json({ error: "The nearest SGR stage does not have an approved fare yet." }, { status: 503 });
       }
       const quoteFare = calculateSharedOffstageFare(
         nearestStageFare,
         quote.distanceMeters,
         tripSeats,
-        cfg.bookingFeeAmount,
+        feePerUnit,
       );
       fare = calculateSharedFare(nearestStageFare, selectedTrip.capacity, tripSeats);
       platformFeeAmount = quoteFare.platformFeeAmount;
@@ -342,7 +377,11 @@ export async function POST(req: NextRequest) {
       fare = isCharter
         ? calculateCharterFare(selectedTrip.capacity, stageFare)
         : calculateSharedFare(stageFare, selectedTrip.capacity, tripSeats);
-      platformFeeAmount = calculateBookingFeeAmount(cfg.bookingFeeAmount, isCharter ? 1 : tripSeats, isCharter);
+      platformFeeAmount = calculateBookingFeeAmount(
+        feePerUnit,
+        bookingFeeUnits(vehicleCategory, tripSeats, isCharter),
+        isCharter,
+      );
     }
   } catch {
     return NextResponse.json(
@@ -358,6 +397,10 @@ export async function POST(req: NextRequest) {
   // Charter VAT: the client incurs the 16% VAT on top of the charter fare.
   // It is recorded separately and never enters the driver's settlement base.
   let vatAmount = 0;
+  const vatInclusive = usesPerRideSchedule && !isCharter;
+  if (vatInclusive) {
+    vatAmount = calculateIncludedVat(fare + homeSurcharge);
+  }
   if (isCharter) {
     if (calculateCharterPlatformShare(fare, Math.round(cfg.commissionRate * 10000)) < platformFeeAmount) {
       return NextResponse.json(
@@ -520,7 +563,7 @@ export async function POST(req: NextRequest) {
     action: isCharter ? "booking.create.charter" : "booking.create",
     entity: "booking",
     entityId: booking.id,
-    metadata: { code: booking.code, total, platformFeeAmount, vatAmount, creditApplied, cashDue, allocation: allocation.note, passengerName: fullName, passengerPhone: phone, passengerNationality: nationality, passengerGender: gender },
+    metadata: { code: booking.code, total, platformFeeAmount, vatAmount, vatInclusive, creditApplied, cashDue, allocation: allocation.note, passengerName: fullName, passengerPhone: phone, passengerNationality: nationality, passengerGender: gender },
   });
 
   // Fully covered by credit? Confirm immediately — no cash ever moves.
@@ -567,6 +610,7 @@ export async function POST(req: NextRequest) {
       fareAmount: fresh!.fareAmount,
       baseFareAmount: fare,
       vatAmount: fresh!.vatAmount,
+      vatInclusive,
       platformFeeAmount: fresh!.platformFeeAmount,
       homeSurcharge: fresh!.homeSurcharge,
       offstageQuote: offstageQuote ? {

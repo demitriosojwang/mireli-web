@@ -12,8 +12,8 @@ export function classifySubmission(result:daraja.DarajaResultCode):"completed"|"
   return "ambiguous";
 }
 export function calculateSettlement(total:number,surcharge:number,platformFee:number,rateBps:number,isCharter:boolean,vatAmount=0) {
-  // VAT is collected on top for the client and remitted; it must never enter
-  // the driver's settlement base or the platform's fare share.
+  // Subtract VAT before splitting the fare. Charter VAT is added on top; the
+  // motorbike and tuk-tuk schedules include VAT in the driver's gross fare.
   const fareBase=total-vatAmount;
   if(!Number.isSafeInteger(total) || total<0 || !Number.isSafeInteger(vatAmount) || vatAmount<0 || vatAmount>total ||
     !Number.isSafeInteger(surcharge) || surcharge<0 || surcharge>fareBase ||

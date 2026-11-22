@@ -45,6 +45,7 @@
     "download",
     "scripts",
     "tool-results",
-    ".local"
+    ".local",
+    "tmp"
   ]
 }

@@ -86,7 +86,7 @@ drivable distance. It does not write the geocoded coordinates to the database
 or logs; the passenger's address is retained with the booking so the assigned
 driver can complete the door-to-door service. The quote uses `(road metres ÷
 40)` KSh per seat, rounded to the nearest shilling with `.50` rounding up, plus
-the usual KSh 50 Mireli fee per shared seat. The full distance surcharge is
+the usual KSh 60 Mi-Reli fee per shared seat (KSh 100 per motorbike ride). The full distance surcharge is
 included in the driver's share.
 
 Leave `MIRELI_OFFSTAGE_VERIFIED_ROUTE_IDS` empty until the route's exact stop

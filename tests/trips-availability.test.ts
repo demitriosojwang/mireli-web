@@ -45,7 +45,7 @@ beforeEach(() => {
   mocks.tripFindMany.mockResolvedValue([]);
   mocks.runOperationalTick.mockResolvedValue({});
   mocks.expireUnpaidBookingReservations.mockResolvedValue({ expired: 0, restoredCredit: 0 });
-  mocks.getConfig.mockResolvedValue({ bookingFeeAmount: 50, terminusArrivalBufferMinutes: 60 });
+  mocks.getConfig.mockResolvedValue({ bookingFeeAmount: 60, terminusArrivalBufferMinutes: 60 });
   mocks.evaluateDriverApplication.mockReturnValue({ eligible: true, reasons: [] });
 });
 
@@ -90,13 +90,12 @@ describe("customer trip availability", () => {
     expect(response.status).toBe(200);
     expect(result.hasEligibleDrivers).toBe(true);
     expect(result.trips).toHaveLength(1);
-    expect(result.trips[0]).toMatchObject({ seatsLeft: 3, platformFeeAmount: 50 });
+    expect(result.trips[0]).toMatchObject({ seatsLeft: 3, platformFeeAmount: 60 });
     expect(result.trips[0].train).toMatchObject({ id: "train-1", name: "Night Train", mtmTime: "03:55" });
     expect(result.trips[0]).not.toHaveProperty("stages");
     expect(result.trips[0]).not.toHaveProperty("points");
-    // Vehicle details are customer-facing (cab type and plate), but the
-    // driver's personal identity stays hidden until after payment.
-    expect(result.trips[0].vehicle).toEqual({ cabType: "Van", plate: "KAA 123A" });
+    // Only the vehicle type is public; identifying vehicle details stay hidden.
+    expect(result.trips[0].vehicle).toEqual({ cabType: "Van" });
     expect(result.trips[0]).not.toHaveProperty("driver");
     expect(mocks.tripFindMany.mock.calls[0][0].where.routeId).toBe("route-1");
     expect(mocks.tripFindMany.mock.calls[0][0].where.trainId).toBe("train-1");
@@ -112,7 +111,7 @@ describe("customer trip availability", () => {
       { shuttleSlotId: { not: null } },
     ]);
     expect(mocks.tripFindMany.mock.calls[0][0].where.driverId.in).toEqual([eligibleDriver.id]);
-    expect(mocks.tripFindMany.mock.calls[0][0].select.driver).toEqual({ select: { cabType: true, plate: true } });
+    expect(mocks.tripFindMany.mock.calls[0][0].select.driver).toEqual({ select: { cabType: true } });
     expect(mocks.driverFindMany.mock.calls[0][0].select.application.select.documents.select)
       .toEqual({ type: true, state: true, scanState: true, expiresAt: true });
     expect(mocks.tripFindMany.mock.calls[0][0].select.route.select).not.toHaveProperty("stages");

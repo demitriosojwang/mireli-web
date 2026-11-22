@@ -9,6 +9,7 @@ import { ACTIVE_BOOKING_STATUSES, INACTIVE_BOOKING_STATUSES } from "@/lib/state-
 import { SiteFooter, SiteHeader, SiteNav } from "@/components/site-chrome";
 import { InstallPrompt } from "@/components/install-prompt";
 import { BookingSheet, BookableTrip, BookingDraft } from "@/components/booking-sheet";
+import { VehicleTypeIcon } from "@/components/vehicle-type-icon";
 import { PaySheet } from "@/components/pay-sheet";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -24,9 +25,12 @@ import {
 import { api, useMe } from "@/lib/client";
 import { getApprovedCabReadinessLabel, getBookingCatalogueView, getCabAvailabilityCountLabel, hasPublishedCustomerPoints, shouldLoadTrainTimetable, type CatalogueStatus } from "@/lib/booking-catalogue";
 import { fmtTime, ksh } from "@/lib/format";
-import { calculateBookingFeeAmount, calculateSharedFare, DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
+import { calculateSharedFare, DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
 import { addNairobiDays, nairobiNowMinutes, nairobiWeekday } from "@/lib/nairobi-time";
 import { calculateCharterFare } from "@/lib/charter-pricing";
+import { calculateCharterVat } from "@/lib/charter-vat";
+import { VEHICLE_CATEGORIES, VEHICLE_CATEGORY_LABELS, vehicleCategoryFromCabType, type VehicleCategory } from "@/lib/vehicle-types";
+import { calculateVehicleBookingFee, getStageFareForVehicle, isPerRideVehicle } from "@/lib/vehicle-fares";
 import { getBookingPaymentPreflight } from "@/lib/booking-payment-preflight";
 import { MAX_STAGE_SEARCH_LENGTH, MIN_STAGE_SEARCH_LENGTH, isStageSearchReady } from "@/lib/stage-search";
 import { SplashScreen, useSplashOnce } from "@/components/app/splash-screen";
@@ -44,7 +48,6 @@ import {
 import {
   Anchor,
   CalendarDays,
-  Car,
   Check,
   ChevronsUpDown,
   Clock,
@@ -128,6 +131,7 @@ export default function Home() {
   // still catchable today; "later" is the classic schedule flow. Uber-style.
   const [pickupMode, setPickupMode] = useState<"now" | "later">("later");
   const [pointCount, setPointCount] = useState(0);
+  const [offstageQuoteRouteIds, setOffstageQuoteRouteIds] = useState<string[]>([]);
   const [bookingFeeAmount, setBookingFeeAmount] = useState(DEFAULT_BOOKING_FEE_AMOUNT);
   const [routesStatus, setRoutesStatus] = useState<CatalogueStatus>("loading");
   const [trips, setTrips] = useState<BookableTrip[] | null>(null);
@@ -159,6 +163,7 @@ export default function Home() {
   const [selectedPoint, setSelectedPoint] = useState<SelectedPoint | null>(null);
   const [homePickup, setHomePickup] = useState(false);
   const [charter, setCharter] = useState(false);
+  const [selectedVehicleCategory, setSelectedVehicleCategory] = useState<VehicleCategory | null>(null);
   const [requestedSeats, setSeats] = useState(1);
   const bookingCatalogueView = getBookingCatalogueView(routesStatus, pointCount);
   const today = todayStr();
@@ -186,6 +191,10 @@ export default function Home() {
   const queryKey = selectedPoint && trainKey
     ? `${direction}|${date}|${trainKey}`
     : null;
+  const vehicleSelectionKey = selectedPoint && queryKey ? `${queryKey}|${selectedPoint.route.id}` : null;
+  useEffect(() => {
+    setSelectedVehicleCategory(null);
+  }, [vehicleSelectionKey]);
   const loading = Boolean(queryKey) && (isRefreshing || loadedQuery !== queryKey);
 
   const [draft, setDraft] = useState<BookingDraft | null>(null);
@@ -237,11 +246,12 @@ export default function Home() {
 
   useEffect(() => {
     const controller = new AbortController();
-    api<{ pointCount: number }>("/api/routes", {
+    api<{ pointCount: number; offstageQuoteRouteIds?: string[] }>("/api/routes", {
       signal: controller.signal,
       timeoutMs: CATALOGUE_TIMEOUT_MS,
     })
       .then((response) => {
+        setOffstageQuoteRouteIds(response.offstageQuoteRouteIds ?? []);
         const nextPointCount = hasPublishedCustomerPoints(response.pointCount) ? response.pointCount : 0;
         setPointCount(nextPointCount);
         setRoutesStatus(nextPointCount ? "ready" : "empty");
@@ -255,6 +265,7 @@ export default function Home() {
       })
       .catch(() => {
         if (controller.signal.aborted) return;
+        setOffstageQuoteRouteIds([]);
         setPointCount(0);
         setRoutesStatus("error");
       });
@@ -398,7 +409,17 @@ export default function Home() {
   }, [splashReady, showSplash, direction, date, trainKey, queryKey, tripRefreshKey]);
 
   async function openBooking(trip: BookableTrip) {
-    if (!selectedPoint || !trainKey || trip.train?.id !== trainKey || selectedPoint.route.id !== trip.routeId || checkingPayment) return;
+    if (!selectedPoint || !selectedVehicleCategory || vehicleCategoryFromCabType(trip.vehicle?.cabType) !== selectedVehicleCategory || !trainKey || trip.train?.id !== trainKey || selectedPoint.route.id !== trip.routeId || checkingPayment) return;
+    const stageFare = getStageFareForVehicle({
+      stageName: selectedPoint.point.name,
+      cabType: trip.vehicle?.cabType,
+      capacity: trip.capacity,
+      fallbackFare: selectedPoint.point.fare,
+    });
+    if (stageFare === null) {
+      setBookingStartError("Pricing for this vehicle type is not configured at this stop yet.");
+      return;
+    }
     setBookingStartError(null);
     setCheckingPayment(true);
     try {
@@ -414,11 +435,17 @@ export default function Home() {
         stkAvailable = false;
       }
 
-      const feeAmount = calculateBookingFeeAmount(trip.platformFeeAmount ?? bookingFeeAmount, seats, charter);
+      const feeAmount = calculateVehicleBookingFee({
+        cabType: trip.vehicle?.cabType,
+        configuredPerSeatFee: trip.platformFeeAmount ?? bookingFeeAmount,
+        seats,
+        charter,
+      });
+      const charterFare = charter ? calculateCharterFare(trip.capacity, stageFare) : 0;
       const total =
         (charter
-          ? calculateCharterFare(trip.capacity, selectedPoint.point.fare)
-          : calculateSharedFare(selectedPoint.point.fare, trip.capacity, seats)) +
+          ? charterFare + calculateCharterVat(charterFare)
+          : calculateSharedFare(stageFare, trip.capacity, seats)) +
         (homePickup && !charter
           ? selectedPoint.point.homeSurcharge * seats
           : 0) +
@@ -433,11 +460,12 @@ export default function Home() {
       }
 
       setDraft({
-        trip: { ...trip, stages: [selectedPoint.point] },
+        trip: { ...trip, stages: [{ ...selectedPoint.point, fare: stageFare }] },
         stageId: selectedPoint.point.id,
         travelDate: date,
         seats,
         charter,
+        vehicleCategory: selectedVehicleCategory,
         homePickup,
         homeAddress: "",
         useCredit: preflight.useCredit,
@@ -499,52 +527,90 @@ export default function Home() {
     trip.train?.id === trainKey && trip.bookable &&
     (charter ? trip.seatsLeft === trip.capacity : trip.seatsLeft > 0),
   ), [trips, trainKey, charter]);
-  const visibleTrips = useMemo(() => queryKey && loadedQuery === queryKey
+  const routeTrips = useMemo(() => queryKey && loadedQuery === queryKey
     ? bookableTrips.filter(trip => trip.routeId === selectedPoint?.route.id)
     : [], [bookableTrips, loadedQuery, queryKey, selectedPoint]);
+  const vehicleChoices = useMemo(() => {
+    const counts = new Map<VehicleCategory, number>();
+    for (const trip of routeTrips) {
+      if (!trip.vehicle?.cabType) continue;
+      const category = vehicleCategoryFromCabType(trip.vehicle.cabType);
+      counts.set(category, (counts.get(category) ?? 0) + 1);
+    }
+    return VEHICLE_CATEGORIES.filter((category) => category !== "other" && counts.has(category)).map((category) => {
+      const matching = routeTrips.filter((trip) => vehicleCategoryFromCabType(trip.vehicle?.cabType) === category);
+      const hasFare = !!selectedPoint && matching.some((trip) => getStageFareForVehicle({
+        stageName: selectedPoint.point.name,
+        cabType: trip.vehicle?.cabType,
+        capacity: trip.capacity,
+        fallbackFare: selectedPoint.point.fare,
+      }) !== null);
+      return { category, count: counts.get(category) ?? 0, hasFare };
+    });
+  }, [routeTrips, selectedPoint]);
+  const visibleTrips = useMemo(() => selectedVehicleCategory && selectedPoint
+    ? routeTrips.filter((trip) => vehicleCategoryFromCabType(trip.vehicle?.cabType) === selectedVehicleCategory &&
+        getStageFareForVehicle({
+          stageName: selectedPoint.point.name,
+          cabType: trip.vehicle?.cabType,
+          capacity: trip.capacity,
+          fallbackFare: selectedPoint.point.fare,
+        }) !== null)
+    : [], [routeTrips, selectedVehicleCategory, selectedPoint]);
   const alternativeRoutes = Array.from(new Map(bookableTrips
     .filter(trip => trip.routeId !== selectedPoint?.route.id)
     .map(trip => [trip.routeId, trip.routeName])).entries());
 
   // How many seats can actually be booked on the cabs currently listed?
   const seatCap = useMemo(() => {
+    if (selectedVehicleCategory && isPerRideVehicle(selectedVehicleCategory)) return 1;
     if (loading) return 1;
     if (!visibleTrips.length) return 1;
     const maxLeft = Math.max(...visibleTrips.map((t) => Math.max(t.seatsLeft, 0)));
     return Math.max(1, Math.min(6, maxLeft));
-  }, [loading, visibleTrips]);
+  }, [loading, selectedVehicleCategory, visibleTrips]);
 
   const seats = Math.min(requestedSeats, seatCap);
 
   // Live fare preview
   const previewStage = selectedPoint?.point;
   const farePreview = (() => {
-    const charterFares = charter && previewStage
-      ? visibleTrips
-          .filter((trip) => trip.routeId === selectedPoint?.route.id)
-          .map((trip) => calculateCharterFare(trip.capacity, previewStage.fare))
+    const pricedTrips = previewStage && selectedPoint
+      ? visibleTrips.flatMap((trip) => {
+          const stageFare = getStageFareForVehicle({
+            stageName: previewStage.name,
+            cabType: trip.vehicle?.cabType,
+            capacity: trip.capacity,
+            fallbackFare: previewStage.fare,
+          });
+          if (stageFare === null) return [];
+          const baseFare = charter
+            ? calculateCharterFare(trip.capacity, stageFare)
+            : calculateSharedFare(stageFare, trip.capacity, seats);
+          const vat = charter ? calculateCharterVat(baseFare) : 0;
+          const platformFee = calculateVehicleBookingFee({
+            cabType: trip.vehicle?.cabType,
+            configuredPerSeatFee: trip.platformFeeAmount ?? bookingFeeAmount,
+            seats,
+            charter,
+          });
+          return [{ baseFare, vat, platformFee, total: baseFare + vat + (charter ? 0 : platformFee) }];
+        })
       : [];
-    const sharedFares = !charter && previewStage
-      ? visibleTrips.map((trip) => calculateSharedFare(previewStage.fare, trip.capacity, seats))
-      : [];
-    const base = charter
-      ? charterFares.length > 0 ? Math.min(...charterFares) : 0
-      : sharedFares.length > 0
-        ? Math.min(...sharedFares)
-        : (previewStage?.fare || 0) * seats;
-    const surcharge = homePickup && !charter
-      ? (previewStage?.homeSurcharge || 0) * seats
-      : 0;
-    const platformFee = selectedPoint
-      ? calculateBookingFeeAmount(bookingFeeAmount, seats, charter)
-      : 0;
+    const charterFares = charter ? pricedTrips.map((trip) => trip.baseFare + trip.vat) : [];
+    const sharedFares = !charter ? pricedTrips.map((trip) => trip.baseFare + trip.platformFee) : [];
+    const base = pricedTrips.length ? Math.min(...pricedTrips.map((trip) => trip.baseFare + trip.vat)) : 0;
+    const surcharge = 0;
+    const platformFee = pricedTrips.length ? Math.min(...pricedTrips.map((trip) => trip.platformFee)) : 0;
     return {
       base,
       surcharge,
       platformFee,
       hasCharterCab: charterFares.length > 0,
       hasVariableSharedFare: new Set(sharedFares).size > 1,
-      total: base + surcharge + (selectedPoint && !charter ? platformFee : 0),
+      total: pricedTrips.length
+        ? Math.min(...pricedTrips.map((trip) => trip.total)) + surcharge
+        : 0,
     };
   })();
 
@@ -996,10 +1062,53 @@ export default function Home() {
             </div>
             )}
 
+            {bookingCatalogueView === "booking" && selectedPoint && (
+              <section className="space-y-2" aria-labelledby="vehicle-choice-title">
+                <div>
+                  <h2 id="vehicle-choice-title" className="text-sm font-semibold">Choose your vehicle</h2>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">Pick a vehicle type first. We&apos;ll show the matching quote and available rides next.</p>
+                </div>
+                {loading ? (
+                  <p className="flex items-center gap-2 rounded-xl border bg-card px-3 py-3 text-xs text-muted-foreground" role="status">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Finding vehicles for this stop…
+                  </p>
+                ) : vehicleChoices.length > 0 ? (
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="group" aria-label="Choose a vehicle type">
+                    {vehicleChoices.map(({ category, count, hasFare }) => (
+                      <button
+                        key={category}
+                        type="button"
+                        disabled={!hasFare}
+                        aria-pressed={selectedVehicleCategory === category}
+                        onClick={() => {
+                          setSelectedVehicleCategory(category);
+                          if (isPerRideVehicle(category)) setCharter(false);
+                        }}
+                        className={cn(
+                          "flex min-h-[62px] items-center gap-2 rounded-xl border bg-card px-2.5 py-2 text-left transition-colors active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-55 disabled:active:scale-100",
+                          selectedVehicleCategory === category ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40",
+                        )}
+                      >
+                        <VehicleTypeIcon category={category} className="h-6 w-8 text-primary" />
+                        <span className="min-w-0">
+                          <span className="block text-xs font-semibold">{VEHICLE_CATEGORY_LABELS[category]}</span>
+                          <span className="block text-[10px] text-muted-foreground">{hasFare ? `${count} available` : "Pricing pending"}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="rounded-xl border bg-card px-3 py-3 text-xs text-muted-foreground">
+                    {tripsStatus === "error" ? "Vehicle availability could not load. Try again below." : "No bookable vehicles are available for this stop and train."}
+                  </p>
+                )}
+              </section>
+            )}
+
             {/* Ride type and door service: compact choices with explicit states. */}
-            {bookingCatalogueView === "booking" && selectedPoint && <section className="space-y-2.5" aria-labelledby="ride-options-title">
+            {bookingCatalogueView === "booking" && selectedPoint && selectedVehicleCategory && <section className="space-y-2.5" aria-labelledby="ride-options-title">
               <h2 id="ride-options-title" className="text-sm font-semibold">Choose your ride</h2>
-              <div className="grid grid-cols-2 gap-2">
+              <div className={cn("grid gap-2", isPerRideVehicle(selectedVehicleCategory) ? "grid-cols-1" : "grid-cols-2")}>
                 <button
                   type="button"
                   aria-pressed={!charter}
@@ -1007,14 +1116,14 @@ export default function Home() {
                   className={cn("rounded-xl border bg-card p-3 text-left transition-all active:scale-[0.97] active:duration-75", !charter ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
                 >
                   <span className="flex items-center gap-2">
-                    <Users className="h-4 w-4 shrink-0 text-primary" />
+                    {isPerRideVehicle(selectedVehicleCategory) ? <VehicleTypeIcon category={selectedVehicleCategory} className="h-4 w-5 shrink-0 text-primary" /> : <Users className="h-4 w-4 shrink-0 text-primary" />}
                     <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium">Hail a seat</span>
-                      <span className="block text-[11px] text-muted-foreground">Share with other passengers</span>
+                      <span className="block truncate text-sm font-medium">{isPerRideVehicle(selectedVehicleCategory) ? "Book a ride" : "Hail a seat"}</span>
+                      <span className="block text-[11px] text-muted-foreground">{isPerRideVehicle(selectedVehicleCategory) ? "One passenger · listed fare per ride" : "Share with other passengers"}</span>
                     </span>
                   </span>
                 </button>
-                <button
+                {selectedVehicleCategory && !isPerRideVehicle(selectedVehicleCategory) && <button
                   type="button"
                   aria-pressed={charter}
                   onClick={() => setCharter(true)}
@@ -1027,7 +1136,7 @@ export default function Home() {
                       <span className="block text-[11px] text-muted-foreground">Your group · no distance fee</span>
                     </span>
                   </span>
-                </button>
+                </button>}
               </div>
 
               <fieldset className="space-y-1.5">
@@ -1051,7 +1160,7 @@ export default function Home() {
                   <button
                     type="button"
                     aria-pressed={homePickup}
-                    disabled={!selectedPoint || !charter}
+                    disabled={!selectedPoint || (!charter && !offstageQuoteRouteIds.includes(selectedPoint.route.id))}
                     onClick={() => setHomePickup(true)}
                     className={cn("min-h-[60px] rounded-xl border bg-card px-2.5 py-2 text-left transition-all active:scale-[0.97] active:duration-75 disabled:cursor-not-allowed disabled:opacity-55 disabled:active:scale-100", homePickup ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
                   >
@@ -1063,7 +1172,9 @@ export default function Home() {
                         ? "Choose a designated stage first"
                         : charter
                           ? "Charter · no extra distance fee"
-                          : "Shared ride distance pricing is not ready yet"}
+                          : offstageQuoteRouteIds.includes(selectedPoint.route.id)
+                            ? "Shared ride · distance surcharge quoted from your address"
+                            : "Address rides are not enabled for this route yet"}
                     </span>
                   </button>
                 </div>
@@ -1071,13 +1182,21 @@ export default function Home() {
 
               <div className="flex items-center justify-between rounded-xl border bg-card px-3.5 py-3">
                 <span>
-                  <span className="block text-xs text-muted-foreground">Estimated total{charter ? " · whole cab" : seats > 1 ? ` · ${seats} seats` : ""}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {homePickup && !charter
+                      ? `Stage fare${seats > 1 ? ` · ${seats} seats` : ""} · distance quote added in booking`
+                      : `Estimated total${charter ? " · whole cab · VAT included" : seats > 1 ? ` · ${seats} seats` : ""}`}
+                  </span>
                   <span className="block text-[11px] text-muted-foreground">
                     {selectedPoint
                       ? charter
-                      ? `${ksh(bookingFeeAmount)} fee included in Mireli's 10% share`
-                        : `${ksh(bookingFeeAmount)} × ${seats} seat${seats === 1 ? "" : "s"} = ${ksh(farePreview.platformFee)} Mireli fee`
-                      : "Final amount shown before payment"}
+                        ? `${ksh(farePreview.platformFee)} fee included in Mireli's 10% share`
+                        : selectedVehicleCategory && isPerRideVehicle(selectedVehicleCategory)
+                          ? `${ksh(farePreview.platformFee)} Mi-Reli fee per ride`
+                          : `${ksh(bookingFeeAmount)} × ${seats} seat${seats === 1 ? "" : "s"} = ${ksh(farePreview.platformFee)} Mi-Reli fee`
+                      : homePickup && !charter
+                        ? "KSh 50 per half-kilometre per seat is added from the nearest stage"
+                        : "Final amount shown before payment"}
                   </span>
                 </span>
                 <span className="text-lg font-bold tabular-nums text-primary">
@@ -1093,7 +1212,7 @@ export default function Home() {
             </section>}
 
             {/* Seats (pooled only) */}
-            {bookingCatalogueView === "booking" && selectedPoint && !charter && (
+            {bookingCatalogueView === "booking" && selectedPoint && selectedVehicleCategory && !charter && (
               <div>
                 <div className="mb-2 flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
                   <Users className="h-3.5 w-3.5" /> How many seats?
@@ -1113,7 +1232,7 @@ export default function Home() {
             )}
 
             {/* Available cabs */}
-            {bookingCatalogueView === "booking" && (selectedPoint || (hasEligibleDrivers === false && routesStatus !== "loading" && routesStatus !== "empty")) && <div className="space-y-2">
+            {bookingCatalogueView === "booking" && selectedVehicleCategory && (selectedPoint || (hasEligibleDrivers === false && routesStatus !== "loading" && routesStatus !== "empty")) && <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium">
                   {charter ? "Available for charter" : "Available pooled cabs"}
@@ -1199,7 +1318,6 @@ export default function Home() {
                       trip={trip}
                       pointName={selectedPoint?.point.name}
                       pointFare={selectedPoint?.point.fare}
-                      pointSurcharge={selectedPoint?.point.homeSurcharge}
                       seats={seats}
                       charter={charter}
                       homePickup={homePickup}
@@ -1356,7 +1474,6 @@ function CabCard({
   trip,
   pointName,
   pointFare,
-  pointSurcharge,
   seats,
   charter,
   homePickup,
@@ -1367,7 +1484,6 @@ function CabCard({
   trip: BookableTrip;
   pointName?: string;
   pointFare?: number;
-  pointSurcharge?: number;
   seats: number;
   charter: boolean;
   homePickup: boolean;
@@ -1376,16 +1492,30 @@ function CabCard({
   onBook: () => void;
 }) {
   const booked = trip.capacity - trip.seatsLeft;
-  const baseFare = pointFare == null
+  const approvedStageFare = pointFare == null ? null : getStageFareForVehicle({
+    stageName: pointName ?? "",
+    cabType: trip.vehicle?.cabType,
+    capacity: trip.capacity,
+    fallbackFare: pointFare,
+  });
+  const baseFare = approvedStageFare == null
     ? 0
     : charter
-      ? calculateCharterFare(trip.capacity, pointFare)
-      : calculateSharedFare(pointFare, trip.capacity, seats);
-  const surcharge = homePickup && !charter ? (pointSurcharge ?? 0) * seats : 0;
-  const platformFee = calculateBookingFeeAmount(trip.platformFeeAmount, seats, charter);
-  const fare = baseFare + surcharge + (hasPoint && !charter ? platformFee : 0);
+      ? calculateCharterFare(trip.capacity, approvedStageFare)
+      : calculateSharedFare(approvedStageFare, trip.capacity, seats);
+  const vatAmount = charter ? calculateCharterVat(baseFare) : 0;
+  // Shared door-to-door quotes use the server's routed distance and are
+  // intentionally not estimated from the legacy fixed stage surcharge.
+  const surcharge = 0;
+  const platformFee = calculateVehicleBookingFee({
+    cabType: trip.vehicle?.cabType,
+    configuredPerSeatFee: trip.platformFeeAmount,
+    seats,
+    charter,
+  });
+  const fare = baseFare + vatAmount + surcharge + (hasPoint && !charter ? platformFee : 0);
   const insufficientSeats = charter ? trip.seatsLeft !== trip.capacity : trip.seatsLeft < seats;
-  const full = insufficientSeats || !trip.bookable;
+  const full = insufficientSeats || !trip.bookable || approvedStageFare === null;
 
   return (
     <Card className="overflow-hidden">
@@ -1405,14 +1535,16 @@ function CabCard({
           </div>
           <div className="shrink-0 text-right">
             <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-              {charter ? "Charter" : seats > 1 ? `${seats} seats` : "Fare"}
+                  {charter ? "Charter · incl. VAT" : homePickup ? "Stage fare + distance" : vehicleCategoryFromCabType(trip.vehicle?.cabType) && isPerRideVehicle(vehicleCategoryFromCabType(trip.vehicle?.cabType)) ? "Ride fare" : seats > 1 ? `${seats} seats` : "Fare"}
             </div>
             <div className="font-bold tabular-nums text-primary">{ksh(fare)}</div>
             {hasPoint && (
               <div className="text-[10px] text-muted-foreground">
                 {charter
-                  ? `${ksh(platformFee)} fee in the 10% share`
-                  : `${ksh(trip.platformFeeAmount)} × ${seats} Mireli fee`}
+                  ? <>{ksh(platformFee)} fee in the 10% share · {ksh(vatAmount)} VAT</>
+                  : isPerRideVehicle(vehicleCategoryFromCabType(trip.vehicle?.cabType))
+                    ? `${ksh(platformFee)} Mi-Reli fee per ride`
+                    : `${ksh(trip.platformFeeAmount)} × ${seats} Mi-Reli fee`}
               </div>
             )}
           </div>
@@ -1435,9 +1567,8 @@ function CabCard({
             )}
             {trip.vehicle?.cabType && (
               <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">
-                <Car className="h-3 w-3" />
+                <VehicleTypeIcon category={vehicleCategoryFromCabType(trip.vehicle.cabType)} className="h-3 w-4" />
                 {trip.vehicle.cabType}
-                {trip.vehicle.plate ? ` · ${trip.vehicle.plate}` : ""}
               </span>
             )}
           </div>
@@ -1450,12 +1581,18 @@ function CabCard({
             : !hasPoint
             ? `Choose a ${trip.pointsLabel} point first`
             : full
-            ? insufficientSeats
+              ? approvedStageFare === null
+                ? "Fare not configured"
+                : insufficientSeats
               ? "Not enough seats"
               : "Unavailable"
             : charter
               ? `Book charter · ${ksh(fare)}`
-              : `Reserve ${seats > 1 ? `${seats} seats` : "seat"} · ${ksh(fare)}`}
+              : homePickup
+                ? `Request address ride · from ${ksh(fare)}`
+                : isPerRideVehicle(vehicleCategoryFromCabType(trip.vehicle?.cabType))
+                  ? `Book ride · ${ksh(fare)}`
+                : `Reserve ${seats > 1 ? `${seats} seats` : "seat"} · ${ksh(fare)}`}
         </Button>
       </CardContent>
     </Card>

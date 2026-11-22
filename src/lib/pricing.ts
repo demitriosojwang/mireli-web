@@ -1,6 +1,6 @@
-/** Default Mireli fee in KSh per passenger seat on a shared booking.
- *  A charter still records one KSh 50 fee inside its 10% platform share. */
-export const DEFAULT_BOOKING_FEE_AMOUNT = 50;
+/** Default Mi-Reli fee in KSh per passenger seat on a shared booking.
+ *  A charter still records one KSh 60 fee inside its 10% platform share. */
+export const DEFAULT_BOOKING_FEE_AMOUNT = 60;
 
 /** Off-stage shared-ride surcharge: half the road kilometres × KSh 50. */
 export function calculateOffstageSurcharge(distanceMeters: number): number {
@@ -54,7 +54,7 @@ export function calculateSharedSeatFare(stageFare: number, vehicleCapacity: numb
       !Number.isSafeInteger(vehicleCapacity) || vehicleCapacity < 1) {
     throw new RangeError("Shared fare requires a valid stage fare and vehicle capacity.");
   }
-  // Every shared passenger pays the approved stage fare. The separate KSh 50
+  // Every shared passenger pays the approved stage fare. The separate KSh 60
   // booking fee is added per seat and retained by Mireli, regardless of cab size.
   return stageFare;
 }
@@ -68,7 +68,7 @@ export function calculateSharedFare(stageFare: number, vehicleCapacity: number, 
   return total;
 }
 
-/** Shared bookings retain the configured fee for every passenger seat.
+/** Hailed bookings retain the configured KSh 60 fee per passenger seat.
  *  Charters retain one fee line; it is included within the 10% share. */
 export function calculateBookingFeeAmount(perSeatAmount: number, seats: number, isCharter = false): number {
   if (!Number.isSafeInteger(perSeatAmount) || perSeatAmount < 0 ||

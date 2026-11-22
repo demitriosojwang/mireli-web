@@ -15,16 +15,16 @@ describe("public booking-fee discovery", () => {
     expect(await response.json()).toEqual({ bookingFeeAmount: 75 });
   });
 
-  it("uses the confirmed KSh 50 fee when no platform config exists", async () => {
+  it("uses the confirmed KSh 60 fee when no platform config exists", async () => {
     configFindUnique.mockResolvedValue(null);
     const response = await GET();
-    expect(await response.json()).toEqual({ bookingFeeAmount: 50 });
+    expect(await response.json()).toEqual({ bookingFeeAmount: 60 });
   });
 
   it("does not publish an invalid fee value from a corrupted config row", async () => {
     configFindUnique.mockResolvedValue({ bookingFeeAmount: -1 });
     const response = await GET();
-    expect(await response.json()).toEqual({ bookingFeeAmount: 50 });
+    expect(await response.json()).toEqual({ bookingFeeAmount: 60 });
   });
 
   it("falls back to the confirmed fee on config failure without logging secrets", async () => {
@@ -33,7 +33,7 @@ describe("public booking-fee discovery", () => {
     const response = await GET();
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ bookingFeeAmount: 50 });
+    expect(await response.json()).toEqual({ bookingFeeAmount: 60 });
     expect(log).toHaveBeenCalledWith("booking fee discovery failed", { code: "P1001" });
     expect(JSON.stringify(log.mock.calls)).not.toContain("secret");
   });

@@ -28,9 +28,12 @@ import { ksh, fmtTime } from "@/lib/format";
 import { MIRELI_SUPPORT_PHONE_LOCAL, MIRELI_SUPPORT_WHATSAPP_NUMBER } from "@/lib/support";
 import { DEFAULT_FULL_REFUND_CUTOFF_MINUTES, describeCancellationCutoff } from "@/lib/cancellation-policy";
 import { NATIONALITIES, DEFAULT_NATIONALITY } from "@/lib/nationalities";
-import { calculateBookingFeeAmount, calculateSharedFare, calculateSharedSeatFare, DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
+import { calculateSharedFare, calculateSharedSeatFare, DEFAULT_BOOKING_FEE_AMOUNT } from "@/lib/pricing";
 import { calculateCharterFare } from "@/lib/charter-pricing";
-import { Crown, Home, Loader2, MapPin, Ticket as TicketIcon, TrainFront, UserRound, AlarmClock, LogIn } from "lucide-react";
+import { calculateCharterVat, calculateIncludedVat } from "@/lib/charter-vat";
+import { calculateVehicleBookingFee, isPerRideVehicle } from "@/lib/vehicle-fares";
+import type { VehicleCategory } from "@/lib/vehicle-types";
+import { Crown, Home, Loader2, MapPin, Ticket as TicketIcon, TrainFront, Plane, UserRound, AlarmClock, LogIn } from "lucide-react";
 import { DotBadge } from "@/components/app/shared";
 
 export interface Stage {
@@ -38,6 +41,7 @@ export interface Stage {
   name: string;
   order: number;
   fare: number;
+  homeSurcharge?: number;
 }
 
 export interface TrainInfo {
@@ -66,7 +70,8 @@ export interface BookableTrip {
   bookable: boolean;
   lockNote?: string | null;
   pointsLabel: "drop-off" | "pickup";
-  vehicle?: { cabType: string; plate: string } | null;
+  vehicle?: { cabType: string } | null;
+  shuttle?: { id: string; airportCode: string; airportName: string; direction: "FROM_AIRPORT" | "TO_AIRPORT" } | null;
 }
 
 export interface BookableTripWithStages extends BookableTrip {
@@ -80,6 +85,7 @@ export interface BookingDraft {
   travelDate: string;
   seats: number;
   charter: boolean;
+  vehicleCategory: VehicleCategory;
   homePickup: boolean;
   homeAddress: string;
   useCredit: boolean;
@@ -93,6 +99,8 @@ interface CreateResponse {
     fareAmount: number;
     baseFareAmount: number;
     isCharter: boolean;
+    vatAmount: number;
+    vatInclusive: boolean;
     platformFeeAmount: number;
     homeSurcharge: number;
     seats: number;
@@ -212,9 +220,17 @@ function BookingSheetContent({
       ? calculateCharterFare(trip.capacity, stage.fare)
       : calculateSharedFare(stage.fare, trip.capacity, draft?.seats || 1))
     : 0;
+  const vatInclusive = !!draft && !trip?.shuttle && isPerRideVehicle(draft.vehicleCategory) && !draft.charter;
+  const vatAmount = draft?.charter
+    ? calculateCharterVat(fare)
+    : vatInclusive
+      ? calculateIncludedVat(fare)
+      : 0;
   const bookingFeePerSeat = trip?.platformFeeAmount ?? DEFAULT_BOOKING_FEE_AMOUNT;
-  const platformFeeAmount = calculateBookingFeeAmount(bookingFeePerSeat, draft?.seats || 1, !!draft?.charter);
-  const total = fare + (draft?.charter ? 0 : platformFeeAmount);
+  const platformFeeAmount = trip
+    ? calculateVehicleBookingFee({ cabType: trip.vehicle?.cabType, configuredPerSeatFee: bookingFeePerSeat, seats: draft?.seats || 1, charter: !!draft?.charter })
+    : 0;
+  const total = fare + (draft?.charter ? vatAmount : 0) + (draft?.charter ? 0 : platformFeeAmount);
   const creditApplied = useCredit ? Math.min(creditBalance, total) : 0;
   const cashDue = total - creditApplied;
   const detailsOk = detailsComplete(details);
@@ -318,6 +334,8 @@ function BookingSheetContent({
                     ? "Nearest-stage fare + road distance + Mireli fee"
                     : isCharter
                     ? `${ksh(platformFeeAmount)} fee included in Mireli's 10% share`
+                    : vatInclusive
+                      ? "KSh 100 Mi-Reli fee per ride"
                     : `${ksh(bookingFeePerSeat)} × ${draft.seats} seat${draft.seats === 1 ? "" : "s"} Mireli fee`}
                 </div>
                 {isCharter && (
@@ -378,13 +396,25 @@ function BookingSheetContent({
                     </div>
                   </>
                 )}
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">{created.offstageQuote ? "Total before credit" : "Total fare"}</span>
-                  <span className="font-medium">{ksh(created.fareAmount)}</span>
-                </div>
+                {!created.offstageQuote && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">{created.isCharter ? "Charter fare" : "Driver fare"}</span>
+                    <span className="font-medium">{ksh(created.baseFareAmount)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>{created.isCharter ? "Mireli fee (inside 10%)" : "Mireli fee"}</span>
+                  <span>{created.isCharter ? "Mi-Reli fee (inside 10%)" : created.vatInclusive ? "Mi-Reli fee per ride" : "Mi-Reli fee"}</span>
                   <span>{ksh(created.platformFeeAmount)}</span>
+                </div>
+                {created.vatAmount > 0 && (
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>{created.vatInclusive ? "VAT included in ride fare" : "VAT · 16% added on top"}</span>
+                    <span>{ksh(created.vatAmount)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Total before credit</span>
+                  <span className="font-medium">{ksh(created.fareAmount)}</span>
                 </div>
                 {created.offstageQuote && (
                   <div className="flex justify-between text-xs text-muted-foreground">
@@ -448,22 +478,27 @@ function BookingSheetContent({
                       ? trip.direction === "FROM_TERMINUS"
                         ? "Drop-off near"
                         : "Pickup near"
+                      : trip.shuttle
+                        ? trip.direction === "FROM_AIRPORT" ? "Drop-off at terminus" : "Airport destination"
                       : trip.direction === "FROM_TERMINUS"
                         ? "Drop-off point"
                         : "Pickup point"}
                   </div>
                   <div className="font-medium">{stage?.name}</div>
                   <div className="text-xs text-muted-foreground">
-                    {draft.homePickup ? "door-to-door" : "shared stage"} · {trip.routeName.includes("North") ? "North" : "South"} Coast
+                    {trip.shuttle ? "airport shuttle" : draft.homePickup ? "door-to-door" : "shared stage"}
                   </div>
                 </div>
                 <div className="rounded-lg bg-secondary/60 p-3">
                   <div className="mb-1 flex items-center gap-1 text-[11px] text-muted-foreground">
-                    <TrainFront className="h-3 w-3" /> Train
+                    {trip.shuttle ? <Plane className="h-3 w-3" /> : <TrainFront className="h-3 w-3" />}
+                    {trip.shuttle ? "Airport shuttle" : "Train"}
                   </div>
-                  <div className="font-medium">{trip.train?.name ?? "Shuttle"}</div>
+                  <div className="font-medium">{trip.shuttle?.airportName ?? trip.train?.name ?? "Shuttle"}</div>
                   <div className="text-xs text-muted-foreground">
-                    {trip.direction === "FROM_TERMINUS"
+                    {trip.shuttle
+                      ? trip.direction === "FROM_AIRPORT" ? "Airport → Mombasa Terminus" : "Mombasa Terminus → airport"
+                      : trip.direction === "FROM_TERMINUS"
                       ? `Meets · MTM ${trip.train?.mtmTime ?? fmtTime(trip.departureAt)}`
                       : `Catches · MTM ${trip.train?.mtmTime ?? fmtTime(trip.departureAt)}`}
                   </div>
@@ -643,9 +678,21 @@ function BookingSheetContent({
                 ) : (
                   <>
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">{isCharter ? "Charter fare" : `Fare × ${draft.seats}`}</span>
+                  <span className="text-muted-foreground">
+                    {isCharter ? "Charter fare" : isPerRideVehicle(draft.vehicleCategory) ? "Ride fare" : `Fare × ${draft.seats}`}
+                  </span>
                   <span className="font-medium tabular-nums">{ksh(fare)}</span>
                 </div>
+                <div className="flex items-center justify-between text-muted-foreground">
+                  <span>{isCharter ? "Mi-Reli fee (inside 10%)" : isPerRideVehicle(draft.vehicleCategory) ? "Mi-Reli fee per ride" : `Mi-Reli fee × ${draft.seats} seat${draft.seats === 1 ? "" : "s"}`}</span>
+                  <span className="font-medium tabular-nums">{ksh(platformFeeAmount)}</span>
+                </div>
+                {vatAmount > 0 && (
+                  <div className="flex items-center justify-between text-muted-foreground">
+                    <span>{vatInclusive ? "VAT included in ride fare" : "VAT · 16% added on top"}</span>
+                    <span className="font-medium tabular-nums">{ksh(vatAmount)}</span>
+                  </div>
+                )}
                 {creditBalance > 0 && (
                   <label className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-2">
                     <Checkbox checked={useCredit} onCheckedChange={(v) => setUseCredit(v === true)} className="mt-0.5" />

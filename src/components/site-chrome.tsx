@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Anchor, Info, Plane, PlaneTakeoff, User, Wallet } from "lucide-react";
+import { Anchor, Info, Plane, User, Wallet } from "lucide-react";
 import { useMe } from "@/lib/client";
 import { cn } from "@/lib/utils";
 
@@ -80,8 +80,7 @@ export function SiteNav() {
 
   const items = [
     { href: "/", label: "Book", icon: Anchor, active: pathname === "/" },
-    { href: "/airport-transfers", label: "Airports", icon: Plane, active: pathname === "/airport-transfers" },
-    { href: "/airports", label: "Shuttles", icon: PlaneTakeoff, active: pathname === "/airports" },
+    { href: "/airports", label: "Airports", icon: Plane, active: pathname === "/airports" || pathname === "/airport-transfers" },
     { href: "/bookings", label: "My rides", icon: User, active: pathname === "/bookings" },
     {
       href: "/credits",
@@ -93,7 +92,7 @@ export function SiteNav() {
 
   return (
     <div className="mx-auto w-full max-w-md px-4 pb-2.5 sm:max-w-2xl sm:px-6 lg:max-w-4xl xl:max-w-5xl">
-      <nav aria-label="Passenger" className="grid grid-cols-5 gap-1 rounded-2xl bg-secondary/50 p-1 backdrop-blur-sm">
+      <nav aria-label="Passenger" className="grid grid-cols-4 gap-1 rounded-2xl bg-secondary/50 p-1 backdrop-blur-sm">
         {items.map((item) => (
           <Link
             key={item.href}
@@ -157,8 +156,8 @@ function AboutSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: b
           <section className="space-y-1.5">
             <h3 className="text-base font-semibold">How fares and driver pay work</h3>
             <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground">
-              <li>Shared rides charge the listed stage fare plus a KSh 50 Mireli fee for each booked seat. Private charters use Mireli&apos;s 10% share.</li>
-              <li>Charter total is vehicle seat capacity × (the approved per-seat fare + KSh 100 per seat). The KSh 50 fee is included, not added again.</li>
+              <li>Shared hailed rides charge the listed stage fare plus a KSh 60 Mi-Reli fee for each booked seat. Motorbike rides use their listed per-ride fare plus a KSh 100 fee.</li>
+              <li>Charter total is vehicle seat capacity × (the approved per-seat fare + KSh 100 per seat), with 16% VAT added on top. Mi-Reli keeps 10% of the charter fare.</li>
               <li>Mireli keeps 10% of the charter total; the remaining 90% goes to the driver. Charters have no extra-distance surcharge.</li>
             </ul>
           </section>

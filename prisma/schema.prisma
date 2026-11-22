@@ -561,7 +561,7 @@ model MpesaTransaction {
 model PlatformConfig {
   id                         String    @id @default("main")
   commissionRate             Float     @default(0.10) // charter commission; must stay under NTSA 18% cap
-  bookingFeeAmount           Int       @default(50) // KSh Mireli fee per shared passenger seat; one fee is included in a charter's 10% share
+  bookingFeeAmount           Int       @default(60) // KSh Mireli fee per hailed passenger seat; one fee is included in a charter's 10% share
   fullRefundCutoffMinutes    Int       @default(1440) // 24 hours before scheduled pickup
   seatFillThresholdPercent   Int       @default(70) // trip locks early when this full
   creditValidityDays         Int       @default(30) // late-cancellation credit validity

@@ -128,7 +128,7 @@ beforeEach(() => {
   mocks.bookingFindUnique.mockResolvedValue(null);
   mocks.bookingUpdate.mockResolvedValue({ id: "booking-1" });
   mocks.bookingDelete.mockResolvedValue({ id: "booking-1" });
-  mocks.tripFindUnique.mockResolvedValue({ capacity: 4, routeId: "route-1", direction: "FROM_TERMINUS" });
+  mocks.tripFindUnique.mockResolvedValue({ capacity: 4, routeId: "route-1", direction: "FROM_TERMINUS", trainId: "train-1", shuttleSlotId: null, driver: { cabType: "Car" } });
   mocks.allocateBooking.mockResolvedValue({ tripId: null, note: "No eligible drivers." });
   mocks.isOffstageQuoteRouteEnabled.mockReturnValue(false);
   mocks.quoteOffstageAddress.mockResolvedValue({
@@ -292,8 +292,8 @@ describe("booking creation with no driver supply", () => {
 
     const response = await POST(request(validBookingBody()));
 
-    expect(response.status).toBe(503);
-    expect((await response.json()).error).toContain("fare is not configured");
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toContain("Pricing for this vehicle type is not configured");
     expect(mocks.bookingCreate).not.toHaveBeenCalled();
     expect(mocks.allocateBooking).not.toHaveBeenCalled();
   });
@@ -523,15 +523,22 @@ describe("booking creation with no driver supply", () => {
     expect(decryptPassengerIdNumber(storedId)).toBe("12345678");
     expect(mocks.tripFindUnique).toHaveBeenCalledWith({
       where: { id: "trip-1" },
-      select: { capacity: true, routeId: true, direction: true },
+      select: {
+        capacity: true,
+        routeId: true,
+        direction: true,
+        trainId: true,
+        shuttleSlotId: true,
+        driver: { select: { cabType: true } },
+      },
     });
     expect(mocks.tripFindUnique.mock.invocationCallOrder[0]).toBeLessThan(mocks.bookingCreate.mock.invocationCallOrder[0]);
     expect(mocks.bookingCreate.mock.invocationCallOrder[0]).toBeLessThan(mocks.allocateBooking.mock.invocationCallOrder[0]);
   });
 
-  it("applies the approved stage fare and KSh 50 fee per shared seat for a large cab", async () => {
+  it("reduces a 10-seater driver fare by KSh 50 per seat and keeps the fee separate", async () => {
     mocks.passengerFindUnique.mockResolvedValue({ id: "passenger-1", phone: "+254712345678" });
-    mocks.tripFindUnique.mockResolvedValue({ capacity: 10, routeId: "route-1", direction: "FROM_TERMINUS" });
+    mocks.tripFindUnique.mockResolvedValue({ capacity: 10, routeId: "route-1", direction: "FROM_TERMINUS", trainId: "train-1", shuttleSlotId: null, driver: { cabType: "Van" } });
     mocks.routeFindUnique.mockResolvedValue({
       id: "route-1",
       active: true,
@@ -544,7 +551,7 @@ describe("booking creation with no driver supply", () => {
     expect(response.status).toBe(409); // The fixture has no assignable driver.
     expect(mocks.bookingCreate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        fareAmount: 900, // approved KSh 400 × 2 + KSh 50 × 2
+        fareAmount: 800, // ((approved KSh 400 - KSh 50) + KSh 50 fee) × 2 seats
         platformFeeAmount: 100,
         homeSurcharge: 0,
         seats: 2,
@@ -581,7 +588,7 @@ describe("booking creation with no driver supply", () => {
     }));
 
     mocks.bookingCreate.mockClear();
-    mocks.tripFindUnique.mockResolvedValue({ capacity: 4, routeId: "route-1", direction: "TO_TERMINUS" });
+    mocks.tripFindUnique.mockResolvedValue({ capacity: 4, routeId: "route-1", direction: "TO_TERMINUS", trainId: "train-1", shuttleSlotId: null, driver: { cabType: "Car" } });
     await POST(request(validBookingBody({
       direction: "TO_TERMINUS",
       isCharter: true,
