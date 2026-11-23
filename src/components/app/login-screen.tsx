@@ -55,6 +55,32 @@ function BrandHero() {
   );
 }
 
+/**
+ * Full-screen brand backdrop: deep navy with an emerald glow, echoing the
+ * Mi-Reli logo's coast-and-rail mark. The sign-in card floats above it like a
+ * bottom sheet, so the flow reads as one continuous brand surface.
+ */
+function BrandBackdrop() {
+  return (
+    <div aria-hidden className="fixed inset-0 bg-[#0d1b2e]">
+      <div
+        className="absolute inset-0 opacity-60"
+        style={{ background: "radial-gradient(130% 90% at 50% -10%, rgba(74,222,128,0.22) 0%, rgba(13,27,46,0) 55%)" }}
+      />
+      <div
+        className="absolute inset-0 opacity-30"
+        style={{ background: "radial-gradient(90% 60% at 85% 110%, rgba(16,185,129,0.25) 0%, rgba(13,27,46,0) 60%)" }}
+      />
+      <div
+        className="absolute inset-0 opacity-[0.07]"
+        style={{
+          backgroundImage: "repeating-linear-gradient(115deg, rgba(255,255,255,0.6) 0px, rgba(255,255,255,0.6) 1px, transparent 1px, transparent 26px)",
+        }}
+      />
+    </div>
+  );
+}
+
 export function LoginScreen({ onDone }: { onDone: () => void }) {
   const [identifier, setIdentifier] = useState("");
   const [code, setCode] = useState<string[]>(Array(6).fill(""));
@@ -172,11 +198,21 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
   const stepIndex = step === "identifier" ? 0 : step === "otp" ? 1 : 2;
 
   return (
-    <div className="flex min-h-dvh flex-1 flex-col bg-background">
-      <BrandHero />
-      <div className="flex flex-1 flex-col px-6 pt-6">
+    <div className="relative flex min-h-dvh flex-1 flex-col">
+      <BrandBackdrop />
+      {/* Floating sign-in card over the brand backdrop */}
+      <div className="relative flex flex-1 flex-col px-4 pb-8 pt-10" style={{ paddingTop: "calc(env(safe-area-inset-top) + 2.5rem)" }}>
+        <div className="mx-auto w-full max-w-sm rounded-3xl border border-white/10 bg-background/95 p-6 shadow-2xl shadow-black/40 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3 pb-5">
+            <div className="rounded-2xl bg-white/95 p-1.5 shadow-md shadow-black/30">
+              <LogoTile size="lg" />
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight">
+              <span className="text-emerald-600">Mireli</span> Passenger
+            </h1>
+          </div>
         {/* Step progress */}
-        <div className="mx-auto flex w-full max-w-sm items-center gap-1.5" aria-hidden>
+        <div className="flex items-center gap-1.5" aria-hidden>
           {["Sign in", "Verify", "Details"].map((label, index) => (
             <div key={label} className="flex flex-1 flex-col gap-1">
               <div
@@ -391,21 +427,22 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
                 </motion.div>
               )}
             </AnimatePresence>
+
+            {/* Trust indicators */}
+            <div className="space-y-2 border-t pt-4">
+              {TRUST_POINTS.map((point) => (
+                <div key={point} className="flex items-start gap-2 text-[11px] leading-snug text-muted-foreground">
+                  <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                  <span>{point}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+        </div>
 
-      {/* Trust indicators */}
-      <div className="mx-auto w-full max-w-sm space-y-2 px-6 pb-2">
-        {TRUST_POINTS.map((point) => (
-          <div key={point} className="flex items-start gap-2 text-[11px] leading-snug text-muted-foreground">
-            <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
-            <span>{point}</span>
-          </div>
-        ))}
+        <div className="pt-5 text-center text-[10px] text-slate-400">Mi-Reli · Mombasa Terminus · Kenya Coast</div>
       </div>
-
-      <div className="px-6 pb-6 pt-2 text-center text-[10px] text-muted-foreground">Mi-Reli · Mombasa Terminus · Kenya Coast</div>
     </div>
   );
 }
