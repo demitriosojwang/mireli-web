@@ -28,6 +28,33 @@ const TRUST_POINTS = [
   "Verification codes expire after 5 minutes. Sign-in sessions expire after 7 days.",
 ];
 
+/** Driver-app-inspired brand panel: dark hero, green accent wordmark. */
+function BrandHero() {
+  return (
+    <div className="relative overflow-hidden bg-[#0d1b2e] px-6 pb-10 pt-12 text-center" style={{ paddingTop: "calc(env(safe-area-inset-top) + 3rem)" }}>
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-40"
+        style={{ background: "radial-gradient(120% 80% at 50% 0%, rgba(74,222,128,0.18) 0%, rgba(13,27,46,0) 60%)" }}
+      />
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: DURATION.brand, ease: EASE_OUT }}
+        className="relative"
+      >
+        <div className="mx-auto w-fit rounded-3xl bg-white/95 p-1.5 shadow-lg shadow-black/30">
+          <LogoTile size="lg" />
+        </div>
+      </motion.div>
+      <h1 className="relative mt-5 text-3xl font-bold tracking-tight text-white">
+        <span className="text-emerald-400">Mireli</span> Passenger
+      </h1>
+      <p className="relative mt-2 text-sm text-slate-300">Book your ride, track your journey and manage your trips.</p>
+    </div>
+  );
+}
+
 export function LoginScreen({ onDone }: { onDone: () => void }) {
   const [identifier, setIdentifier] = useState("");
   const [code, setCode] = useState<string[]>(Array(6).fill(""));
@@ -146,22 +173,10 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="flex min-h-dvh flex-1 flex-col bg-background">
-      <div className="flex flex-1 flex-col">
-        {/* Brand header */}
-        <div className="flex flex-col items-center px-6 pt-10">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: DURATION.brand, ease: EASE_OUT }}
-          >
-            <LogoTile size="lg" />
-          </motion.div>
-          <h1 className="mb-0.5 mt-4 text-2xl font-bold tracking-tight">Mi-Reli</h1>
-          <p className="text-sm text-muted-foreground">Ride · Connect · Journey</p>
-        </div>
-
+      <BrandHero />
+      <div className="flex flex-1 flex-col px-6 pt-6">
         {/* Step progress */}
-        <div className="mx-auto mt-6 flex w-full max-w-sm items-center gap-1.5 px-6" aria-hidden>
+        <div className="mx-auto flex w-full max-w-sm items-center gap-1.5" aria-hidden>
           {["Sign in", "Verify", "Details"].map((label, index) => (
             <div key={label} className="flex flex-1 flex-col gap-1">
               <div
@@ -177,7 +192,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
           ))}
         </div>
 
-        <div className="flex flex-1 flex-col items-center px-6 py-6">
+        <div className="flex flex-1 flex-col items-center pt-6">
           <div className="w-full max-w-sm">
             <AnimatePresence mode="wait">
               {step === "identifier" && (
@@ -390,7 +405,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
         ))}
       </div>
 
-      <div className="px-6 py-4 text-center text-[10px] text-muted-foreground">Mi-Reli · Mombasa Terminus · Kenya Coast</div>
+      <div className="px-6 pb-6 pt-2 text-center text-[10px] text-muted-foreground">Mi-Reli · Mombasa Terminus · Kenya Coast</div>
     </div>
   );
 }

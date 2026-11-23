@@ -124,7 +124,7 @@ export function SiteNav() {
 
   return (
     <div className="mx-auto w-full max-w-md px-4 pb-2.5 sm:max-w-2xl sm:px-6 lg:max-w-4xl xl:max-w-5xl">
-      <nav aria-label="Passenger" className="grid grid-cols-3 gap-1 rounded-2xl bg-secondary/50 p-1 backdrop-blur-sm">
+      <nav aria-label="Passenger" className="grid grid-cols-2 gap-1 rounded-2xl bg-secondary/50 p-1 backdrop-blur-sm">
         {items.map((item) => (
           <Link
             key={item.href}
@@ -140,20 +140,6 @@ export function SiteNav() {
             <item.icon className="h-4 w-4" /> {item.label}
           </Link>
         ))}
-        <button
-          type="button"
-          onClick={() => setAccountOpen(true)}
-          aria-haspopup="dialog"
-          aria-expanded={accountOpen}
-          className={cn(
-            "flex flex-col items-center justify-center gap-1 rounded-xl px-0.5 py-2 text-center text-[11px] font-semibold transition-all duration-200 sm:flex-row sm:gap-1.5 sm:text-xs",
-            pathname === "/bookings" || pathname === "/credits"
-              ? "mireli-pill-active"
-              : "text-muted-foreground hover:bg-accent/10 hover:text-foreground",
-          )}
-        >
-          <User className="h-4 w-4" /> Account
-        </button>
       </nav>
 
       {me && (
@@ -165,7 +151,7 @@ export function SiteNav() {
 
 /** Reuses the profile sheet content for the nav Account pill. */
 function AccountSheetHost({ open, onOpenChange, me, onRefresh }: { open: boolean; onOpenChange: (v: boolean) => void; me: Me; onRefresh: () => void }) {
-  return <ProfileChip me={me} onRefresh={onRefresh} open={open} onOpenChange={onOpenChange} />;
+  return <ProfileChip me={me} onRefresh={onRefresh} showTrigger={false} open={open} onOpenChange={onOpenChange} />;
 }
 
 export function SiteFooter({ airportTransfers = false }: { airportTransfers?: boolean } = {}) {

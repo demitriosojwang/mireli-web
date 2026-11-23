@@ -22,11 +22,14 @@ function initials(name: string | null | undefined): string {
 export function ProfileChip({
   me,
   onRefresh,
+  showTrigger = true,
   open: controlledOpen,
   onOpenChange,
 }: {
   me: Me;
   onRefresh: () => void;
+  /** When false, only the sheet renders (the nav hosts its own trigger). */
+  showTrigger?: boolean;
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
 }) {
@@ -54,25 +57,27 @@ export function ProfileChip({
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        className={cn(
-          "flex min-h-9 items-center gap-1.5 rounded-full border bg-card py-1 pl-1 pr-2.5 text-left transition-colors hover:border-primary/40",
-          open && "border-primary/50",
-        )}
-        aria-label="Your account"
-      >
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
-          {initials(name)}
-        </span>
-        <span className="hidden min-w-0 flex-col leading-tight sm:flex">
-          <span className="max-w-[120px] truncate text-[11px] font-semibold text-foreground">{name}</span>
-          <span className="max-w-[120px] truncate text-[9px] text-muted-foreground">{email}</span>
-        </span>
-      </button>
+      {showTrigger && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          className={cn(
+            "flex min-h-9 items-center gap-1.5 rounded-full border bg-card py-1 pl-1 pr-2.5 text-left transition-colors hover:border-primary/40",
+            open && "border-primary/50",
+          )}
+          aria-label="Your account"
+        >
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+            {initials(name)}
+          </span>
+          <span className="hidden min-w-0 flex-col leading-tight sm:flex">
+            <span className="max-w-[120px] truncate text-[11px] font-semibold text-foreground">{name}</span>
+            <span className="max-w-[120px] truncate text-[9px] text-muted-foreground">{email}</span>
+          </span>
+        </button>
+      )}
 
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent side="bottom" className="max-h-[90vh] overflow-y-auto">
