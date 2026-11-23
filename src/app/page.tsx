@@ -129,14 +129,13 @@ export default function Home() {
   const showSplash = splashSeen && !splashDone;
 
   const [direction, setDirection] = useState<"FROM_TERMINUS" | "TO_TERMINUS">("FROM_TERMINUS");
-  const [destinationType, setDestinationType] = useState<"sgr" | "airport">("sgr");
-  // Old /airports links land here with ?type=airport: pre-select the airport
-  // toggle once on mount so the redirect keeps its intent.
-  useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("type") === "airport") {
-      setDestinationType("airport");
-    }
-  }, []);
+  const [destinationType, setDestinationType] = useState<"sgr" | "airport">(() =>
+    // Old /airports links land here with ?type=airport: pre-select the airport
+    // toggle on first render so the redirect keeps its intent.
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("type") === "airport"
+      ? "airport"
+      : "sgr",
+  );
   const [scheduledDate, setDate] = useState(() => todayStr());
   // Pickup mode: "now" pins the date to today and auto-picks the next train
   // still catchable today; "later" is the classic schedule flow. Uber-style.
