@@ -344,7 +344,7 @@ export default function PickupMap({
     );
   }, []);
 
-  const stopLabel = stops.length > 0 ? `${stops.length} approved stop${stops.length > 1 ? "s" : ""} · ${detail}` : detail;
+  const stopLabel = live && stops.length > 0 ? `${stops.length} approved stop${stops.length > 1 ? "s" : ""} · ${detail}` : detail;
 
   return (
     <section className="overflow-hidden rounded-2xl border bg-card" aria-label={caption}>
@@ -358,12 +358,12 @@ export default function PickupMap({
         {mapState !== "ready" && (
           <div className="absolute inset-0 grid place-items-center bg-muted px-4 text-center">
             <div>
-              <p className="text-xs font-medium text-foreground">
-                {mapState === "error" ? "Map unavailable" : "Loading your pickup area…"}
+              <p className="text-xs font-medium text-foreground" role="status">
+                {mapState === "error" ? "Map unavailable" : "Loading map…"}
               </p>
-              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                {mapState === "error" ? "Your booking options below are unaffected." : "Checking the Mombasa terminus and nearby stops."}
-              </p>
+              {mapState === "error" && (
+                <p className="mt-1 text-xs text-muted-foreground">You can still choose a ride.</p>
+              )}
             </div>
           </div>
         )}
@@ -371,10 +371,7 @@ export default function PickupMap({
       <div className="flex items-center justify-between gap-3 px-3.5 py-3">
         <div className="min-w-0">
           <p className="text-sm font-semibold">{caption}</p>
-          <p className="truncate text-xs text-muted-foreground">
-            {stopLabel}
-
-          </p>
+          <p className="text-xs text-muted-foreground">{stopLabel}</p>
           <p role="status" className="text-xs text-muted-foreground">
             {locationState === "denied" && "Allow location in your browser settings, then retry."}
             {locationState === "unavailable" && "Could not get your location. You can still choose a stop."}
@@ -392,13 +389,13 @@ export default function PickupMap({
               {locationState === "locating" ? "Finding location…" : locationState === "idle" ? "Use my location" : "Retry location"}
             </button>
           )}
-          <span className="rounded-full bg-secondary px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-secondary-foreground">
+          {live && <span className="rounded-full bg-secondary px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-secondary-foreground">
             {liveCabCount > 0
               ? `${liveCabCount} live`
               : cabCount > 0
                 ? `${cabCount} cab${cabCount > 1 ? "s" : ""} ready`
                 : "Mombasa"}
-          </span>
+          </span>}
         </div>
       </div>
     </section>

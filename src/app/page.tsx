@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence, useAnimationControls } from "framer-motion";
 import { DURATION, EASE_IN_OUT, EASE_OUT, KNOB_STRETCH, LAYOUT_ID, PRESS_SCALE, STAGGER_MS } from "@/lib/motion";
 import { ACTIVE_BOOKING_STATUSES, INACTIVE_BOOKING_STATUSES } from "@/lib/state-machines";
-import { SiteFooter, SiteHeader, SiteNav, SupportEmailLink } from "@/components/site-chrome";
+import { SiteFooter, SiteHeader, SupportEmailLink } from "@/components/site-chrome";
 import { AirportsFlow } from "@/components/app/airports-flow";
 import { InstallPrompt } from "@/components/install-prompt";
 import { BookingSheet, BookableTrip, BookingDraft } from "@/components/booking-sheet";
@@ -34,7 +35,6 @@ import { VEHICLE_CATEGORIES, VEHICLE_CATEGORY_LABELS, vehicleCategoryFromCabType
 import { calculateVehicleBookingFee, getStageFareForVehicle, isPerRideVehicle } from "@/lib/vehicle-fares";
 import { getBookingPaymentPreflight } from "@/lib/booking-payment-preflight";
 import { MAX_STAGE_SEARCH_LENGTH, MIN_STAGE_SEARCH_LENGTH, isStageSearchReady } from "@/lib/stage-search";
-import { SplashScreen, useSplashOnce } from "@/components/app/splash-screen";
 import PickupMap, { type MapPoint } from "@/components/passenger/PickupMap";
 import {
   DatePicker,
@@ -123,19 +123,9 @@ function coastOf(routeName: string): "north" | "south" {
 export default function Home() {
   const { me } = useMe();
   const router = useRouter();
-  const { show: splashSeen, ready: splashReady } = useSplashOnce();
-  const [splashDone, setSplashDone] = useState(false);
-
-  const showSplash = splashSeen && !splashDone;
-
+  const searchParams = useSearchParams();
+  const destinationType = searchParams.get("type") === "airport" ? "airport" : "sgr";
   const [direction, setDirection] = useState<"FROM_TERMINUS" | "TO_TERMINUS">("FROM_TERMINUS");
-  const [destinationType, setDestinationType] = useState<"sgr" | "airport">(() =>
-    // Old /airports links land here with ?type=airport: pre-select the airport
-    // toggle on first render so the redirect keeps its intent.
-    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("type") === "airport"
-      ? "airport"
-      : "sgr",
-  );
   const [scheduledDate, setDate] = useState(() => todayStr());
   // Pickup mode: "now" pins the date to today and auto-picks the next train
   // still catchable today; "later" is the classic schedule flow. Uber-style.
@@ -386,7 +376,7 @@ export default function Home() {
   }, [isAuthed]);
 
   useEffect(() => {
-    if (!splashReady || showSplash || !trainKey || !queryKey) return;
+    if (destinationType !== "sgr" || !trainKey || !queryKey) return;
     const requestedQueryKey = queryKey;
     const controller = new AbortController();
     let active = true;
@@ -414,7 +404,7 @@ export default function Home() {
       active = false;
       controller.abort();
     };
-  }, [splashReady, showSplash, direction, date, trainKey, queryKey, tripRefreshKey]);
+  }, [destinationType, direction, date, trainKey, queryKey, tripRefreshKey]);
 
   async function openBooking(trip: BookableTrip) {
     if (!selectedPoint || !selectedVehicleCategory || vehicleCategoryFromCabType(trip.vehicle?.cabType) !== selectedVehicleCategory || !trainKey || trip.train?.id !== trainKey || selectedPoint.route.id !== trip.routeId || checkingPayment) return;
@@ -622,103 +612,80 @@ export default function Home() {
     };
   })();
 
-  /* ─── Splash (after all hooks) ───────────────────────────────────────────── */
-
-  if (showSplash) {
-    return <SplashScreen onDone={() => setSplashDone(true)} />;
-  }
-
   return (
     <div className="flex min-h-dvh flex-col bg-background">
       <SiteHeader />
 
-      {/* Direction switcher — the signature pill row */}
-      <div className="mx-auto w-full max-w-md px-4 pt-3 sm:max-w-2xl sm:px-6 lg:max-w-5xl">
-        {/* A two-option direction switch is a radiogroup, not a tablist: Radix
-            Tabs set aria-controls to panels that never exist here, which failed
-            the aria audit. Buttons keep the exact trigger styling + pill. */}
-        <div
-          role="radiogroup"
-          aria-label="Journey direction"
-          className="relative grid h-9 w-full grid-cols-2 items-center justify-center rounded-lg bg-muted p-[3px] text-muted-foreground"
-          onKeyDown={(e) => {
-            if (!["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp"].includes(e.key)) return;
-            e.preventDefault();
-            changeDirection(direction === "FROM_TERMINUS" ? "TO_TERMINUS" : "FROM_TERMINUS");
-            requestAnimationFrame(() => {
-              e.currentTarget.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')?.focus();
-            });
-          }}
-        >
-          <button
-            type="button"
-            role="radio"
-            aria-checked={direction === "FROM_TERMINUS"}
-            data-state={direction === "FROM_TERMINUS" ? "active" : "inactive"}
-            tabIndex={direction === "FROM_TERMINUS" ? 0 : -1}
-            onClick={() => changeDirection("FROM_TERMINUS")}
-            className="relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-transparent px-2 py-1 text-sm font-medium text-foreground transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 data-[state=active]:bg-transparent! data-[state=active]:shadow-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 dark:text-muted-foreground dark:data-[state=active]:border-input dark:data-[state=active]:bg-input/30 dark:data-[state=active]:text-foreground"
+      <div className="mx-auto w-full max-w-md space-y-3 px-4 pt-3 sm:max-w-2xl sm:px-6 lg:max-w-5xl">
+        <nav aria-label="Ride services" className="flex gap-6 border-b sm:gap-10">
+          <Link
+            href="/"
+            aria-current={destinationType === "sgr" ? "page" : undefined}
+            className="flex min-h-13 items-center gap-2 border-b-2 border-transparent px-1 text-sm font-semibold text-muted-foreground hover:text-foreground aria-[current=page]:border-primary aria-[current=page]:text-primary"
           >
-            {direction === "FROM_TERMINUS" && <DirectionPill />}
-            <span className="relative z-10 flex items-center gap-1.5">
-              <Anchor className="h-3.5 w-3.5" /> From Terminus
-            </span>
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={direction === "TO_TERMINUS"}
-            data-state={direction === "TO_TERMINUS" ? "active" : "inactive"}
-            tabIndex={direction === "TO_TERMINUS" ? 0 : -1}
-            onClick={() => changeDirection("TO_TERMINUS")}
-            className="relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-transparent px-2 py-1 text-sm font-medium text-foreground transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 data-[state=active]:bg-transparent! data-[state=active]:shadow-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 dark:text-muted-foreground dark:data-[state=active]:border-input dark:data-[state=active]:bg-input/30 dark:data-[state=active]:text-foreground"
+            <TrainFront className="size-5 shrink-0 text-primary" aria-hidden />
+            SGR rides
+          </Link>
+          <Link
+            href="/?type=airport"
+            aria-current={destinationType === "airport" ? "page" : undefined}
+            className="flex min-h-13 items-center gap-2 border-b-2 border-transparent px-1 text-sm font-semibold text-muted-foreground hover:text-foreground aria-[current=page]:border-primary aria-[current=page]:text-primary"
           >
-            {direction === "TO_TERMINUS" && <DirectionPill />}
-            <span className="relative z-10 flex items-center gap-1.5">
-              <Navigation className="h-3.5 w-3.5" /> To Terminus
-            </span>
-          </button>
-        </div>
-        {/* Destination-type toggle: SGR train or airport shuttle. Airport
-            renders the shared AirportsFlow; SGR keeps the existing flow. */}
-        <div
-          role="radiogroup"
-          aria-label="Destination type"
-          className="mt-2 grid h-9 w-full grid-cols-2 items-center justify-center rounded-lg bg-muted p-[3px] text-muted-foreground"
-        >
-          <button
-            type="button"
-            role="radio"
-            aria-checked={destinationType === "sgr"}
-            data-state={destinationType === "sgr" ? "active" : "inactive"}
-            onClick={() => setDestinationType("sgr")}
-            className="inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-transparent px-2 py-1 text-sm font-medium text-foreground transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 data-[state=active]:bg-background data-[state=active]:shadow-sm dark:data-[state=active]:bg-input/30"
+            <Plane className="size-5 shrink-0 text-primary" aria-hidden />
+            Airport rides
+          </Link>
+        </nav>
+        {destinationType === "sgr" && (
+          <div
+            role="radiogroup"
+            aria-label="Journey direction"
+            className="relative grid h-9 w-full grid-cols-2 items-center justify-center rounded-lg bg-muted p-[3px] text-muted-foreground"
+            onKeyDown={(e) => {
+              if (!["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp"].includes(e.key)) return;
+              e.preventDefault();
+              changeDirection(direction === "FROM_TERMINUS" ? "TO_TERMINUS" : "FROM_TERMINUS");
+              requestAnimationFrame(() => {
+                e.currentTarget.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')?.focus();
+              });
+            }}
           >
-            <span className="flex items-center gap-1.5">
-              <TrainFront className="h-3.5 w-3.5" /> SGR train
-            </span>
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={destinationType === "airport"}
-            data-state={destinationType === "airport" ? "active" : "inactive"}
-            onClick={() => setDestinationType("airport")}
-            className="inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-transparent px-2 py-1 text-sm font-medium text-foreground transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 data-[state=active]:bg-background data-[state=active]:shadow-sm dark:data-[state=active]:bg-input/30"
-          >
-            <span className="flex items-center gap-1.5">
-              <Plane className="h-3.5 w-3.5" /> Airport
-            </span>
-          </button>
-        </div>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={direction === "FROM_TERMINUS"}
+              data-state={direction === "FROM_TERMINUS" ? "active" : "inactive"}
+              tabIndex={direction === "FROM_TERMINUS" ? 0 : -1}
+              onClick={() => changeDirection("FROM_TERMINUS")}
+              className="relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-transparent px-2 py-1 text-sm font-medium text-foreground transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 data-[state=active]:bg-transparent! data-[state=active]:shadow-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 dark:text-muted-foreground dark:data-[state=active]:border-input dark:data-[state=active]:bg-input/30 dark:data-[state=active]:text-foreground"
+            >
+              {direction === "FROM_TERMINUS" && <DirectionPill />}
+              <span className="relative z-10 flex items-center gap-1.5">
+                <Anchor className="h-3.5 w-3.5" /> From Terminus
+              </span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={direction === "TO_TERMINUS"}
+              data-state={direction === "TO_TERMINUS" ? "active" : "inactive"}
+              tabIndex={direction === "TO_TERMINUS" ? 0 : -1}
+              onClick={() => changeDirection("TO_TERMINUS")}
+              className="relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-transparent px-2 py-1 text-sm font-medium text-foreground transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 data-[state=active]:bg-transparent! data-[state=active]:shadow-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 dark:text-muted-foreground dark:data-[state=active]:border-input dark:data-[state=active]:bg-input/30 dark:data-[state=active]:text-foreground"
+            >
+              {direction === "TO_TERMINUS" && <DirectionPill />}
+              <span className="relative z-10 flex items-center gap-1.5">
+                <Navigation className="h-3.5 w-3.5" /> To Terminus
+              </span>
+            </button>
+          </div>
+        )}
       </div>
-      <SiteNav />
 
-      <main className="mx-auto w-full max-w-md flex-1 px-4 pb-6 sm:max-w-2xl sm:px-6 lg:max-w-5xl">
-        <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-6">
+      <main className="mx-auto w-full max-w-md flex-1 px-4 pt-4 pb-6 sm:max-w-2xl sm:px-6 lg:max-w-5xl">
+        <div className={cn(destinationType === "sgr" && "lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-6")}>
         <div className="min-w-0 space-y-4">
         {destinationType === "airport" ? (
-          <AirportsFlow compact />
+          <AirportsFlow openPrivateTransfer={searchParams.get("transfer") === "1"} />
         ) : <>
         <PickupMap
           stops={mapStops}
@@ -815,7 +782,7 @@ export default function Home() {
                   {trainOptions.length > 0 && (
                     <ul className="mt-2 grid grid-cols-3 gap-2">
                       {trainOptions.map((train) => (
-                        <li key={train.id} className="rounded-lg border bg-background px-2 py-2">
+                        <li key={train.id} className="border-b px-2 py-2">
                           <p className="text-[10px] font-medium text-muted-foreground">{train.name}</p>
                           <p className="text-sm font-semibold tabular-nums">{train.time}</p>
                         </li>
@@ -1128,8 +1095,8 @@ export default function Home() {
                           if (isPerRideVehicle(category)) setCharter(false);
                         }}
                         className={cn(
-                          "flex min-h-[62px] items-center gap-2 rounded-xl border bg-card px-2.5 py-2 text-left transition-colors active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-55 disabled:active:scale-100",
-                          selectedVehicleCategory === category ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40",
+                          "flex min-h-[62px] items-center gap-2 border-b-2 border-transparent px-2.5 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-55",
+                          selectedVehicleCategory === category ? "border-primary bg-primary/5" : "hover:border-primary/40",
                         )}
                       >
                         <VehicleTypeIcon category={category} className="h-6 w-8 text-primary" />
@@ -1174,7 +1141,7 @@ export default function Home() {
                   type="button"
                   aria-pressed={!charter}
                   onClick={() => { setCharter(false); setHomePickup(false); }}
-                  className={cn("rounded-xl border bg-card p-3 text-left transition-all active:scale-[0.97] active:duration-75", !charter ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
+                  className={cn("border-b-2 border-transparent p-3 text-left transition-colors", !charter ? "border-primary bg-primary/5" : "hover:border-primary/40")}
                 >
                   <span className="flex items-center gap-2">
                     {isPerRideVehicle(selectedVehicleCategory) ? <VehicleTypeIcon category={selectedVehicleCategory} className="h-4 w-5 shrink-0 text-primary" /> : <Users className="h-4 w-4 shrink-0 text-primary" />}
@@ -1188,7 +1155,7 @@ export default function Home() {
                   type="button"
                   aria-pressed={charter}
                   onClick={() => setCharter(true)}
-                  className={cn("rounded-xl border bg-card p-3 text-left transition-all active:scale-[0.97] active:duration-75", charter ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
+                  className={cn("border-b-2 border-transparent p-3 text-left transition-colors", charter ? "border-primary bg-primary/5" : "hover:border-primary/40")}
                 >
                   <span className="flex items-center gap-2">
                     <Crown className="h-4 w-4 shrink-0 text-violet-600" />
@@ -1209,7 +1176,7 @@ export default function Home() {
                     type="button"
                     aria-pressed={!homePickup}
                     onClick={() => setHomePickup(false)}
-                    className={cn("min-h-[60px] rounded-xl border bg-card px-2.5 py-2 text-left transition-all active:scale-[0.97] active:duration-75", !homePickup ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
+                    className={cn("min-h-[60px] border-b-2 border-transparent px-2.5 py-2 text-left transition-colors", !homePickup ? "border-primary bg-primary/5" : "hover:border-primary/40")}
                   >
                     <span className="flex items-center gap-1.5 text-xs font-semibold">
                       <MapPin className="h-3.5 w-3.5 shrink-0 text-primary" /> At the SGR stage
@@ -1223,7 +1190,7 @@ export default function Home() {
                     aria-pressed={homePickup}
                     disabled={!selectedPoint || (!charter && !offstageQuoteRouteIds.includes(selectedPoint.route.id))}
                     onClick={() => setHomePickup(true)}
-                    className={cn("min-h-[60px] rounded-xl border bg-card px-2.5 py-2 text-left transition-all active:scale-[0.97] active:duration-75 disabled:cursor-not-allowed disabled:opacity-55 disabled:active:scale-100", homePickup ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40")}
+                    className={cn("min-h-[60px] border-b-2 border-transparent px-2.5 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-55 disabled:active:scale-100", homePickup ? "border-primary bg-primary/5" : "hover:border-primary/40")}
                   >
                     <span className="flex items-center gap-1.5 text-xs font-semibold">
                       <HomeIcon className="h-3.5 w-3.5 shrink-0 text-primary" /> At my address
@@ -1446,8 +1413,8 @@ export default function Home() {
         </div>
 
         {/* Desktop rail: timetable + guidance beside the booking column */}
-        <aside className={cn("mt-6 space-y-4 lg:sticky lg:top-24 lg:block", destinationType === "airport" && "lg:hidden")}>
-          <section className="rounded-2xl border bg-card p-4" aria-label="Madaraka Express timetable">
+        {destinationType === "sgr" && <aside className="mt-6 hidden space-y-4 lg:sticky lg:top-24 lg:block">
+          <section className="border-b pb-4" aria-label="Madaraka Express timetable">
             <h2 className="text-sm font-semibold">Madaraka Express times</h2>
             <p className="mt-1 text-xs text-muted-foreground">
               {direction === "FROM_TERMINUS" ? "Arrival at Mombasa Terminus" : "Departure from Mombasa Terminus"}  Kenya time
@@ -1463,7 +1430,7 @@ export default function Home() {
             {trainOptions.length > 0 && (
               <ul className="mt-2 grid grid-cols-3 gap-2">
                 {trainOptions.map((train) => (
-                  <li key={train.id} className="rounded-lg border bg-background px-2 py-2">
+                  <li key={train.id} className="border-b px-2 py-2">
                     <p className="text-[10px] font-medium text-muted-foreground">{train.name}</p>
                     <p className="text-sm font-semibold tabular-nums">{train.time}</p>
                   </li>
@@ -1472,7 +1439,7 @@ export default function Home() {
             )}
           </section>
 
-          <section className="rounded-2xl border bg-card p-4">
+          <section className="border-b pb-4">
             <h2 className="text-sm font-semibold">How booking works</h2>
             <ol className="mt-2 space-y-2 text-xs leading-relaxed text-muted-foreground">
               <li><span className="font-semibold text-foreground">1.</span> Choose a direction and date, then an approved stop.</li>
@@ -1481,14 +1448,14 @@ export default function Home() {
             </ol>
           </section>
 
-          <section className="rounded-2xl border bg-card p-4">
+          <section className="border-b pb-4">
             <h2 className="text-sm font-semibold">Need help?</h2>
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
               Questions about a ride, a stop, or your booking? Write to us.
             </p>
             <SupportEmailLink variant="help" />
           </section>
-        </aside>
+        </aside>}
         </div>
       </main>
 
@@ -1578,84 +1545,80 @@ function CabCard({
   const full = insufficientSeats || !trip.bookable || approvedStageFare === null;
 
   return (
-    <Card className="overflow-hidden">
-      <CardContent className="space-y-2.5 p-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-semibold">{pointName ?? trip.routeName}</span>
-              <DotBadge status={trip.status} />
-            </div>
-            <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
-              <Clock className="h-3 w-3" />
-              {trip.direction === "TO_TERMINUS"
-                ? `Leaves the stage ${fmtTime(trip.departureAt)} · be there by then`
-                : `Cab departs ${fmtTime(trip.departureAt)}`}
-            </div>
+    <article className="space-y-2.5 border-b py-4">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold">{pointName ?? trip.routeName}</span>
+            <DotBadge status={trip.status} />
           </div>
-          <div className="shrink-0 text-right">
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                  {charter ? "Charter · incl. VAT" : homePickup ? "Stage fare + distance" : vehicleCategoryFromCabType(trip.vehicle?.cabType) && isPerRideVehicle(vehicleCategoryFromCabType(trip.vehicle?.cabType)) ? "Ride fare" : seats > 1 ? `${seats} seats` : "Fare"}
-            </div>
-            <div className="font-bold tabular-nums text-primary">{ksh(fare)}</div>
-            {hasPoint && (
-              <div className="text-[10px] text-muted-foreground">
-                {charter
-                  ? <>{ksh(platformFee)} fee in the 10% share · {ksh(vatAmount)} VAT</>
-                  : isPerRideVehicle(vehicleCategoryFromCabType(trip.vehicle?.cabType))
-                    ? `${ksh(platformFee)} Mi-Reli fee per ride`
-                    : `${ksh(trip.platformFeeAmount)} × ${seats} Mi-Reli fee`}
-              </div>
-            )}
+          <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+            <Clock className="h-3 w-3" />
+            {trip.direction === "TO_TERMINUS"
+              ? `Leaves the stage ${fmtTime(trip.departureAt)} · be there by then`
+              : `Cab departs ${fmtTime(trip.departureAt)}`}
           </div>
         </div>
-
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
-            {trip.train && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">
-                <TrainIcon className="h-3 w-3" />
-                {trip.direction === "FROM_TERMINUS"
-                  ? `Meets the ${trip.train.name} · MTM ${trip.train.mtmTime}`
-                  : `Catches the ${trip.train.name} · MTM ${trip.train.mtmTime}`}
-              </span>
-            )}
-            {trip.direction === "TO_TERMINUS" && (
-              <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-                <Navigation className="h-3 w-3" /> reaches MTM {fmtTime(trip.terminusAt)}
-              </span>
-            )}
-            {trip.vehicle?.cabType && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">
-                <VehicleTypeIcon category={vehicleCategoryFromCabType(trip.vehicle.cabType)} className="h-3 w-4" />
-                {trip.vehicle.cabType}
-              </span>
-            )}
+        <div className="shrink-0 text-right">
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                {charter ? "Charter · incl. VAT" : homePickup ? "Stage fare + distance" : vehicleCategoryFromCabType(trip.vehicle?.cabType) && isPerRideVehicle(vehicleCategoryFromCabType(trip.vehicle?.cabType)) ? "Ride fare" : seats > 1 ? `${seats} seats` : "Fare"}
           </div>
-          <SeatMeter booked={booked} capacity={trip.capacity} />
-        </div>
-
-        <Button variant="accent" className="h-10 w-full" size="sm" disabled={full || !hasPoint || paymentChecking} onClick={onBook}>
-          {paymentChecking
-            ? "Checking checkout…"
-            : !hasPoint
-            ? `Choose a ${trip.pointsLabel} point first`
-            : full
-              ? approvedStageFare === null
-                ? "Fare not configured"
-                : insufficientSeats
-              ? "Not enough seats"
-              : "Unavailable"
-            : charter
-              ? `Book charter · ${ksh(fare)}`
-              : homePickup
-                ? `Request address ride · from ${ksh(fare)}`
+          <div className="font-bold tabular-nums text-primary">{ksh(fare)}</div>
+          {hasPoint && (
+            <div className="text-[10px] text-muted-foreground">
+              {charter
+                ? <>{ksh(platformFee)} fee in the 10% share · {ksh(vatAmount)} VAT</>
                 : isPerRideVehicle(vehicleCategoryFromCabType(trip.vehicle?.cabType))
-                  ? `Book ride · ${ksh(fare)}`
-                : `Reserve ${seats > 1 ? `${seats} seats` : "seat"} · ${ksh(fare)}`}
-        </Button>
-      </CardContent>
-    </Card>
+                  ? `${ksh(platformFee)} Mi-Reli fee per ride`
+                  : `${ksh(trip.platformFeeAmount)} × ${seats} Mi-Reli fee`}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs">
+          {trip.train && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">
+              <TrainIcon className="h-3 w-3" />
+              {trip.direction === "FROM_TERMINUS"
+                ? `Meets the ${trip.train.name} · MTM ${trip.train.mtmTime}`
+                : `Catches the ${trip.train.name} · MTM ${trip.train.mtmTime}`}
+            </span>
+          )}
+          {trip.direction === "TO_TERMINUS" && (
+            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+              <Navigation className="h-3 w-3" /> reaches MTM {fmtTime(trip.terminusAt)}
+            </span>
+          )}
+          {trip.vehicle?.cabType && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">
+              <VehicleTypeIcon category={vehicleCategoryFromCabType(trip.vehicle.cabType)} className="h-3 w-4" />
+              {trip.vehicle.cabType}
+            </span>
+          )}
+        </div>
+        <SeatMeter booked={booked} capacity={trip.capacity} />
+      </div>
+      <Button variant="accent" className="min-h-11 w-full rounded-full" size="sm" disabled={full || !hasPoint || paymentChecking} onClick={onBook}>
+        {paymentChecking
+          ? "Checking checkout…"
+          : !hasPoint
+          ? `Choose a ${trip.pointsLabel} point first`
+          : full
+            ? approvedStageFare === null
+              ? "Fare not configured"
+              : insufficientSeats
+            ? "Not enough seats"
+            : "Unavailable"
+          : charter
+            ? `Book charter · ${ksh(fare)}`
+            : homePickup
+              ? `Request address ride · from ${ksh(fare)}`
+              : isPerRideVehicle(vehicleCategoryFromCabType(trip.vehicle?.cabType))
+                ? `Book ride · ${ksh(fare)}`
+              : `Reserve ${seats > 1 ? `${seats} seats` : "seat"} · ${ksh(fare)}`}
+      </Button>
+    </article>
   );
 }
 

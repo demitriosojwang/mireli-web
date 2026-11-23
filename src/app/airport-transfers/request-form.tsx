@@ -192,7 +192,7 @@ export default function AirportRequestForm() {
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {loading || passengerId
         ? <Button type="submit" disabled={loading || saving || hasAirportDrivers === false} className="min-h-11 w-full">{saving ? "Sending…" : "Request airport transfer"}</Button>
-        : <Button asChild><Link href="/login?next=%2Fairports">Sign in to request a transfer</Link></Button>}
+        : <Button asChild><Link href="/login?next=%2F%3Ftype%3Dairport%26transfer%3D1">Sign in to request a transfer</Link></Button>}
       <p className="text-sm leading-relaxed text-muted-foreground">Return here to see when an approved airport driver accepts your request.</p>
     </form>
     </div>
