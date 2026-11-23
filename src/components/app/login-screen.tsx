@@ -92,6 +92,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState<Step>("identifier");
+  const [mode_, setMode] = useState<"signin" | "signup">("signin");
 
   const isEmail = identifier.includes("@");
   const codeValue = useMemo(() => code.join(""), [code]);
@@ -157,7 +158,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
       const res = await api<{ ok?: boolean; needsName?: boolean; needsPhone?: boolean }>("/api/auth", {
         body: { step: "verify", challengeId, code: codeValue, name, phone: signupPhone },
       });
-      if (res.needsName) {
+      if (res.needsName || (mode_ === "signup" && !name.trim())) {
         setStep("profile");
         setError(null);
         return;
@@ -200,20 +201,38 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
   return (
     <div className="relative flex min-h-dvh flex-1 flex-col">
       <BrandBackdrop />
-      {/* Floating sign-in card over the brand backdrop */}
-      <div className="relative flex flex-1 flex-col px-4 pb-8 pt-10" style={{ paddingTop: "calc(env(safe-area-inset-top) + 2.5rem)" }}>
-        <div className="mx-auto w-full max-w-sm rounded-3xl border border-white/10 bg-background/95 p-6 shadow-2xl shadow-black/40 backdrop-blur-sm">
+      {/* Content blends into the backdrop: no card, no border, just the flow. */}
+      <div className="relative flex flex-1 flex-col px-6 pb-8" style={{ paddingTop: "calc(env(safe-area-inset-top) + 2.5rem)" }}>
+        <div className="mx-auto flex w-full max-w-sm flex-1 flex-col">
           <div className="flex flex-col items-center gap-3 pb-5">
             <div className="rounded-2xl bg-white/95 p-1.5 shadow-md shadow-black/30">
               <LogoTile size="lg" />
             </div>
-            <h1 className="text-2xl font-bold tracking-tight">
-              <span className="text-emerald-600">Mireli</span> Passenger
+            <h1 className="text-2xl font-bold tracking-tight text-white">
+              <span className="text-emerald-400">Mireli</span> Passenger
             </h1>
           </div>
+        {/* Sign in / Sign up switch */}
+        <div className="grid grid-cols-2 gap-1 rounded-xl bg-white/10 p-1" role="radiogroup" aria-label="Account action">
+          {(["signin", "signup"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              role="radio"
+              aria-checked={mode === mode_}
+              onClick={() => { setMode(mode); setError(null); }}
+              className={cn(
+                "rounded-lg px-3 py-2 text-sm font-semibold transition-colors",
+                mode === mode_ ? "bg-white text-[#0d1b2e] shadow-sm" : "text-slate-300 hover:text-white",
+              )}
+            >
+              {mode === "signin" ? "Sign in" : "Sign up"}
+            </button>
+          ))}
+        </div>
         {/* Step progress */}
-        <div className="flex items-center gap-1.5" aria-hidden>
-          {["Sign in", "Verify", "Details"].map((label, index) => (
+        <div className="flex items-center gap-1.5 pt-4" aria-hidden>
+          {(mode_ === "signin" ? ["Sign in", "Verify", "Details"] : ["Sign up", "Verify", "Details"]).map((label, index) => (
             <div key={label} className="flex flex-1 flex-col gap-1">
               <div
                 className={cn(
@@ -221,7 +240,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
                   index < stepIndex ? "bg-primary" : index === stepIndex ? "bg-primary/60" : "bg-muted",
                 )}
               />
-              <span className={cn("text-[9px] font-medium uppercase tracking-wide", index <= stepIndex ? "text-primary" : "text-muted-foreground/60")}>
+              <span className={cn("text-[9px] font-medium uppercase tracking-wide", index <= stepIndex ? "text-emerald-400" : "text-slate-300/60")}>
                 {label}
               </span>
             </div>
@@ -241,15 +260,19 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
                   className="space-y-4"
                 >
                   <div>
-                    <h2 className="text-xl font-bold tracking-tight">Welcome</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Log in or create an account with your email or phone number.
+                    <h2 className="text-xl font-bold tracking-tight text-white">
+                      {mode_ === "signin" ? "Welcome back" : "Create your account"}
+                    </h2>
+                    <p className="mt-1 text-sm text-slate-300">
+                      {mode_ === "signin"
+                        ? "Log in with your email or phone number."
+                        : "Sign up with your email or phone number — it takes under a minute."}
                     </p>
                   </div>
 
                   <div className="space-y-2">
-                    <label htmlFor="login-identifier" className="flex items-center gap-1.5 text-xs font-medium">
-                      {isEmail ? <Mail className="h-3.5 w-3.5 text-primary" /> : <Phone className="h-3.5 w-3.5 text-primary" />}
+                    <label htmlFor="login-identifier" className="flex items-center gap-1.5 text-xs font-medium text-slate-200">
+                      {isEmail ? <Mail className="h-3.5 w-3.5 text-emerald-400" /> : <Phone className="h-3.5 w-3.5 text-emerald-400" />}
                       Email or phone
                     </label>
                     <Input
@@ -276,8 +299,8 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
                     {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <>Continue <ArrowRight className="ml-1 h-4 w-4" /></>}
                   </Button>
 
-                  <p className="text-center text-[11px] text-muted-foreground">
-                    New here? This creates your account — no separate signup form.
+                  <p className="text-center text-[11px] text-slate-300">
+                    {mode_ === "signin" ? "New here? Switch to Sign up above." : "Already have an account? Switch to Sign in above."}
                   </p>
                 </motion.div>
               )}
@@ -293,7 +316,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
                 >
                   <div>
                     <h2 className="text-xl font-bold tracking-tight">Check your {isEmail ? "email" : "phone"}</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
+                    <p className="mt-1 text-sm text-slate-300">
                       We sent a 6-digit code to <span className="font-medium text-foreground">{identifier}</span>.
                     </p>
                   </div>
@@ -315,7 +338,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
                         }}
                         onFocus={(e) => e.currentTarget.select()}
                         className={cn(
-                          "h-13 w-full min-w-0 rounded-xl border bg-card text-center text-xl font-semibold tabular-nums transition-colors outline-none",
+                          "h-13 w-full min-w-0 rounded-xl border bg-white/10 text-center text-xl font-semibold tabular-nums transition-colors outline-none",
                           "focus:border-primary focus:ring-2 focus:ring-primary/20",
                           digit && "border-primary/50",
                           error && "border-destructive",
@@ -342,7 +365,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
                     <button
                       type="button"
                       onClick={() => { setStep("identifier"); setError(null); }}
-                      className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                      className="inline-flex items-center gap-1 text-slate-300 hover:text-foreground"
                     >
                       <ArrowLeft className="h-3 w-3" /> Change {isEmail ? "email" : "number"}
                     </button>
@@ -350,7 +373,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
                       type="button"
                       onClick={handleSendOtp}
                       disabled={busy || resendSeconds > 0}
-                      className="font-medium text-primary underline-offset-4 hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline [font-variant-numeric:tabular-nums]"
+                      className="font-medium text-emerald-400 underline-offset-4 hover:underline disabled:cursor-not-allowed disabled:text-slate-300 disabled:no-underline [font-variant-numeric:tabular-nums]"
                     >
                       {resendSeconds > 0 ? `Resend in ${resendSeconds}s` : "Resend code"}
                     </button>
@@ -369,14 +392,14 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
                 >
                   <div>
                     <h2 className="text-xl font-bold tracking-tight">Almost done</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
+                    <p className="mt-1 text-sm text-slate-300">
                       First time here — tell us who you are and we&apos;ll set up your account.
                     </p>
                   </div>
 
                   <div className="space-y-2">
                     <label htmlFor="login-name" className="flex items-center gap-1.5 text-xs font-medium">
-                      <CheckCircle2 className="h-3.5 w-3.5 text-primary" /> Your name
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" /> Your name
                     </label>
                     <Input
                       id="login-name"
@@ -394,7 +417,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
 
                   <div className="space-y-2">
                     <label htmlFor="login-phone" className="flex items-center gap-1.5 text-xs font-medium">
-                      <Phone className="h-3.5 w-3.5 text-primary" /> Mobile number
+                      <Phone className="h-3.5 w-3.5 text-emerald-400" /> Mobile number
                     </label>
                     <Input
                       id="login-phone"
@@ -408,7 +431,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
                       disabled={busy}
                       aria-invalid={Boolean(error)}
                     />
-                    <p className="text-[11px] text-muted-foreground">For M-Pesa receipts and ride updates. Never shared with drivers before pickup.</p>
+                    <p className="text-[11px] text-slate-300">For M-Pesa receipts and ride updates. Never shared with drivers before pickup.</p>
                   </div>
 
                   {error && <p className="text-xs font-medium text-destructive" role="alert">{error}</p>}
@@ -420,7 +443,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
                   <button
                     type="button"
                     onClick={reset}
-                    className="mx-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                    className="mx-auto flex items-center gap-1 text-xs text-slate-300 hover:text-foreground"
                   >
                     <ArrowLeft className="h-3 w-3" /> Start over
                   </button>
@@ -431,7 +454,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
             {/* Trust indicators */}
             <div className="space-y-2 border-t pt-4">
               {TRUST_POINTS.map((point) => (
-                <div key={point} className="flex items-start gap-2 text-[11px] leading-snug text-muted-foreground">
+                <div key={point} className="flex items-start gap-2 text-[11px] leading-snug text-slate-300">
                   <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
                   <span>{point}</span>
                 </div>

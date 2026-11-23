@@ -445,7 +445,10 @@ export function AirportsFlow({ compact = false }: { compact?: boolean }) {
 
                     {vehicleChoices.length > 0 && (
                       <>
-                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="group" aria-label="Choose a vehicle">
+                        {/* Riider-style ride list: full-width rows, name and
+                            availability left, from-price right, selected row
+                            outlined. One decision per row, like Bolt. */}
+                        <div className="space-y-2" role="group" aria-label="Choose a ride">
                           {vehicleChoices.map(({ category, count, minFare }) => (
                             <button
                               key={category}
@@ -453,16 +456,22 @@ export function AirportsFlow({ compact = false }: { compact?: boolean }) {
                               aria-pressed={selectedVehicle === category}
                               onClick={() => setSelectedVehicle(category)}
                               className={cn(
-                                "flex min-h-16 items-center gap-2 rounded-xl border bg-card px-2.5 py-2 text-left transition-colors active:scale-[0.97]",
-                                selectedVehicle === category ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "hover:border-primary/40",
+                                "flex w-full items-center justify-between gap-3 rounded-xl border bg-card px-3.5 py-3 text-left transition-colors active:scale-[0.98]",
+                                selectedVehicle === category ? "border-primary ring-1 ring-primary/30" : "hover:border-primary/40",
                               )}
                             >
-                              <VehicleTypeIcon category={category} className="h-6 w-8 text-primary" />
-                              <span className="min-w-0">
-                                <span className="block text-xs font-semibold">{VEHICLE_CATEGORY_LABELS[category]}</span>
-                                <span className="block text-[10px] text-muted-foreground">
-                                  {count} available · from {ksh(minFare)}
+                              <span className="flex min-w-0 items-center gap-3">
+                                <span className="grid h-10 w-12 shrink-0 place-items-center rounded-lg bg-primary/10">
+                                  <VehicleTypeIcon category={category} className="h-6 w-9 text-primary" />
                                 </span>
+                                <span className="min-w-0">
+                                  <span className="block text-sm font-semibold">{VEHICLE_CATEGORY_LABELS[category]}</span>
+                                  <span className="block text-xs text-muted-foreground">{count} available</span>
+                                </span>
+                              </span>
+                              <span className="shrink-0 text-right">
+                                <span className="block text-sm font-bold tabular-nums text-primary">{ksh(minFare)}</span>
+                                <span className="block text-[10px] text-muted-foreground">from / seat</span>
                               </span>
                             </button>
                           ))}
