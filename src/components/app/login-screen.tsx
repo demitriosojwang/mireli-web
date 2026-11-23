@@ -21,6 +21,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
   const [challengeId, setChallengeId] = useState<string | null>(null);
   const [demoCode, setDemoCode] = useState<string | null>(null);
   const [name, setName] = useState("");
+  const [signupPhone, setSignupPhone] = useState("");
   const [resendSeconds, setResendSeconds] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -70,8 +71,8 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      const res = await api<{ ok?: boolean; needsName?: boolean }>("/api/auth", {
-        body: { step: "verify", challengeId, code, name },
+      const res = await api<{ ok?: boolean; needsName?: boolean; needsPhone?: boolean }>("/api/auth", {
+        body: { step: "verify", challengeId, code, name, phone: signupPhone },
       });
       if (res.needsName) {
         setStep("nameCapture");
@@ -90,6 +91,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
     setIdentifier("");
     setCode("");
     setName("");
+    setSignupPhone("");
     setChallengeId(null);
     setDemoCode(null);
     setResendSeconds(0);
@@ -188,6 +190,22 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
                     autoFocus
                     onKeyDown={(e) => e.key === "Enter" && handleVerifyOtp()}
                   />
+                  {isEmail && (
+                    <>
+                      <Label className="flex items-center gap-1 text-xs text-primary">
+                        <Phone className="h-3 w-3" /> Mobile number (for M-Pesa &amp; ride updates)
+                      </Label>
+                      <Input
+                        type="tel"
+                        inputMode="tel"
+                        value={signupPhone}
+                        onChange={(e) => setSignupPhone(e.target.value)}
+                        placeholder="07XX XXX XXX"
+                        className="h-11"
+                        onKeyDown={(e) => e.key === "Enter" && handleVerifyOtp()}
+                      />
+                    </>
+                  )}
                 </motion.div>
               )}
 
@@ -195,7 +213,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
               <Button
                 className="h-11 w-full"
                 onClick={handleVerifyOtp}
-                disabled={busy || code.length !== 6 || !challengeId || (step === "nameCapture" && name.length < 2)}
+                disabled={busy || code.length !== 6 || !challengeId || (step === "nameCapture" && (name.length < 2 || (isEmail && signupPhone.trim().length < 9)))}
               >
                 Verify &amp; log in <ArrowRight className="ml-1 h-4 w-4" />
               </Button>

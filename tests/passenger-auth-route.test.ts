@@ -143,7 +143,7 @@ describe("passenger authentication route", () => {
     }
   });
 
-  it("does not create a passenger with an unverified synthetic phone for a new email", async () => {
+  it("asks a new email passenger for name and mobile instead of rejecting them", async () => {
     mocks.verifyPassengerChallenge.mockResolvedValueOnce({
       id: "email-challenge",
       channel: "passenger_email",
@@ -151,11 +151,59 @@ describe("passenger authentication route", () => {
       email: "new@example.com",
     });
 
-    const response = await POST(post({ step: "verify", challengeId: "email-challenge", code: "123456", name: "New Passenger" }));
+    const response = await POST(post({ step: "verify", challengeId: "email-challenge", code: "123456" }));
 
-    expect(response.status).toBe(404);
-    expect((await response.json()).error).toContain("verified mobile number");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ needsName: true, needsPhone: true, identifier: "new@example.com" });
     expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.txPassengerCreate).not.toHaveBeenCalled();
+  });
+
+  it("creates an account for a new email passenger with a verified name and free mobile", async () => {
+    mocks.verifyPassengerChallenge.mockResolvedValueOnce({
+      id: "email-challenge",
+      channel: "passenger_email",
+      phone: null,
+      email: "new@example.com",
+    });
+    const created = { id: "new-passenger", name: "New Passenger", phone: "+254712345678", email: "new@example.com" };
+    mocks.txPassengerCreate.mockResolvedValueOnce(created);
+
+    const response = await POST(post({
+      step: "verify",
+      challengeId: "email-challenge",
+      code: "123456",
+      name: "New Passenger",
+      phone: "0712345678",
+    }));
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).isNew).toBe(true);
+    expect(mocks.txPassengerCreate).toHaveBeenCalledWith({
+      data: { phone: "+254712345678", email: "new@example.com", name: "New Passenger" },
+    });
+    expect(mocks.audit).toHaveBeenCalledWith(expect.objectContaining({ action: "auth.signup" }));
+  });
+
+  it("refuses to bind a mobile number that already belongs to another account", async () => {
+    mocks.verifyPassengerChallenge.mockResolvedValueOnce({
+      id: "email-challenge",
+      channel: "passenger_email",
+      phone: null,
+      email: "new@example.com",
+    });
+    mocks.txPassengerFindUnique.mockResolvedValueOnce({ id: "someone-else" }); // mobile taken
+
+    const response = await POST(post({
+      step: "verify",
+      challengeId: "email-challenge",
+      code: "123456",
+      name: "New Passenger",
+      phone: "0712345678",
+    }));
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).code).toBe("MOBILE_IN_USE");
     expect(mocks.txPassengerCreate).not.toHaveBeenCalled();
   });
 

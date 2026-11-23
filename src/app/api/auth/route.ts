@@ -59,24 +59,22 @@ async function verifySignIn(body: Record<string, unknown>) {
   const email = challenge.email;
   const contact = phone || email!;
   const nameInput = typeof body.name === "string" ? body.name.trim() : "";
+  // A first-time email passenger supplies a mobile number with their name; it
+  // becomes the account's contact for booking and M-Pesa.
+  const phoneInput = phone ? "" : normalizePhone(typeof body.phone === "string" ? body.phone : "");
   const existing = phone
     ? await db.passenger.findUnique({ where: { phone } })
     : await db.passenger.findFirst({ where: { email: email! } });
 
-  // Email can be used to sign in to an existing account, but new passenger
-  // accounts need a verified mobile number for booking and M-Pesa contact.
-  if (!existing && !phone) {
-    return NextResponse.json(
-      { error: "No account was found for that email. Create an account with a verified mobile number." },
-      { status: 404, headers: NO_STORE },
-    );
-  }
-
   // Keep the verified challenge pending while a first-time passenger supplies
-  // the name required to create their account. It is consumed in the account
-  // transaction below, so this response alone cannot grant a session.
-  if (!existing && !nameInput) {
-    return NextResponse.json({ needsName: true, identifier: contact }, { headers: NO_STORE });
+  // the name (and, for email sign-ups, the mobile number) required to create
+  // their account. It is consumed in the account transaction below, so this
+  // response alone cannot grant a session.
+  if (!existing && (!nameInput || (!phone && !phoneInput))) {
+    return NextResponse.json(
+      { needsName: true, needsPhone: !phone, identifier: contact },
+      { headers: NO_STORE },
+    );
   }
   const name = existing ? existing.name || "Passenger" : text(nameInput, "Name", 2, 80);
 
@@ -87,10 +85,23 @@ async function verifySignIn(body: Record<string, unknown>) {
       : await tx.passenger.findFirst({ where: { email: email! } });
     if (found) return { passenger: found, isNew: false };
     if (!nameInput) throw new DriverError(400, "NAME_REQUIRED", "Enter your name to create an account.");
-    if (!phone) throw new DriverError(400, "MOBILE_REQUIRED", "Create your account with a verified mobile number.");
+    // Email sign-ups bind a verified-by-challenge phone; phone sign-ups already
+    // have one. Either way the account always carries a mobile contact.
+    const accountPhone = phone || phoneInput;
+    if (!accountPhone) throw new DriverError(400, "MOBILE_REQUIRED", "Add your mobile number to create an account.");
+    if (!phone) {
+      const phoneTaken = await tx.passenger.findUnique({ where: { phone: accountPhone } });
+      if (phoneTaken) {
+        throw new DriverError(
+          409,
+          "MOBILE_IN_USE",
+          "That mobile number already has an account. Sign in with the mobile number instead.",
+        );
+      }
+    }
     const passenger = await tx.passenger.create({
       data: {
-        phone,
+        phone: accountPhone,
         email: email || null,
         name,
       },
