@@ -7,6 +7,7 @@ import { motion, AnimatePresence, useAnimationControls } from "framer-motion";
 import { DURATION, EASE_IN_OUT, EASE_OUT, KNOB_STRETCH, LAYOUT_ID, PRESS_SCALE, STAGGER_MS } from "@/lib/motion";
 import { ACTIVE_BOOKING_STATUSES, INACTIVE_BOOKING_STATUSES } from "@/lib/state-machines";
 import { SiteFooter, SiteHeader, SiteNav, SupportEmailLink } from "@/components/site-chrome";
+import { AirportsFlow } from "@/components/app/airports-flow";
 import { InstallPrompt } from "@/components/install-prompt";
 import { BookingSheet, BookableTrip, BookingDraft } from "@/components/booking-sheet";
 import { VehicleTypeIcon } from "@/components/vehicle-type-icon";
@@ -58,6 +59,8 @@ import {
   Navigation,
   Ticket as TicketIcon,
   Train as TrainIcon,
+  TrainFront,
+  Plane,
   Users,
   Zap,
 } from "lucide-react";
@@ -126,6 +129,14 @@ export default function Home() {
   const showSplash = splashSeen && !splashDone;
 
   const [direction, setDirection] = useState<"FROM_TERMINUS" | "TO_TERMINUS">("FROM_TERMINUS");
+  const [destinationType, setDestinationType] = useState<"sgr" | "airport">("sgr");
+  // Old /airports links land here with ?type=airport: pre-select the airport
+  // toggle once on mount so the redirect keeps its intent.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("type") === "airport") {
+      setDestinationType("airport");
+    }
+  }, []);
   const [scheduledDate, setDate] = useState(() => todayStr());
   // Pickup mode: "now" pins the date to today and auto-picks the next train
   // still catchable today; "later" is the classic schedule flow. Uber-style.
@@ -669,12 +680,47 @@ export default function Home() {
             </span>
           </button>
         </div>
+        {/* Destination-type toggle: SGR train or airport shuttle. Airport
+            renders the shared AirportsFlow; SGR keeps the existing flow. */}
+        <div
+          role="radiogroup"
+          aria-label="Destination type"
+          className="mt-2 grid h-9 w-full grid-cols-2 items-center justify-center rounded-lg bg-muted p-[3px] text-muted-foreground"
+        >
+          <button
+            type="button"
+            role="radio"
+            aria-checked={destinationType === "sgr"}
+            data-state={destinationType === "sgr" ? "active" : "inactive"}
+            onClick={() => setDestinationType("sgr")}
+            className="inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-transparent px-2 py-1 text-sm font-medium text-foreground transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 data-[state=active]:bg-background data-[state=active]:shadow-sm dark:data-[state=active]:bg-input/30"
+          >
+            <span className="flex items-center gap-1.5">
+              <TrainFront className="h-3.5 w-3.5" /> SGR train
+            </span>
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={destinationType === "airport"}
+            data-state={destinationType === "airport" ? "active" : "inactive"}
+            onClick={() => setDestinationType("airport")}
+            className="inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-transparent px-2 py-1 text-sm font-medium text-foreground transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 data-[state=active]:bg-background data-[state=active]:shadow-sm dark:data-[state=active]:bg-input/30"
+          >
+            <span className="flex items-center gap-1.5">
+              <Plane className="h-3.5 w-3.5" /> Airport
+            </span>
+          </button>
+        </div>
       </div>
       <SiteNav />
 
       <main className="mx-auto w-full max-w-md flex-1 px-4 pb-6 sm:max-w-2xl sm:px-6 lg:max-w-5xl">
         <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-6">
         <div className="min-w-0 space-y-4">
+        {destinationType === "airport" ? (
+          <AirportsFlow compact />
+        ) : <>
         <PickupMap
           stops={mapStops}
           cabCount={eligibleDriverCount ?? 0}
@@ -1397,10 +1443,11 @@ export default function Home() {
             )}
           </motion.div>
         </AnimatePresence>
+        </>}
         </div>
 
         {/* Desktop rail: timetable + guidance beside the booking column */}
-        <aside className="mt-6 hidden space-y-4 lg:sticky lg:top-24 lg:mt-0 lg:block">
+        <aside className={cn("mt-6 space-y-4 lg:sticky lg:top-24 lg:block", destinationType === "airport" && "lg:hidden")}>
           <section className="rounded-2xl border bg-card p-4" aria-label="Madaraka Express timetable">
             <h2 className="text-sm font-semibold">Madaraka Express times</h2>
             <p className="mt-1 text-xs text-muted-foreground">

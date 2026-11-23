@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Anchor, Info, Plane, User, Wallet } from "lucide-react";
+import { Anchor, Info } from "lucide-react";
 import { api, useMe, type Me } from "@/lib/client";
 import { ProfileChip, SignInLink } from "@/components/app/profile-chip";
 import { cn } from "@/lib/utils";
@@ -85,18 +85,10 @@ export function SiteNav() {
   if (!signedIn) {
     const guestItems = [
       { href: "/", label: "Book", icon: Anchor, active: pathname === "/" },
-      { href: "/airports", label: "Airports", icon: Plane, active: pathname === "/airports" || pathname === "/airport-transfers" },
-      { href: "/bookings", label: "My rides", icon: User, active: pathname === "/bookings" },
-      {
-        href: "/credits",
-        label: me?.creditBalance ? `Credit · KSh ${me.creditBalance}` : "Credits",
-        icon: Wallet,
-        active: pathname === "/credits",
-      },
     ];
     return (
       <div className="mx-auto w-full max-w-md px-4 pb-2.5 sm:max-w-2xl sm:px-6 lg:max-w-4xl xl:max-w-5xl">
-        <nav aria-label="Passenger" className="grid grid-cols-4 gap-1 rounded-2xl bg-secondary/50 p-1 backdrop-blur-sm">
+        <nav aria-label="Passenger" className="grid grid-cols-1 gap-1 rounded-2xl bg-secondary/50 p-1 backdrop-blur-sm">
           {guestItems.map((item) => (
             <Link
               key={item.href}
@@ -119,12 +111,11 @@ export function SiteNav() {
 
   const items = [
     { href: "/", label: "Book", icon: Anchor, active: pathname === "/" },
-    { href: "/airports", label: "Airports", icon: Plane, active: pathname === "/airports" || pathname === "/airport-transfers" },
   ];
 
   return (
     <div className="mx-auto w-full max-w-md px-4 pb-2.5 sm:max-w-2xl sm:px-6 lg:max-w-4xl xl:max-w-5xl">
-      <nav aria-label="Passenger" className="grid grid-cols-2 gap-1 rounded-2xl bg-secondary/50 p-1 backdrop-blur-sm">
+      <nav aria-label="Passenger" className="grid grid-cols-1 gap-1 rounded-2xl bg-secondary/50 p-1 backdrop-blur-sm">
         {items.map((item) => (
           <Link
             key={item.href}
