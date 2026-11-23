@@ -9,13 +9,14 @@ function LoginInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next");
+  const destination = next && /^\/(?![\/\\])/.test(next) && !/[\\\s]/.test(next) ? next : "/";
   const { refresh } = useMe();
 
   return (
     <LoginScreen
       onDone={() => {
         refresh();
-        router.push(next || "/");
+        router.replace(destination);
       }}
     />
   );
