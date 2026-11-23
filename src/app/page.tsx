@@ -535,7 +535,7 @@ export default function Home() {
       const category = vehicleCategoryFromCabType(trip.vehicle.cabType);
       counts.set(category, (counts.get(category) ?? 0) + 1);
     }
-    return VEHICLE_CATEGORIES.filter((category) => category !== "other" && counts.has(category)).map((category) => {
+    return VEHICLE_CATEGORIES.filter((category) => counts.has(category)).map((category) => {
       const matching = routeTrips.filter((trip) => vehicleCategoryFromCabType(trip.vehicle?.cabType) === category);
       const hasFare = !!selectedPoint && matching.some((trip) => getStageFareForVehicle({
         stageName: selectedPoint.point.name,
@@ -1096,9 +1096,27 @@ export default function Home() {
                     ))}
                   </div>
                 ) : (
-                  <p className="rounded-xl border bg-card px-3 py-3 text-xs text-muted-foreground">
-                    {tripsStatus === "error" ? "Vehicle availability could not load. Try again below." : "No bookable vehicles are available for this stop and train."}
-                  </p>
+                  <div className="space-y-2 rounded-xl border bg-card px-3 py-3">
+                    <p className="text-xs text-muted-foreground">
+                      {tripsStatus === "error"
+                        ? "Vehicle availability could not load."
+                        : hasEligibleDrivers === false
+                          ? "No approved drivers are on duty for this departure yet."
+                          : "Cabs for this stop and train are still being confirmed."}
+                    </p>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setTripRefreshKey((value) => value + 1)}
+                        className="text-xs font-medium text-primary underline underline-offset-4"
+                      >
+                        Check again
+                      </button>
+                      <a href="mailto:mirellisgr001@gmail.com" className="text-xs text-muted-foreground underline underline-offset-4">
+                        Contact support
+                      </a>
+                    </div>
+                  </div>
                 )}
               </section>
             )}

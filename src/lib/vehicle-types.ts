@@ -14,6 +14,6 @@ export function vehicleCategoryFromCabType(cabType: string | null | undefined): 
   if (/motor ?bike|motorcycle|boda|bike/.test(type)) return "motorbike";
   if (/tuk ?tuk|tuktuk|rickshaw/.test(type)) return "tuk-tuk";
   if (/van|matatu|shuttle|bus|7 ?seater|14 ?seater/.test(type)) return "van";
-  if (/car|sedan|saloon|suv|4 ?seater/.test(type)) return "car";
+  if (/car|sedan|saloon|suv|4 ?seater|probox|station wagon|estat/.test(type)) return "car";
   return "other";
 }

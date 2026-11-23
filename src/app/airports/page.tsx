@@ -137,7 +137,7 @@ export default function AirportsPage() {
       const category = vehicleCategoryFromCabType(trip.vehicle.cabType);
       counts.set(category, (counts.get(category) ?? 0) + 1);
     }
-    return VEHICLE_CATEGORIES.filter((category) => category !== "other" && counts.has(category)).map((category) => ({
+    return VEHICLE_CATEGORIES.filter((category) => counts.has(category)).map((category) => ({
       category,
       count: counts.get(category) ?? 0,
     }));
@@ -214,6 +214,21 @@ export default function AirportsPage() {
               />
             </label>
           </div>
+
+          {/* Journey progress: pick shuttle -> choose vehicle -> book, mirrors the trains side. */}
+          {activeAirport && activeSlot && (
+            <div className="mt-3 flex items-center gap-2 rounded-xl border bg-card px-3 py-2 text-xs" aria-label="Booking progress">
+              <span className={cn("flex items-center gap-1.5 font-medium", activeAirport ? "text-primary" : "text-muted-foreground")}>
+                <Plane className="h-3.5 w-3.5" aria-hidden /> {activeAirport.code} · {fmtTime(`${travelDate}T${activeSlot.departTime}:00+03:00`)}
+              </span>
+              <span className="text-muted-foreground/50">→</span>
+              <span className={cn("font-medium", selectedVehicle ? "text-primary" : "text-muted-foreground")}>
+                {selectedVehicle ? VEHICLE_CATEGORY_LABELS[selectedVehicle] : "Choose vehicle"}
+              </span>
+              <span className="text-muted-foreground/50">→</span>
+              <span className={cn("font-medium", draft ? "text-primary" : "text-muted-foreground")}>Book</span>
+            </div>
+          )}
         </motion.div>
 
         <Accordion type="single" collapsible className="mt-3">
@@ -305,11 +320,26 @@ export default function AirportsPage() {
                             <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> Checking drivers and seats…
                           </p>
                         )}
-                        {trips !== null && hasEligibleDrivers === false && (
-                          <p className="text-sm text-muted-foreground">No eligible drivers are available for this date.</p>
-                        )}
-                        {trips !== null && hasEligibleDrivers !== false && vehicleChoices.length === 0 && !tripsError && (
-                          <p className="text-sm text-muted-foreground">No bookable vehicles are available for this departure.</p>
+                        {trips !== null && (hasEligibleDrivers === false || vehicleChoices.length === 0) && !tripsError && (
+                          <div className="space-y-1.5 rounded-lg border bg-card p-3">
+                            <p className="text-sm text-muted-foreground">
+                              {hasEligibleDrivers === false
+                                ? "No approved drivers are on duty for this departure yet."
+                                : "Cabs for this shuttle are still being confirmed."}
+                            </p>
+                            <div className="flex items-center gap-3">
+                              <button
+                                type="button"
+                                onClick={() => setRefreshKey((value) => value + 1)}
+                                className="text-xs font-medium text-primary underline underline-offset-4"
+                              >
+                                Check again
+                              </button>
+                              <a href="mailto:mirellisgr001@gmail.com" className="text-xs text-muted-foreground underline underline-offset-4">
+                                Contact support
+                              </a>
+                            </div>
+                          </div>
                         )}
 
                         {vehicleChoices.length > 0 && (

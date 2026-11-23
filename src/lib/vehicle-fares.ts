@@ -108,7 +108,8 @@ export function getStageFareForVehicle(params: {
   const category = vehicleCategoryFromCabType(params.cabType);
   if (category === "motorbike") return getApprovedMotorbikeFare(params.stageName);
   if (category === "tuk-tuk") return getApprovedTuktukFare(params.stageName);
-  if (category === "other") return null;
+  // Uncategorized cab types (e.g. "Probox", free-text entries) price at the
+  // approved stage fare like cars/vans so customers never hit a dead end.
   const approvedFare = getApprovedStageFare(params.stageName) ?? params.fallbackFare;
   if (params.capacity === 10 || params.capacity === 11) return approvedFare > 50 ? approvedFare - 50 : null;
   if (params.capacity !== 4 && params.capacity !== 7) return null;
