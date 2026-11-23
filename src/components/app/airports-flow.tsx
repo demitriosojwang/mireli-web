@@ -339,7 +339,7 @@ export function AirportsFlow({ openPrivateTransfer = false }: { openPrivateTrans
               </div>
 
               {activeSlot && (
-                <section className="space-y-3 border-t pt-4>
+                <section className="space-y-3 border-t pt-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h3 className="text-base font-semibold">Choose your ride</h3>
