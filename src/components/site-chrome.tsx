@@ -6,7 +6,8 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Anchor, Info, Plane, User, Wallet } from "lucide-react";
-import { useMe } from "@/lib/client";
+import { api, useMe, type Me } from "@/lib/client";
+import { ProfileChip, SignInLink } from "@/components/app/profile-chip";
 import { cn } from "@/lib/utils";
 
 /** Rounded brand tile — the logo image itself, like the app icon. */
@@ -30,7 +31,7 @@ export function LogoTile({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
  */
 export function SiteHeader({ subtitle = "Mombasa Terminus" }: { subtitle?: string }) {
   const [aboutOpen, setAboutOpen] = useState(false);
-  const { me } = useMe();
+  const { me, refresh } = useMe();
   // Login is optional: the link appears only for guests who have not claimed
   // an account. Signed-in passengers never see it.
   const showSignIn = !!me && (!me.passenger || me.passenger.isGuest);
@@ -51,13 +52,10 @@ export function SiteHeader({ subtitle = "Mombasa Terminus" }: { subtitle?: strin
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {showSignIn && (
-            <Link
-              href="/login"
-              className="rounded-lg px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-            >
-              Sign in
-            </Link>
+          {me?.passenger && !me.passenger.isGuest ? (
+            <ProfileChip me={me} onRefresh={refresh} />
+          ) : (
+            showSignIn && <SignInLink />
           )}
           <button
             onClick={() => setAboutOpen(true)}
@@ -73,26 +71,60 @@ export function SiteHeader({ subtitle = "Mombasa Terminus" }: { subtitle?: strin
   );
 }
 
-/** Passenger nav — the signature pill switcher (Book / My rides / Credits). */
+/**
+ * Passenger nav — the signature pill switcher. Signed-in passengers get
+ * Book / Airports / Account (rides + credits live in the account sheet);
+ * guests keep Book / Airports / My rides / Credits.
+ */
 export function SiteNav() {
   const pathname = usePathname();
-  const { me } = useMe();
+  const { me, refresh } = useMe();
+  const [accountOpen, setAccountOpen] = useState(false);
+  const signedIn = !!me?.passenger && !me.passenger.isGuest;
+
+  if (!signedIn) {
+    const guestItems = [
+      { href: "/", label: "Book", icon: Anchor, active: pathname === "/" },
+      { href: "/airports", label: "Airports", icon: Plane, active: pathname === "/airports" || pathname === "/airport-transfers" },
+      { href: "/bookings", label: "My rides", icon: User, active: pathname === "/bookings" },
+      {
+        href: "/credits",
+        label: me?.creditBalance ? `Credit · KSh ${me.creditBalance}` : "Credits",
+        icon: Wallet,
+        active: pathname === "/credits",
+      },
+    ];
+    return (
+      <div className="mx-auto w-full max-w-md px-4 pb-2.5 sm:max-w-2xl sm:px-6 lg:max-w-4xl xl:max-w-5xl">
+        <nav aria-label="Passenger" className="grid grid-cols-4 gap-1 rounded-2xl bg-secondary/50 p-1 backdrop-blur-sm">
+          {guestItems.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              aria-current={item.active ? "page" : undefined}
+              className={cn(
+                "flex flex-col items-center justify-center gap-1 rounded-xl px-0.5 py-2 text-center text-[11px] font-semibold transition-all duration-200 sm:flex-row sm:gap-1.5 sm:text-xs",
+                item.active
+                  ? "mireli-pill-active"
+                  : "text-muted-foreground hover:bg-accent/10 hover:text-foreground",
+              )}
+            >
+              <item.icon className="h-4 w-4" /> {item.label}
+            </Link>
+          ))}
+        </nav>
+      </div>
+    );
+  }
 
   const items = [
     { href: "/", label: "Book", icon: Anchor, active: pathname === "/" },
     { href: "/airports", label: "Airports", icon: Plane, active: pathname === "/airports" || pathname === "/airport-transfers" },
-    { href: "/bookings", label: "My rides", icon: User, active: pathname === "/bookings" },
-    {
-      href: "/credits",
-      label: me?.creditBalance ? `Credit · KSh ${me.creditBalance}` : "Credits",
-      icon: Wallet,
-      active: pathname === "/credits",
-    },
   ];
 
   return (
     <div className="mx-auto w-full max-w-md px-4 pb-2.5 sm:max-w-2xl sm:px-6 lg:max-w-4xl xl:max-w-5xl">
-      <nav aria-label="Passenger" className="grid grid-cols-4 gap-1 rounded-2xl bg-secondary/50 p-1 backdrop-blur-sm">
+      <nav aria-label="Passenger" className="grid grid-cols-3 gap-1 rounded-2xl bg-secondary/50 p-1 backdrop-blur-sm">
         {items.map((item) => (
           <Link
             key={item.href}
@@ -108,9 +140,32 @@ export function SiteNav() {
             <item.icon className="h-4 w-4" /> {item.label}
           </Link>
         ))}
+        <button
+          type="button"
+          onClick={() => setAccountOpen(true)}
+          aria-haspopup="dialog"
+          aria-expanded={accountOpen}
+          className={cn(
+            "flex flex-col items-center justify-center gap-1 rounded-xl px-0.5 py-2 text-center text-[11px] font-semibold transition-all duration-200 sm:flex-row sm:gap-1.5 sm:text-xs",
+            pathname === "/bookings" || pathname === "/credits"
+              ? "mireli-pill-active"
+              : "text-muted-foreground hover:bg-accent/10 hover:text-foreground",
+          )}
+        >
+          <User className="h-4 w-4" /> Account
+        </button>
       </nav>
+
+      {me && (
+        <AccountSheetHost open={accountOpen} onOpenChange={setAccountOpen} me={me} onRefresh={refresh} />
+      )}
     </div>
   );
+}
+
+/** Reuses the profile sheet content for the nav Account pill. */
+function AccountSheetHost({ open, onOpenChange, me, onRefresh }: { open: boolean; onOpenChange: (v: boolean) => void; me: Me; onRefresh: () => void }) {
+  return <ProfileChip me={me} onRefresh={onRefresh} open={open} onOpenChange={onOpenChange} />;
 }
 
 export function SiteFooter({ airportTransfers = false }: { airportTransfers?: boolean } = {}) {
