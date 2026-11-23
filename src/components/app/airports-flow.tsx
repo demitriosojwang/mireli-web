@@ -20,6 +20,16 @@ import { nairobiToday } from "@/lib/nairobi-time";
 import { VEHICLE_CATEGORIES, VEHICLE_CATEGORY_LABELS, vehicleCategoryFromCabType, type VehicleCategory } from "@/lib/vehicle-types";
 import { cn } from "@/lib/utils";
 import AirportRequestForm from "@/app/airport-transfers/request-form";
+import PickupMap from "@/components/passenger/PickupMap";
+
+/** Airport coordinates for the shared map (public geography, not config). */
+const AIRPORT_COORDS: Record<string, { lat: number; lng: number }> = {
+  MBA: { lat: -4.0348, lng: 39.5942 }, // Moi International, Mombasa
+  UKA: { lat: -4.2865, lng: 39.5892 }, // Diani/Ukunda
+  MYD: { lat: -3.2236, lng: 40.0994 }, // Malindi International
+  LAU: { lat: -2.4008, lng: 40.7269 }, // Manda, Lamu
+  VPG: { lat: -3.8736, lng: 39.7833 }, // Vipingo Ridge
+};
 
 /**
  * The full airport shuttle booking flow, embeddable. The /airports page wraps
@@ -183,6 +193,17 @@ export function AirportsFlow({ compact = false }: { compact?: boolean }) {
     setPickedCode(airport.code);
   }
 
+  // Map markers: the terminus plus every airport with published slots, so the
+  // passenger sees the network before picking and the route after.
+  const airportMapStops = useMemo(() => {
+    const stops: { id: string; name: string; lat: number; lng: number }[] = [];
+    for (const airport of airports ?? []) {
+      const coords = AIRPORT_COORDS[airport.code];
+      if (coords) stops.push({ id: airport.code, name: airport.name, ...coords });
+    }
+    return stops;
+  }, [airports]);
+
   function openBooking(trip: BookableTrip) {
     if (!activeAirport || !activeSlot || !activeJourney || !trip.bookable || trip.routeId !== activeJourney.routeId) return;
     const bookingTrip: BookableTripWithStages = {
@@ -213,6 +234,16 @@ export function AirportsFlow({ compact = false }: { compact?: boolean }) {
         </>
       )}
       <main className={cn("mx-auto w-full px-4 pb-16 pt-4 sm:px-6", compact ? "max-w-md" : "max-w-md sm:max-w-2xl lg:max-w-4xl xl:max-w-5xl")}>
+        {/* Bolt-style shared map: terminus and the chosen airport, visible in
+            both directions of the journey so the passenger sees the route. */}
+        <PickupMap
+          stops={airportMapStops}
+          selectedStopId={pickedCode}
+          fitStops
+          caption={activeAirport ? activeAirport.name : "Your airport shuttle route"}
+          detail={activeAirport ? `Mombasa Terminus ⇄ ${activeAirport.name} · ${activeAirport.durationMinutes} min` : "Mombasa Terminus · Miritini"}
+          heightClassName="h-[180px] sm:h-[220px]"
+        />
         {!compact && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
@@ -492,7 +523,7 @@ export function AirportsFlow({ compact = false }: { compact?: boolean }) {
           })()
         )}
       </main>
-      <SiteFooter airportTransfers />
+      {!compact && <SiteFooter airportTransfers />}
       <InstallPrompt />
       <BookingSheet
         open={sheetOpen}

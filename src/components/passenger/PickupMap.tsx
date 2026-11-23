@@ -31,6 +31,8 @@ type PickupMapProps = {
   showLocation?: boolean;
   /** Poll the newest GPS fix of every active pooled cab and glide the markers to it. */
   live?: boolean;
+  /** Reframe the map to include origin + all stops whenever the stop set changes. */
+  fitStops?: boolean;
 };
 
 type LiveCabFix = {
@@ -64,6 +66,7 @@ export default function PickupMap({
   detail = "Mombasa Terminus · Miritini",
   showLocation = true,
   live = true,
+  fitStops = false,
 }: PickupMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<import("maplibre-gl").Map | null>(null);
@@ -301,7 +304,15 @@ export default function PickupMap({
         .addTo(map);
       existing.set(stop.id, marker);
     }
-  }, [stops, selectedStopId, mapReady]);
+
+    // Airport-style views reframe so origin and every stop are visible at once.
+    if (fitStops && stops.length > 0) {
+      const bounds = new maplibregl.LngLatBounds();
+      bounds.extend([origin.lng, origin.lat]);
+      for (const stop of stops) bounds.extend([stop.lng, stop.lat]);
+      map.fitBounds(bounds, { padding: 48, maxZoom: 13, duration: 400 });
+    }
+  }, [stops, selectedStopId, mapReady, fitStops, origin.lng, origin.lat]);
 
   useEffect(() => {
     const map = mapRef.current;
