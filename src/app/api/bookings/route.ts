@@ -167,10 +167,13 @@ export async function POST(req: NextRequest) {
     passengerNationality, // dropdown value from /lib/nationalities
     passengerGender, // "male" | "female" | "other"
   } = body;
+  if (direction === "FROM_AIRPORT" || direction === "TO_AIRPORT") {
+    return NextResponse.json({ error: "Airport rides use private transfers.", bookingPath: "/airport-transfers" }, { status: 409 });
+  }
   let travelDateDate: Date;
   try { travelDateDate = nairobiDayRange(travelDate ?? nairobiDate(new Date())).start; }
   catch { return NextResponse.json({ error: "Invalid travel date" }, { status: 400 }); }
-  if (!["FROM_TERMINUS", "TO_TERMINUS", "FROM_AIRPORT", "TO_AIRPORT"].includes(direction)) return NextResponse.json({ error: "Invalid direction" }, { status: 400 });
+  if (!["FROM_TERMINUS", "TO_TERMINUS"].includes(direction)) return NextResponse.json({ error: "Invalid direction" }, { status: 400 });
 
   // ── Primary passenger details (required for every booking) ────────────────
   const fullName = String(passengerName || "").trim();
@@ -239,15 +242,15 @@ export async function POST(req: NextRequest) {
   if (!route || !route.active) {
     return NextResponse.json({ error: "This route is not currently open for booking." }, { status: 409 });
   }
+  if (route.serviceKind === "airport_shuttle") {
+    return NextResponse.json({ error: "Airport rides use private transfers.", bookingPath: "/airport-transfers" }, { status: 409 });
+  }
   let stage = route.stages.find((s) => s.id === stageId && s.order > 0);
   if (!stage) {
     return NextResponse.json({ error: "Choose a published pickup or drop-off stop." }, { status: 409 });
   }
   if (homePickup && (!homeAddress || typeof homeAddress !== "string" || homeAddress.trim().length < 5 || homeAddress.trim().length > 200)) {
     return NextResponse.json({ error: "Enter an address between 5 and 200 characters." }, { status: 400 });
-  }
-  if (homePickup && direction.endsWith("_AIRPORT")) {
-    return NextResponse.json({ error: "Address pickup is not available for scheduled airport shuttles." }, { status: 409 });
   }
   if (homePickup && !isCharter && locationQuoteConsent !== true) {
     return NextResponse.json({ error: "Agree to the one-time location quote to continue with an off-stage shared ride." }, { status: 400 });
@@ -272,10 +275,8 @@ export async function POST(req: NextRequest) {
       driver: { select: { cabType: true } },
     },
   });
-  const airportDirection = direction.endsWith("_AIRPORT");
   if (!selectedTrip || selectedTrip.routeId !== route.id || selectedTrip.direction !== direction ||
-      (airportDirection ? !selectedTrip.shuttleSlotId : !selectedTrip.trainId) ||
-      (airportDirection !== (route.serviceKind === "airport_shuttle")) ||
+      selectedTrip.shuttleSlotId || !selectedTrip.trainId ||
       !Number.isSafeInteger(selectedTrip.capacity) || selectedTrip.capacity < 1) {
     return NextResponse.json(
       { error: "That cab is no longer available. Refresh the list and choose another cab or date." },
@@ -283,7 +284,7 @@ export async function POST(req: NextRequest) {
     );
   }
   const vehicleCategory = vehicleCategoryFromCabType(selectedTrip.driver?.cabType);
-  const usesPerRideSchedule = route.serviceKind !== "airport_shuttle" && isPerRideVehicle(vehicleCategory);
+  const usesPerRideSchedule = isPerRideVehicle(vehicleCategory);
   if (usesPerRideSchedule && isCharter) {
     return NextResponse.json({ error: "Motorbike and tuk-tuk bookings use per-ride fares. Choose a shared ride." }, { status: 409 });
   }
@@ -296,7 +297,6 @@ export async function POST(req: NextRequest) {
     cabType: selectedTrip.driver?.cabType,
     capacity: selectedTrip.capacity,
     fallbackFare: configuredStageFare,
-    airportShuttle: route.serviceKind === "airport_shuttle",
   });
   if (stageFare === null || !Number.isSafeInteger(stageFare) || stageFare <= 0) {
     return NextResponse.json({ error: "Pricing for this vehicle type is not configured at this stop yet." }, { status: 409 });

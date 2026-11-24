@@ -5,7 +5,6 @@ import { audit } from "@/lib/audit";
 import { nairobiDate, nairobiDayRange, nairobiEventAt, nairobiTrainArrivalAt, nairobiWeekday } from "@/lib/nairobi-time";
 import { isLocalDemoEnabled } from "@/lib/runtime-mode";
 import { airportConflict, SGR_SERVICES } from "@/lib/ride-service";
-import { provisionAirportNetwork } from "@/lib/airport-network";
 
 /**
  * The ops engine — everything here runs automatically so the admin's role
@@ -47,13 +46,11 @@ function dayAt(base: Date, dayOffset: number, hhmm: string): Date {
 async function createScheduledTrip(params: {
   routeId: string;
   direction: string;
-  /** Train anchor for SGR feeder trips; airport trips anchor on shuttleSlotId instead. */
-  trainId?: string;
+  trainId: string;
   departureAt: Date;  routeDurationMinutes: number;
   driverIds: string[];
-  shuttleSlotId?: string;
 }): Promise<boolean> {
-  const slotKey = `${params.routeId}:${params.direction}:${params.shuttleSlotId ?? params.trainId ?? "none"}:${params.departureAt.toISOString()}`;
+  const slotKey = `${params.routeId}:${params.direction}:${params.trainId}:${params.departureAt.toISOString()}`;
   const departureEnd = new Date(params.departureAt.getTime() + params.routeDurationMinutes * 60 * 1000);
 
   for (const driverId of params.driverIds) {
@@ -64,7 +61,7 @@ async function createScheduledTrip(params: {
         where: {
           routeId: params.routeId,
           direction: params.direction,
-          ...(params.shuttleSlotId ? { shuttleSlotId: params.shuttleSlotId } : { trainId: params.trainId! }),
+          trainId: params.trainId,
           departureAt: params.departureAt,
         },
         select: { id: true },
@@ -102,8 +99,7 @@ async function createScheduledTrip(params: {
           departureAt: params.departureAt,
           capacity: driver.capacity,
           source: "schedule",
-          ...(params.shuttleSlotId ? { shuttleSlotId: params.shuttleSlotId } : { trainId: params.trainId! }),
-          ...(params.shuttleSlotId ? { shuttleSlotId: params.shuttleSlotId } : {}),
+          trainId: params.trainId,
         },
       });
       return "created" as const;
@@ -117,13 +113,12 @@ async function createScheduledTrip(params: {
 }
 
 /** Creates scheduled trips for the next `tripHorizonDays`, anchored to the
- *  train timetable and airport shuttle slots, and assigns available drivers.
+ *  train timetable, and assigns available drivers.
  *  Return shuttles reuse the outbound driver of the same route + train when
  *  feasible. Lazily self-extending; idempotent. */
 export async function ensureTrips(): Promise<number> {
   const cfg = await getConfig();
-  await provisionAirportNetwork();
-  const routes = await db.route.findMany({ where: { active: true } });
+  const routes = await db.route.findMany({ where: { active: true, serviceKind: "sgr_feeder" } });
   const candidates = await db.driver.findMany({ where: { status: "active", rideService: { in: SGR_SERVICES } }, orderBy: { createdAt: "asc" },include:{application:{include:{documents:{where:{state:{not:"replaced"}}}}}} });
   const drivers=candidates.filter(d=>isLocalDemoEnabled() || evaluateDriverApplication(d.application,d.status).eligible);
   if (!drivers.length || !routes.length) return 0;
@@ -134,7 +129,7 @@ export async function ensureTrips(): Promise<number> {
     where: { active: true },
     orderBy: [{ direction: "asc" }, { originTime: "asc" }],
   });
-  if (!trains.length && !(await db.airportShuttleSlot.count({ where: { active: true } }))) return 0;
+  if (!trains.length) return 0;
   const now = new Date();
   let created = 0;
   let rr = (await db.trip.count()) % Math.max(drivers.length, 1); // round-robin offset
@@ -224,36 +219,6 @@ export async function ensureTrips(): Promise<number> {
     }
   }
 
-  // Airport shuttles — same scheduler, anchored to fixed daily shuttle slots
-  // instead of train events. Airport routes carry serviceKind
-  // "airport_shuttle" and their trips carry a shuttleSlot anchor.
-  const airportRoutes = routes.filter((route) => route.serviceKind === "airport_shuttle");
-  const shuttleSlots = await db.airportShuttleSlot.findMany({ where: { active: true } });
-  for (let dayOffset = 0; dayOffset <= cfg.tripHorizonDays; dayOffset++) {
-    for (const slot of shuttleSlots) {
-      const dep = dayAt(now, dayOffset, slot.departTime);
-      const route = airportRoutes.find((candidate) =>
-        candidate.name.includes(`[${slot.airportCode}]`) && candidate.name.includes(slot.direction),
-      );
-      if (!route || dep.getTime() < now.getTime() - 30 * 60 * 1000) continue;
-      const exists = await db.trip.findFirst({
-        where: { routeId: route.id, direction: slot.direction, shuttleSlotId: slot.id, departureAt: dep },
-      });
-      if (exists) continue;
-      const wasCreated = await createScheduledTrip({
-        routeId: route.id,
-        direction: slot.direction,
-        departureAt: dep,
-        routeDurationMinutes: route.durationMinutes,
-        driverIds: orderedDriverIds(),
-        shuttleSlotId: slot.id,
-      });
-      if (wasCreated) {
-        created++;
-        rr = (rr + 1) % drivers.length;
-      }
-    }
-  }
   return created;
 }
 

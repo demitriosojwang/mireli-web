@@ -52,6 +52,13 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("customer trip availability", () => {
+  it("routes legacy airport departures to the private transfer flow", async () => {
+    const response = await GET(new NextRequest("https://mireli.online/api/trips?date=2026-11-26&direction=FROM_AIRPORT&trainId=airport-MBA-FROM_AIRPORT"));
+    expect(response.status).toBe(409);
+    expect((await response.json()).bookingPath).toBe("/airport-transfers");
+    expect(mocks.runOperationalTick).not.toHaveBeenCalled();
+  });
+
   it("returns a fast, honest empty result without running the scheduler when there are no drivers", async () => {
     const response = await GET(request());
 
@@ -102,14 +109,12 @@ describe("customer trip availability", () => {
     expect(mocks.tripFindMany.mock.calls[0][0].where.route).toEqual({
       is: {
         active: true,
+        serviceKind: "sgr_feeder",
         stages: { some: { order: { gt: 0 }, fare: { gt: 0 }, homeSurcharge: { gte: 0 } } },
       },
     });
-    // Train-anchored queries keep the active-train OR shuttle-slot filter.
-    expect(mocks.tripFindMany.mock.calls[0][0].where.OR).toEqual([
-      { train: { is: { active: true } } },
-      { shuttleSlotId: { not: null } },
-    ]);
+    expect(mocks.tripFindMany.mock.calls[0][0].where.train).toEqual({ is: { active: true } });
+    expect(mocks.tripFindMany.mock.calls[0][0].where.shuttleSlotId).toBeNull();
     expect(mocks.tripFindMany.mock.calls[0][0].where.driverId.in).toEqual([eligibleDriver.id]);
     expect(mocks.tripFindMany.mock.calls[0][0].select.driver).toEqual({ select: { cabType: true } });
     expect(mocks.driverFindMany.mock.calls[0][0].select.application.select.documents.select)
