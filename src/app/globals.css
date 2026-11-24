@@ -232,6 +232,26 @@
       0 0 0 4px oklch(0.28 0.07 258 / 0.18),
       0 2px 6px oklch(0.18 0.04 260 / 0.35);
   }
+  .mireli-map-marker--interactive {
+    width: 22px;
+    height: 22px;
+    color: white;
+    background: #0f5760;
+    cursor: pointer;
+  }
+  .mireli-map-marker--airport {
+    width: 44px;
+    height: 44px;
+    font-size: .6875rem;
+    font-weight: 700;
+  }
+  .mireli-map-marker--interactive.mireli-map-marker--selected {
+    background: #162f4e;
+  }
+  .mireli-map-marker--interactive:focus-visible {
+    outline: 3px solid #102635;
+    outline-offset: 3px;
+  }
   .mireli-map-marker--cab {
     width: 16px;
     height: 16px;

@@ -111,7 +111,7 @@ async function sendEmail(email: string, code: string) {
       sender: { email: emailAddress(process.env.BREVO_SENDER_EMAIL), name: "Mi-Reli" },
       to: [{ email }],
       subject: "Your Mi-Reli verification code",
-      textContent: `Your Mi-Reli verification code is ${code}.\n\nIt expires in 5 minutes. Do not share it. If you did not request it, you can ignore this email.`,
+      textContent: `Your Mi-Reli verification code\n\n${code}\n\nIt expires in 5 minutes. Do not share it. If you did not request it, you can ignore this email.`,
       htmlContent: mireliEmailShell({
         headerHtml: mireliEmailHeader("Your sign-in code"),
         bodyHtml:

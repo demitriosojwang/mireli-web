@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ChevronRight, Clock, Loader2, Plane, PlaneLanding, PlaneTakeoff } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, ArrowLeft, ArrowRight, ChevronRight, Clock, Loader2, Plane, PlaneLanding, PlaneTakeoff, Search } from "lucide-react";
 import { BookingSheet, type BookableTrip, type BookingDraft, type BookableTripWithStages } from "@/components/booking-sheet";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
@@ -16,16 +16,10 @@ import { nairobiToday } from "@/lib/nairobi-time";
 import { VEHICLE_CATEGORIES, VEHICLE_CATEGORY_LABELS, vehicleCategoryFromCabType, type VehicleCategory } from "@/lib/vehicle-types";
 import { cn } from "@/lib/utils";
 import AirportRequestForm from "@/app/airport-transfers/request-form";
-import PickupMap from "@/components/passenger/PickupMap";
+import type { PassengerPlace } from "@/components/passenger/PassengerPlaceLookup";
+import type { RideMapSelection, MapPoint } from "@/components/passenger/PickupMap";
 
-/** Airport coordinates for the shared map (public geography, not config). */
-const AIRPORT_COORDS: Record<string, { lat: number; lng: number }> = {
-  MBA: { lat: -4.0348, lng: 39.5942 }, // Moi International, Mombasa
-  UKA: { lat: -4.2865, lng: 39.5892 }, // Diani/Ukunda
-  MYD: { lat: -3.2236, lng: 40.0994 }, // Malindi International
-  LAU: { lat: -2.4008, lng: 40.7269 }, // Manda, Lamu
-  VPG: { lat: -3.8736, lng: 39.7833 }, // Vipingo Ridge
-};
+import { getAirportByCode } from "@/lib/airport-catalogue";
 
 interface ShuttleSlot {
   id: string;
@@ -63,7 +57,7 @@ const DIRECTION_LABEL: Record<ShuttleSlot["direction"], string> = {
   TO_AIRPORT: "Terminus to airport",
 };
 
-export function AirportsFlow({ openPrivateTransfer = false }: { openPrivateTransfer?: boolean }) {
+export function AirportsFlow({ openPrivateTransfer = false, onMapChange }: { openPrivateTransfer?: boolean; onMapChange: (map: RideMapSelection) => void }) {
   const [airports, setAirports] = useState<AirportRow[] | null>(null);
   const [catalogueAttempt, setCatalogueAttempt] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +66,12 @@ export function AirportsFlow({ openPrivateTransfer = false }: { openPrivateTrans
   // Step 1 of the airport flow: the airport the passenger is travelling to or
   // from, chosen on the "Where to?" screen before any slot is picked.
   const [pickedCode, setPickedCode] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [direction, setDirection] = useState<ShuttleSlot["direction"]>("TO_AIRPORT");
+  const [pendingSlotId, setPendingSlotId] = useState<string | null>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const panelHeading = useRef<HTMLHeadingElement>(null);
   const [availability, setAvailability] = useState<AirportAvailability | null>(null);
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleCategory | null>(null);
   const [charter, setCharter] = useState(false);
@@ -79,6 +79,12 @@ export function AirportsFlow({ openPrivateTransfer = false }: { openPrivateTrans
   const [sheetOpen, setSheetOpen] = useState(false);
   const [draft, setDraft] = useState<BookingDraft | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [privatePreview, setPrivatePreview] = useState<{ place: PassengerPlace; airport: MapPoint; toAirport: boolean } | null>(null);
+  const handlePrivatePreview = useCallback((place: PassengerPlace | null, airport: ReturnType<typeof getAirportByCode>, toAirport: boolean) => {
+    setPrivatePreview(place && airport ? {
+      place, airport: { id: airport.code, name: airport.name, lat: airport.lat, lng: airport.lng }, toAirport,
+    } : null);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -93,6 +99,11 @@ export function AirportsFlow({ openPrivateTransfer = false }: { openPrivateTrans
   }, [catalogueAttempt]);
 
   const pickedAirport = airports?.find((airport) => airport.code === pickedCode) ?? null;
+  const searchTerm = query.trim().toLowerCase();
+  const matches = searchTerm ? airports?.filter((airport) =>
+    `${airport.name} ${airport.code}`.toLowerCase().includes(searchTerm)
+  ) ?? [] : [];
+  const pendingSlot = pickedAirport?.slots.find((slot) => slot.id === pendingSlotId && slot.direction === direction);
   const activeAirport = airports?.find((airport) => airport.code === selection?.airportCode) ?? null;
   const activeSlot = activeAirport?.slots.find((slot) => slot.id === selection?.slotId) ?? null;
   const activeJourney = activeSlot ? activeAirport?.journeys[activeSlot.direction] ?? null : null;
@@ -176,24 +187,40 @@ export function AirportsFlow({ openPrivateTransfer = false }: { openPrivateTrans
     setSelection({ airportCode: airport.code, slotId: slot.id });
   }
 
-  function pickAirport(airport: AirportRow) {
+  const pickAirport = useCallback((code: string) => {
     setSelectedVehicle(null);
     setCharter(false);
     setSeats(1);
     setSelection(null);
-    setPickedCode(airport.code);
+    setPendingSlotId(null);
+    setPickedCode(code);
+    setSearchOpen(false);
+    setQuery("");
+    requestAnimationFrame(() => panelHeading.current?.focus({ preventScroll: true }));
+  }, []);
+
+  function showSearch() {
+    setSearchOpen(true);
+    setQuery("");
+    requestAnimationFrame(() => searchInput.current?.focus());
   }
 
-  // Map markers: the terminus plus every airport with published slots, so the
-  // passenger sees the network before picking and the route after.
+  function chooseDirection(nextDirection: ShuttleSlot["direction"]) {
+    if (nextDirection === direction) return;
+    setDirection(nextDirection);
+    setPendingSlotId(null);
+  }
+
+  // Keep the initial map around Mombasa. Focus the route endpoints after a selection.
   const airportMapStops = useMemo(() => {
     const stops: { id: string; name: string; lat: number; lng: number }[] = [];
-    for (const airport of pickedAirport ? [pickedAirport] : airports ?? []) {
-      const coords = AIRPORT_COORDS[airport.code];
-      if (coords) stops.push({ id: airport.code, name: airport.name, ...coords });
+    for (const airport of airports ?? []) {
+      if (pickedCode && airport.code !== pickedCode) continue;
+      const coords = getAirportByCode(airport.code);
+      if (coords) stops.push({ id: airport.code, name: airport.name, lat: coords.lat, lng: coords.lng });
     }
     return stops;
-  }, [airports, pickedAirport]);
+  }, [airports, pickedCode]);
 
   function openBooking(trip: BookableTrip) {
     if (!activeAirport || !activeSlot || !activeJourney || !selectedVehicle || !trip.bookable || trip.routeId !== activeJourney.routeId) return;
@@ -216,256 +243,265 @@ export function AirportsFlow({ openPrivateTransfer = false }: { openPrivateTrans
     setSheetOpen(true);
   }
 
-  const fromAirport = activeSlot?.direction === "FROM_AIRPORT";
+  const fromAirport = direction === "FROM_AIRPORT";
   const airportName = pickedAirport?.name ?? "";
-  const routeSummary = activeSlot
-    ? fromAirport
-      ? `${airportName} → Mombasa Terminus`
-      : `Mombasa Terminus → ${airportName}`
-    : pickedAirport ? `Mombasa Terminus ↔ ${airportName}` : "Scheduled rides to and from Mombasa Terminus";
+  const pickup = fromAirport ? airportName : "Mombasa Terminus";
+  const dropoff = fromAirport ? "Mombasa Terminus" : airportName;
+
+  const mapDetail = pickedAirport ? `${pickup} → ${dropoff}` : "Tap an airport pin or search by name.";
+  useEffect(() => {
+    if (privatePreview) {
+      const { place, airport, toAirport } = privatePreview;
+      onMapChange({
+        stops: [airport, place], selectedStopId: place.id, onSelectStop: () => {},
+        routeOrigin: airport, reverse: toAirport,
+        detail: toAirport ? `${place.name} → ${airport.name}` : `${airport.name} → ${place.name}`,
+      });
+      return;
+    }
+    onMapChange({ stops: airportMapStops, selectedStopId: pickedCode, onSelectStop: pickAirport, detail: mapDetail, reverse: fromAirport });
+  }, [airportMapStops, pickedCode, pickAirport, mapDetail, fromAirport, onMapChange, privatePreview]);
 
   return (
-    <div className="space-y-4">
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:items-start lg:gap-9">
-        <div className="lg:sticky lg:top-20">
-          <PickupMap
-            stops={airportMapStops}
-            selectedStopId={pickedCode}
-            fitStops
-            live={false}
-            caption="Airport shuttle map"
-            detail={routeSummary}
-            heightClassName="h-52 sm:h-64 lg:h-[360px]"
-          />
-        </div>
-        <section className="min-w-0" aria-labelledby="airport-shuttle-title">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <h1 id="airport-shuttle-title" className="text-xl font-bold tracking-tight">Airport shuttles</h1>
-              <p className="mt-1 text-sm text-muted-foreground">Choose an airport and departure.</p>
-            </div>
-            <label className="text-xs font-medium text-muted-foreground">
-              Travel date
-              <input
-                type="date"
-                required
-                min={nairobiToday()}
-                value={travelDate}
-                onChange={(event) => {
-                  if (!event.target.value || !event.target.validity.valid) return;
-                  setSelectedVehicle(null);
-                  setCharter(false);
-                  setSeats(1);
-                  setTravelDate(event.target.value);
-                }}
-                className="mt-1 block min-h-11 min-w-36 rounded-xl border border-input bg-background px-2 text-base text-foreground"
-              />
-            </label>
+    <div className="space-y-5">
+      <section aria-labelledby="airport-shuttle-title">
+      {(!pickedAirport || searchOpen) && (
+        <div className="space-y-4">
+          <h1 id="airport-shuttle-title" ref={panelHeading} tabIndex={-1} className="text-2xl font-bold tracking-tight outline-none">Where to?</h1>
+          <div className="relative">
+            <Search aria-hidden className="pointer-events-none absolute start-4 top-1/2 size-5 -translate-y-1/2 text-primary" />
+            <input
+              ref={searchInput}
+              aria-label="Search airports"
+              type="search"
+              placeholder="Search airport name or code"
+              value={query}
+              autoComplete="off"
+              className="min-h-13 w-full rounded-full border bg-card pe-4 ps-12 text-base focus-visible:outline-2 focus-visible:outline-ring"
+              onChange={(event) => setQuery(event.target.value)}
+            />
           </div>
-          {error && (
-            <div className="mt-4 border-s-2 border-destructive py-1 ps-3">
+          {pickedAirport && <button type="button" onClick={() => setSearchOpen(false)} className="min-h-11 text-sm font-semibold text-primary">Back to {airportName}</button>}
+          {error ? (
+            <div className="border-s-2 border-destructive ps-3">
               <p role="alert" className="text-sm text-destructive">{error}</p>
-              <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => {
+              <Button type="button" variant="ghost" onClick={() => {
                 setError(null);
                 setCatalogueAttempt((attempt) => attempt + 1);
               }}>Try again</Button>
             </div>
+          ) : !airports ? (
+            <p role="status" className="text-sm text-muted-foreground">Loading airports…</p>
+          ) : searchTerm ? (
+            matches.length ? (
+              <ul className="divide-y" aria-label="Matching airports">
+                {matches.map((airport) => (
+                  <li key={airport.code}>
+                    <button type="button" onClick={() => pickAirport(airport.code)} className="flex min-h-14 w-full items-center gap-3 py-2 text-start hover:bg-primary/5">
+                      <Plane className="size-5 shrink-0 text-primary" aria-hidden />
+                      <span className="flex-1 text-sm font-semibold">{airport.name}</span>
+                      <span className="text-xs text-muted-foreground">{airport.code}</span>
+                      <ChevronRight className="size-4" aria-hidden />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : <p role="status" className="text-sm text-muted-foreground">No matching airports. Try the airport name or code.</p>
+          ) : (
+            <p className="text-sm leading-relaxed text-muted-foreground">Tap a pin or search by name or code, such as Moi or MBA.</p>
           )}
+        </div>
+      )}
 
-          {!airports && !error && (
-            <div role="status" className="mt-5 flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 motion-safe:animate-spin" aria-hidden />
-              Loading airports…
-            </div>
-          )}
-
-          {airports && !pickedAirport && (
-            <div className="mt-6" role="group" aria-labelledby="airport-list-title">
-              <h2 id="airport-list-title" className="text-base font-semibold">Which airport?</h2>
-              {airports.length === 0 && <p className="text-sm text-muted-foreground">No airport shuttles are listed.</p>}
-              {airports.map((airport) => (
-                <button
-                  key={airport.code}
-                  type="button"
-                  onClick={() => pickAirport(airport)}
-                  className="flex min-h-15 w-full items-center justify-between gap-3 border-b py-3 text-left transition-colors hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-ring"
-                >
-                  <span className="flex min-w-0 items-center gap-3">
-                    <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10">
-                      <Plane className="h-4.5 w-4.5 text-primary" aria-hidden />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-sm font-semibold text-foreground">{airport.name}</span>
-                      <span className="block text-xs text-muted-foreground">{airport.code} · About {airport.durationMinutes} min</span>
-                    </span>
-                  </span>
-                  <ChevronRight className="size-5 shrink-0 text-primary" aria-hidden />
+      {pickedAirport && !searchOpen && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <h1 id="airport-shuttle-title" ref={panelHeading} tabIndex={-1} className="text-xl font-bold tracking-tight outline-none">{activeSlot ? "Choose your ride" : "Confirm your journey"}</h1>
+            <button type="button" onClick={showSearch} className="inline-flex min-h-11 shrink-0 items-center gap-2 text-sm font-semibold text-primary">
+              <Search className="size-4" aria-hidden /> Change airport
+            </button>
+          </div>
+          <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 rounded-2xl bg-muted/60 p-3.5 text-sm" aria-label="Pickup and drop-off">
+            <span className="size-2.5 justify-self-center rounded-full border-2 border-primary" aria-hidden />
+            <p><span className="block text-xs text-muted-foreground">Pickup</span>{pickup}</p>
+            <ArrowDown className="size-4 text-muted-foreground" aria-hidden />
+            <span />
+            <span className="size-2.5 justify-self-center rounded-full bg-primary" aria-hidden />
+            <p><span className="block text-xs text-muted-foreground">Drop-off</span>{dropoff}</p>
+          </div>
+          {!activeSlot && (
+            <>
+              <div role="group" aria-label="Airport direction" className="grid grid-cols-2 gap-2 rounded-full bg-muted p-1">
+                <button type="button" onClick={() => chooseDirection("TO_AIRPORT")} aria-pressed={!fromAirport} className={cn("flex min-h-11 items-center justify-center gap-1.5 rounded-full px-2 text-sm", !fromAirport && "bg-card font-semibold shadow-xs")}>
+                  <PlaneTakeoff className="size-4 shrink-0" aria-hidden /> To airport
                 </button>
-              ))}
-            </div>
+                <button type="button" onClick={() => chooseDirection("FROM_AIRPORT")} aria-pressed={fromAirport} className={cn("flex min-h-11 items-center justify-center gap-1.5 rounded-full px-2 text-sm", fromAirport && "bg-card font-semibold shadow-xs")}>
+                  <PlaneLanding className="size-4 shrink-0" aria-hidden /> From airport
+                </button>
+              </div>
+              <label className="block text-sm font-medium">
+                Travel date
+                <input
+                  type="date"
+                  required
+                  min={nairobiToday()}
+                  value={travelDate}
+                  onChange={(event) => {
+                    if (!event.target.value || !event.target.validity.valid) return;
+                    setTravelDate(event.target.value);
+                    setPendingSlotId(null);
+                  }}
+                  className="mt-1 block min-h-11 w-full rounded-xl border bg-card px-3 text-base"
+                />
+              </label>
+              <SlotColumn
+                label="Departure time (EAT)"
+                icon={<Clock className="size-4" aria-hidden />}
+                slots={pickedAirport.slots.filter((slot) => slot.direction === direction && pickedAirport.journeys[direction])}
+                selectedSlotId={pendingSlotId}
+                onSelect={(slot) => setPendingSlotId(slot.id)}
+              />
+              <Button type="button" className="h-12 w-full rounded-full text-base" disabled={!pendingSlot} onClick={() => {
+                if (!pendingSlot) return;
+                chooseSlot(pickedAirport, pendingSlot);
+                requestAnimationFrame(() => panelHeading.current?.focus({ preventScroll: true }));
+              }}>
+                Find rides <ArrowRight className="size-4" aria-hidden />
+              </Button>
+            </>
           )}
-          {pickedAirport && (
-            <div className="mt-4 space-y-3">
-              <button
-                type="button"
-                onClick={() => { setPickedCode(null); setSelection(null); }}
-                className="flex min-h-11 items-center gap-1.5 text-sm font-medium text-primary underline-offset-4 hover:underline"
-              >
-                <ArrowLeft className="size-4" aria-hidden /> Change airport
-              </button>
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <h2 className="text-base font-semibold">{pickedAirport.name}</h2>
-                  <p className="text-xs text-muted-foreground">{pickedAirport.code} · About {pickedAirport.durationMinutes} min</p>
+          {activeSlot && (
+            <section className="space-y-3 border-t pt-4">
+              <div className="flex items-start justify-between gap-3">
+                <p className="text-sm text-muted-foreground">
+                  {DIRECTION_LABEL[activeSlot.direction]} · {travelDate} · {activeSlot.departTime} EAT
+                </p>
+                <button type="button" className="min-h-11 shrink-0 text-sm font-semibold text-primary" onClick={() => setSelection(null)}>
+                  <ArrowLeft className="me-1 inline size-4" aria-hidden /> Edit trip
+                </button>
+              </div>
+
+              {tripsError && (
+                <div>
+                  <p className="text-sm text-destructive" role="alert">{tripsError}</p>
+                  <Button type="button" variant="ghost" onClick={() => setRefreshKey((value) => value + 1)}>Try again</Button>
                 </div>
-                <Plane className="h-5 w-5 shrink-0 text-primary" aria-hidden />
-              </div>
+              )}
+              {trips === null && !tripsError && (
+                <p className="flex items-center gap-2 text-xs text-muted-foreground" role="status">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> Checking drivers and seats…
+                </p>
+              )}
+              {trips !== null && (hasEligibleDrivers === false || vehicleChoices.length === 0) && !tripsError && (
+                <div className="space-y-1.5 py-2">
+                  <p className="text-sm text-muted-foreground">
+                    {hasEligibleDrivers === false
+                      ? "No approved drivers are on duty for this departure yet."
+                      : "Cabs for this shuttle are still being confirmed."}
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setRefreshKey((value) => value + 1)}
+                      className="text-xs font-medium text-primary underline underline-offset-4"
+                    >
+                      Check again
+                    </button>
+                    <a href="mailto:mirellisgr001@gmail.com" className="text-xs text-muted-foreground underline underline-offset-4">
+                      Contact support
+                    </a>
+                  </div>
+                </div>
+              )}
 
-              <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
-                <SlotColumn
-                  label="From the airport"
-                  icon={<PlaneLanding className="h-3.5 w-3.5" aria-hidden />}
-                  slots={pickedAirport.slots.filter((slot) => slot.direction === "FROM_AIRPORT")}
-                  selectedSlotId={activeSlot?.id ?? null}
-                  onSelect={(slot) => chooseSlot(pickedAirport, slot)}
-                />
-                <SlotColumn
-                  label="To the airport"
-                  icon={<PlaneTakeoff className="h-3.5 w-3.5" aria-hidden />}
-                  slots={pickedAirport.slots.filter((slot) => slot.direction === "TO_AIRPORT")}
-                  selectedSlotId={activeSlot?.id ?? null}
-                  onSelect={(slot) => chooseSlot(pickedAirport, slot)}
-                />
-              </div>
-
-              {activeSlot && (
-                <section className="space-y-3 border-t pt-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="text-base font-semibold">Choose your ride</h3>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        {DIRECTION_LABEL[activeSlot.direction]} · {fmtTime(`${travelDate}T${activeSlot.departTime}:00+03:00`)} EAT
-                      </p>
-                    </div>
-                    <Plane className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+              {vehicleChoices.length > 0 && (
+                <>
+                  <div className="divide-y" role="group" aria-label="Choose a ride">
+                    {vehicleChoices.map(({ category, count, minFare }) => (
+                      <button
+                        key={category}
+                        type="button"
+                        aria-pressed={selectedVehicle === category}
+                        onClick={() => {
+                          setSelectedVehicle(category);
+                          setSeats(1);
+                          setCharter(false);
+                        }}
+                        className={cn(
+                          "flex min-h-16 w-full items-center justify-between gap-3 px-2 py-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring",
+                          selectedVehicle === category ? "bg-primary/8 font-semibold" : "hover:bg-primary/5",
+                        )}
+                      >
+                        <span className="flex min-w-0 items-center gap-3">
+                          <span className="grid h-10 w-11 shrink-0 place-items-center text-primary">
+                            <VehicleTypeIcon category={category} className="h-6 w-9 text-primary" />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block text-sm font-semibold">{VEHICLE_CATEGORY_LABELS[category]}</span>
+                            <span className="block text-xs text-muted-foreground">{count} available</span>
+                          </span>
+                        </span>
+                        <span className="shrink-0 text-right">
+                          <span className="block text-sm font-bold tabular-nums text-primary">{ksh(minFare)}</span>
+                          <span className="block text-[10px] text-muted-foreground">from / seat</span>
+                        </span>
+                      </button>
+                    ))}
                   </div>
 
-                  {tripsError && <p className="text-sm text-destructive" role="alert">{tripsError}</p>}
-                  {trips === null && !tripsError && (
-                    <p className="flex items-center gap-2 text-xs text-muted-foreground" role="status">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> Checking drivers and seats…
-                    </p>
-                  )}
-                  {trips !== null && (hasEligibleDrivers === false || vehicleChoices.length === 0) && !tripsError && (
-                    <div className="space-y-1.5 py-2">
-                      <p className="text-sm text-muted-foreground">
-                        {hasEligibleDrivers === false
-                          ? "No approved drivers are on duty for this departure yet."
-                          : "Cabs for this shuttle are still being confirmed."}
-                      </p>
-                      <div className="flex items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() => setRefreshKey((value) => value + 1)}
-                          className="text-xs font-medium text-primary underline underline-offset-4"
-                        >
-                          Check again
-                        </button>
-                        <a href="mailto:mirellisgr001@gmail.com" className="text-xs text-muted-foreground underline underline-offset-4">
-                          Contact support
-                        </a>
+                  {selectedVehicle && (
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3">
+                        <div>
+                          <p className="text-xs font-semibold">{VEHICLE_CATEGORY_LABELS[selectedVehicle]} fare</p>
+                          <p className="text-[10px] text-muted-foreground">
+                            {charter ? "Whole cab · 16% VAT added on top" : "Per-seat stage fare plus Mi-Reli fee"}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1 rounded-full bg-muted p-1">
+                          <button type="button" aria-pressed={!charter} onClick={() => setCharter(false)} className={cn("min-h-9 rounded-full px-3 text-xs", !charter && "bg-background font-semibold shadow-sm")}>Shared</button>
+                          <button type="button" aria-pressed={charter} onClick={() => setCharter(true)} className={cn("min-h-9 rounded-full px-3 text-xs", charter && "bg-background font-semibold shadow-sm")}>Charter</button>
+                        </div>
                       </div>
-                    </div>
-                  )}
-
-                  {vehicleChoices.length > 0 && (
-                    <>
-                      {/* Riider-style ride list: full-width rows, name and
-                          availability left, from-price right, selected row
-                          outlined. One decision per row, like Bolt. */}
-                      <div className="divide-y" role="group" aria-label="Choose a ride">
-                        {vehicleChoices.map(({ category, count, minFare }) => (
-                          <button
-                            key={category}
-                            type="button"
-                            aria-pressed={selectedVehicle === category}
-                            onClick={() => setSelectedVehicle(category)}
-                            className={cn(
-                              "flex min-h-16 w-full items-center justify-between gap-3 px-2 py-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring",
-                              selectedVehicle === category ? "bg-primary/8 font-semibold" : "hover:bg-primary/5",
-                            )}
-                          >
-                            <span className="flex min-w-0 items-center gap-3">
-                              <span className="grid h-10 w-11 shrink-0 place-items-center text-primary">
-                                <VehicleTypeIcon category={category} className="h-6 w-9 text-primary" />
-                              </span>
-                              <span className="min-w-0">
-                                <span className="block text-sm font-semibold">{VEHICLE_CATEGORY_LABELS[category]}</span>
-                                <span className="block text-xs text-muted-foreground">{count} available</span>
-                              </span>
-                            </span>
-                            <span className="shrink-0 text-right">
-                              <span className="block text-sm font-bold tabular-nums text-primary">{ksh(minFare)}</span>
-                              <span className="block text-[10px] text-muted-foreground">from / seat</span>
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-
-                      {selectedVehicle && (
-                        <div className="space-y-3">
-                          <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3">
-                            <div>
-                              <p className="text-xs font-semibold">{VEHICLE_CATEGORY_LABELS[selectedVehicle]} fare</p>
-                              <p className="text-[10px] text-muted-foreground">
-                                {charter ? "Whole cab · 16% VAT added on top" : "Per-seat stage fare plus Mi-Reli fee"}
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-1 rounded-full bg-muted p-1">
-                              <button type="button" aria-pressed={!charter} onClick={() => setCharter(false)} className={cn("min-h-9 rounded-full px-3 text-xs", !charter && "bg-background font-semibold shadow-sm")}>Shared</button>
-                              <button type="button" aria-pressed={charter} onClick={() => setCharter(true)} className={cn("min-h-9 rounded-full px-3 text-xs", charter && "bg-background font-semibold shadow-sm")}>Charter</button>
-                            </div>
-                          </div>
-                          {!charter && (
-                            <div role="group" aria-label="Seats" className="flex items-center justify-between border-b pb-2 text-sm">
-                              <span>Seats</span>
-                              <span className="flex items-center gap-2">
-                                <button type="button" aria-label="Remove one seat" disabled={seats <= 1} onClick={() => setSeats((value) => Math.max(1, value - 1))} className="size-11 rounded-full bg-muted hover:bg-primary/10 disabled:opacity-40">−</button>
-                                <span className="min-w-4 text-center font-semibold tabular-nums">{seats}</span>
-                                <button type="button" aria-label="Add one seat" disabled={seats >= maxSeats} onClick={() => setSeats((value) => Math.min(maxSeats, value + 1))} className="size-11 rounded-full bg-muted hover:bg-primary/10 disabled:opacity-40">+</button>
-                              </span>
-                            </div>
-                          )}
-
-                          {visibleTrips.length === 0 ? (
-                            <p className="py-2 text-sm text-muted-foreground">
-                              {charter ? "No unbooked cab of this type is available for a charter." : "Not enough seats on this vehicle type. Choose fewer seats or another vehicle."}
-                            </p>
-                          ) : (
-                            <div className="space-y-2">
-                              {visibleTrips.map((trip) => (
-                                <AirportTripCard
-                                  key={trip.id}
-                                  trip={trip}
-                                  fare={getAirportFare(trip, activeJourney!.stage.fare, seats, charter)}
-                                  vat={charter ? calculateCharterVat(calculateCharterFare(trip.capacity, activeJourney!.stage.fare)) : 0}
-                                  charter={charter}
-                                  seats={seats}
-                                  onBook={() => openBooking(trip)}
-                                />
-                              ))}
-                            </div>
-                          )}
+                      {!charter && (
+                        <div role="group" aria-label="Seats" className="flex items-center justify-between border-b pb-2 text-sm">
+                          <span>Seats</span>
+                          <span className="flex items-center gap-2">
+                            <button type="button" aria-label="Remove one seat" disabled={seats <= 1} onClick={() => setSeats((value) => Math.max(1, value - 1))} className="size-11 rounded-full bg-muted hover:bg-primary/10 disabled:opacity-40">−</button>
+                            <span className="min-w-4 text-center font-semibold tabular-nums">{seats}</span>
+                            <button type="button" aria-label="Add one seat" disabled={seats >= maxSeats} onClick={() => setSeats((value) => Math.min(maxSeats, value + 1))} className="size-11 rounded-full bg-muted hover:bg-primary/10 disabled:opacity-40">+</button>
+                          </span>
                         </div>
                       )}
-                    </>
+
+                      {visibleTrips.length === 0 ? (
+                        <p className="py-2 text-sm text-muted-foreground">
+                          {charter ? "No unbooked cab of this type is available for a charter." : "Not enough seats on this vehicle type. Choose fewer seats or another vehicle."}
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {visibleTrips.map((trip) => (
+                            <AirportTripCard
+                              key={trip.id}
+                              trip={trip}
+                              fare={getAirportFare(trip, activeJourney!.stage.fare, seats, charter)}
+                              vat={charter ? calculateCharterVat(calculateCharterFare(trip.capacity, activeJourney!.stage.fare)) : 0}
+                              charter={charter}
+                              seats={seats}
+                              onBook={() => openBooking(trip)}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   )}
-                </section>
+                </>
               )}
-            </div>
+            </section>
           )}
-        </section>
-      </div>
+        </div>
+      )}
+      </section>
       <Accordion type="single" collapsible defaultValue={openPrivateTransfer ? "private-transfer" : undefined} className="w-full">
         <AccordionItem value="private-transfer" className="border-t">
           <AccordionTrigger className="gap-4 py-4 text-left hover:no-underline">
@@ -475,7 +511,7 @@ export function AirportsFlow({ openPrivateTransfer = false }: { openPrivateTrans
             </span>
           </AccordionTrigger>
           <AccordionContent className="pb-4 pt-1">
-            <AirportRequestForm />
+            <AirportRequestForm onPreview={handlePrivatePreview} />
           </AccordionContent>
         </AccordionItem>
       </Accordion>

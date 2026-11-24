@@ -23,6 +23,8 @@ import {
 } from "@/components/ui/select";
 import { PaySheet } from "@/components/pay-sheet";
 import { AuthSheet } from "@/components/auth-sheet";
+import { PassengerPlaceLookup, type PassengerPlace } from "@/components/passenger/PassengerPlaceLookup";
+import { PASSENGER_TERMINUS } from "@/lib/passenger-terminus";
 import { api, useMe, detailsComplete, type PassengerDetails } from "@/lib/client";
 import { ksh, fmtTime } from "@/lib/format";
 import { MIRELI_SUPPORT_PHONE_LOCAL, MIRELI_SUPPORT_WHATSAPP_NUMBER } from "@/lib/support";
@@ -174,17 +176,28 @@ function BookingSheetContent({
   onClose,
   draft,
   onBooked,
+  onAddressPreview,
   identity,
 }: {
   open: boolean;
   onClose: () => void;
   draft: BookingDraft | null;
   onBooked: () => void;
+  onAddressPreview?: (place: PassengerPlace | null) => void;
   identity: ReturnType<typeof useMe>;
 }) {
   const { me, refresh } = identity;
   const creditBalance = me?.creditBalance || 0;
   const [homeAddress, setHomeAddress] = useState(draft?.homeAddress || "");
+  const [addressPlace, setAddressPlace] = useState<PassengerPlace | null>(null);
+  const toTerminus = draft?.trip.direction === "TO_TERMINUS";
+  const stationQuery = `${PASSENGER_TERMINUS.lat},${PASSENGER_TERMINUS.lng}`;
+  const addressQuery = addressPlace ? `${addressPlace.lat},${addressPlace.lng}` : "";
+  const addressDirections = addressPlace ? new URLSearchParams({
+    api: "1", travelmode: "driving",
+    origin: toTerminus ? addressQuery : stationQuery,
+    destination: toTerminus ? stationQuery : addressQuery,
+  }) : null;
   const [locationQuoteConsent, setLocationQuoteConsent] = useState(false);
   const [useCredit, setUseCredit] = useState(draft?.useCredit || false);
   const [busy, setBusy] = useState(false);
@@ -529,11 +542,22 @@ function BookingSheetContent({
                     autoComplete="street-address"
                     onChange={(e) => {
                       setHomeAddress(e.target.value);
+                      setAddressPlace(null);
+                      onAddressPreview?.(null);
                       setLocationQuoteConsent(false);
                     }}
                     placeholder="e.g. Near Naivas Bamburi, gate 2"
                     className="h-9"
                   />
+                  <PassengerPlaceLookup address={homeAddress} onSelect={(place) => {
+                    setHomeAddress(place.address);
+                    setAddressPlace(place);
+                    setLocationQuoteConsent(false);
+                    onAddressPreview?.(place);
+                  }} />
+                  {addressDirections && <a className="inline-flex min-h-11 items-center text-sm font-medium text-primary underline"
+                    href={`https://www.google.com/maps/dir/?${addressDirections}`} target="_blank" rel="noreferrer">Open directions</a>}
+
                   {offstageShared && (
                     <label className="flex items-start gap-2 rounded-lg border bg-card p-2.5 text-[11px] leading-relaxed text-muted-foreground">
                       <Checkbox

@@ -17,7 +17,7 @@ export async function GET() {
         order: { gt: 0 },
         fare: { gt: 0 },
         homeSurcharge: { gte: 0 },
-        route: { is: { active: true } },
+        route: { is: { active: true, serviceKind: "sgr_feeder" } },
       },
       select: {
         id: true,
@@ -25,7 +25,9 @@ export async function GET() {
         lat: true,
         lng: true,
         order: true,
-        route: { select: { id: true, name: true } },
+        fare: true,
+        homeSurcharge: true,
+        route: { select: { id: true, name: true, charterPrice: true } },
       },
       orderBy: [{ route: { name: "asc" } }, { order: "asc" }],
       take: MAX_STOPS,
@@ -40,6 +42,10 @@ export async function GET() {
         lng: stop.lng,
         routeId: stop.route.id,
         routeName: stop.route.name,
+        order: stop.order,
+        fare: stop.fare,
+        homeSurcharge: stop.homeSurcharge,
+        route: stop.route,
       })),
     });
   } catch (error) {

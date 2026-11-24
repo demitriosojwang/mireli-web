@@ -48,7 +48,7 @@ describe("public customer stop search", () => {
         order: { gt: 0 },
         fare: { gt: 0 },
         homeSurcharge: { gte: 0 },
-        route: { is: { active: true } },
+        route: { is: { active: true, serviceKind: "sgr_feeder" } },
         name: { contains: "mtwapa", mode: "insensitive" },
       }),
       take: 13,

@@ -31,6 +31,7 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null);
+  const codeInput = useRef<HTMLInputElement>(null);
   const focusedStep = useRef<Step>("welcome");
 
   const welcome = step === "welcome";
@@ -42,7 +43,8 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
   useEffect(() => {
     if (step === focusedStep.current) return;
     focusedStep.current = step;
-    heading.current?.focus({ preventScroll: true });
+    if (step === "otp") codeInput.current?.focus({ preventScroll: true });
+    else heading.current?.focus({ preventScroll: true });
   }, [step]);
 
   useEffect(() => {
@@ -90,10 +92,34 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
       setResendSeconds(result.cooldownSeconds);
       setResendUntil(Date.now() + result.cooldownSeconds * 1000);
       setStep("otp");
+      if (step === "otp") requestAnimationFrame(() => codeInput.current?.focus({ preventScroll: true }));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The code could not be sent. Try again.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  function acceptPastedCode(text: string) {
+    const compact = text.trim().replace(/\s|-/g, "");
+    const matches = text.match(/\b[0-9]{6}\b/g);
+    const pastedCode = /^[0-9]{6}$/.test(compact) ? compact : matches?.length === 1 ? matches[0] : "";
+    if (!pastedCode) {
+      setError("Copy the six-digit code and paste it into the verification field.");
+      codeInput.current?.focus();
+      return;
+    }
+    setCode(pastedCode);
+    setError("");
+    codeInput.current?.focus();
+  }
+
+  async function pasteCode() {
+    try {
+      acceptPastedCode(await navigator.clipboard.readText());
+    } catch {
+      codeInput.current?.focus();
+      setError("Use your keyboard or browser’s Paste command in the verification field.");
     }
   }
 
@@ -200,7 +226,29 @@ export function LoginScreen({ onDone }: { onDone: () => void }) {
                 {step === "otp" && (
                   <div className="space-y-2">
                     <label htmlFor="login-code" className="block text-sm font-medium">Verification code</label>
-                    <Input id="login-code" inputMode="numeric" autoComplete="one-time-code" maxLength={12} placeholder="000000" className={cn(field, "font-mono text-lg tracking-[0.35em]")} value={code} onChange={(event) => { setCode(event.target.value.replace(/\D/g, "").slice(0, 6)); setError(""); }} disabled={busy} />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Input
+                        ref={codeInput}
+                        id="login-code"
+                        name="one-time-code"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        aria-describedby="login-code-hint"
+                        placeholder="000000"
+                        className={cn(field, "min-w-34 flex-1 font-mono text-lg tracking-[0.35em]")}
+                        value={code}
+                        onChange={(event) => { setCode(event.target.value.replace(/\D/g, "").slice(0, 6)); setError(""); }}
+                        onPaste={(event) => {
+                          event.preventDefault();
+                          acceptPastedCode(event.clipboardData.getData("text"));
+                        }}
+                        disabled={busy}
+                      />
+                      <button type="button" onClick={pasteCode} disabled={busy} className={cn(secondaryAction, "px-2")}>Paste code</button>
+                    </div>
+                    <p id="login-code-hint" className="text-xs text-[#c1d1dc]">
+                      Tap a code suggested by your device, or paste the code here.
+                    </p>
                     {demoCode && <p className="text-sm text-amber-200">Local demo code <strong>{demoCode}</strong></p>}
                   </div>
                 )}
