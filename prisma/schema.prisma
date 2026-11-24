@@ -71,6 +71,16 @@ model AirportTransfer {
   passengers      Int
   flight          String?
   luggage         String?
+  addressLat      Float?
+  addressLng      Float?
+  airportLat      Float?
+  airportLng      Float?
+  pickupNote      String?
+  arrivedAt       DateTime?
+  driverLat       Float?
+  driverLng       Float?
+  driverSeenAt    DateTime?
+  etaSeconds      Int?
   status          String    @default("requested")
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt

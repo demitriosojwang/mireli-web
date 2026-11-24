@@ -1,6 +1,7 @@
 "use client";
 
 import { PassengerPlaceLookup, type PassengerPlace } from "@/components/passenger/PassengerPlaceLookup";
+import { isTransferPin, type TransferPin } from "@/lib/airport-transfer-pins";
 import { getAirportByCode } from "@/lib/airport-catalogue";
 import { ArrowLeft, ArrowRight, Plane, Search } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
@@ -30,6 +31,9 @@ type TransferDraft = {
   passengers: number;
   flight: string;
   bags: string;
+  pickupNote?: string;
+  addressPin?: TransferPin | null;
+  airportPin?: TransferPin | null;
 };
 const TRANSFER_DRAFT_KEY = "mireli:airport-transfer-draft";
 
@@ -41,6 +45,20 @@ type AirportRequest = {
   pickupAt: string;
   status: string;
   driver: { name: string; plate: string; phone: string | null } | null;
+  navigation?: TrackedTransfer["navigation"];
+  position?: TrackedTransfer["position"];
+};
+
+export type TrackedTransfer = {
+  id: string;
+  status: string;
+  navigation: {
+    pickup: { name: string; lat: number | null; lng: number | null };
+    dropoff: { name: string; lat: number | null; lng: number | null };
+    pickupNote: string | null;
+    arrivedAt: string | null;
+  };
+  position: (TransferPin & { etaSeconds: number | null; seenAt: string }) | null;
 };
 
 const REQUEST_STATUS: Record<string, string> = {
@@ -56,13 +74,22 @@ const pickupFormat = new Intl.DateTimeFormat("en-KE", {
 });
 
 export default function AirportRequestForm({
-  airport, onAirportChange, direction, onDirectionChange, onPlaceChange,
+  airport, onAirportChange, direction, onDirectionChange, onPlaceChange, place, airportPin,
+  onRestorePins, pinPicking, pinError, onAdjustPickup, onCancelPin, onTrack,
 }: {
   airport: TransferAirport | null;
   onAirportChange: (airport: TransferAirport | null) => void;
   direction: "from" | "to";
   onDirectionChange: (direction: "from" | "to") => void;
   onPlaceChange: (place: PassengerPlace | null) => void;
+  place: PassengerPlace | null;
+  airportPin: TransferPin | null;
+  onRestorePins: (draft: TransferDraft) => void;
+  pinPicking: boolean;
+  pinError: string;
+  onAdjustPickup: (address: string) => void;
+  onCancelPin: () => void;
+  onTrack: (transfer: TrackedTransfer | null) => void;
 }) {
   const { me, loading } = useMe();
   const passengerId = me?.passenger && !me.passenger.isGuest ? me.passenger.id : undefined;
@@ -74,6 +101,11 @@ export default function AirportRequestForm({
   const [statusError, setStatusError] = useState("");
   const [requests, setRequests] = useState<AirportRequest[]>([]);
   const [saving, setSaving] = useState(false);
+  const [trackedId, setTrackedId] = useState<string | null>(null);
+  const tracked = requests.find((request) => request.id === trackedId && (request.status === "confirmed" || request.status === "in_progress"));
+  useEffect(() => {
+    onTrack(tracked?.navigation ? { id: tracked.id, status: tracked.status, navigation: tracked.navigation, position: tracked.position ?? null } : null);
+  }, [tracked, onTrack]);
   const [hasAirportDrivers, setHasAirportDrivers] = useState<boolean | null>(null);
   const requestKey = useRef<string | null>(null);
   const requestRevision = useRef(0);
@@ -104,11 +136,12 @@ export default function AirportRequestForm({
         onDirectionChange(saved.direction);
         setAddress(saved.address);
         setReview(saved);
+        onRestorePins(saved);
         setEditing(false);
       } catch { /* Draft storage is optional. */ }
     }, 0);
     return () => window.clearTimeout(restore);
-  }, [onAirportChange, onDirectionChange]);
+  }, [onAirportChange, onDirectionChange, onRestorePins]);
 
   const refreshRequests = useCallback(async (signal?: AbortSignal) => {
     const revision = requestRevision.current;
@@ -132,12 +165,12 @@ export default function AirportRequestForm({
       } catch {
         if (!controller.signal.aborted) setStatusError("Could not refresh transfers. Retrying…");
       } finally {
-        if (!controller.signal.aborted) timer = setTimeout(poll, 15_000);
+        if (!controller.signal.aborted) timer = setTimeout(poll, trackedId ? 5_000 : 15_000);
       }
     };
     void poll();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [passengerId, refreshRequests]);
+  }, [passengerId, refreshRequests, trackedId]);
 
   async function requestTransfer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -158,6 +191,9 @@ export default function AirportRequestForm({
         passengers: Number(fields.get("passengers")),
         flight: String(fields.get("flight") ?? "").trim(),
         bags: String(fields.get("bags") ?? "").trim(),
+        pickupNote: String(fields.get("pickupNote") ?? "").trim(),
+        addressPin: isTransferPin(place) ? { lat: place.lat, lng: place.lng } : null,
+        airportPin,
       });
       setEditing(false);
       requestAnimationFrame(() => heading.current?.focus());
@@ -181,6 +217,7 @@ export default function AirportRequestForm({
       setEditing(true);
       setAddress("");
       onPlaceChange(null);
+      onAirportChange(null);
       formRef.current?.reset();
     } catch (error) {
       setError(error instanceof Error ? error.message : "Could not send your transfer request.");
@@ -220,7 +257,23 @@ export default function AirportRequestForm({
             <article key={request.id} className="grid gap-2 rounded-xl border p-3 text-sm">
               <h3 className="font-semibold">{request.direction === "from" ? "From " : "To "}{AIRPORTS[request.airport]}</h3>
               <p>{request.address} · {pickupFormat.format(new Date(request.pickupAt))} EAT</p>
-              <p role="status" className="text-muted-foreground">{missed ? "Pickup time passed" : REQUEST_STATUS[request.status]}</p>
+              <p role="status" className="text-muted-foreground">
+                {missed ? "Pickup time passed" : request.status === "confirmed" && request.navigation?.arrivedAt ? "Driver arrived at pickup" : REQUEST_STATUS[request.status]}
+              </p>
+              {request.driver && request.navigation && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button type="button" variant="outline" onClick={() => {
+                    setTrackedId(trackedId === request.id ? null : request.id);
+                    onCancelPin();
+                    document.getElementById("passenger-ride-map")?.scrollIntoView({ block: "nearest" });
+                  }}>{trackedId === request.id ? "Hide tracking" : "Track driver on map"}</Button>
+                  <span role="status" className="text-xs text-muted-foreground">
+                    {request.position?.etaSeconds != null
+                      ? `About ${Math.ceil(request.position.etaSeconds / 60)} min to ${request.status === "in_progress" ? "drop-off" : "pickup"}`
+                      : trackedId === request.id && !request.position ? "Waiting for a current driver location" : ""}
+                  </span>
+                </div>
+              )}
               {request.driver && <p>{request.driver.name} · {request.driver.plate}
                 {request.driver.phone && <> · <a className="underline" href={`tel:${request.driver.phone}`}>Call driver</a></>}
               </p>}
@@ -241,6 +294,7 @@ export default function AirportRequestForm({
           <dl className="grid gap-3 rounded-2xl bg-muted/60 p-4 text-sm">
             <div><dt className="text-xs text-muted-foreground">Pickup</dt><dd>{fromAirport ? airportName : shownReview.address}</dd></div>
             <div><dt className="text-xs text-muted-foreground">Drop-off</dt><dd>{fromAirport ? shownReview.address : airportName}</dd></div>
+            {shownReview.pickupNote && <div><dt className="text-xs text-muted-foreground">Pickup instructions</dt><dd>{shownReview.pickupNote}</dd></div>}
             <div><dt className="text-xs text-muted-foreground">Pickup time</dt>
               <dd>{pickupFormat.format(new Date(`${shownReview.date}T${shownReview.time}:00+03:00`))} EAT · {shownReview.passengers} {shownReview.passengers === 1 ? "passenger" : "passengers"}</dd>
             </div>
@@ -332,6 +386,18 @@ export default function AirportRequestForm({
                 setAddress(result.address);
                 onPlaceChange(result);
               }} />
+              <div className="grid gap-2">
+                <Button type="button" variant="outline" className="justify-self-start rounded-full" disabled={!fromAirport && address.trim().length < 3}
+                  onClick={() => { setTrackedId(null); if (pinPicking) onCancelPin(); else onAdjustPickup(address.trim()); }}>
+                  {pinPicking ? "Cancel pin adjustment" : "Adjust pickup pin"}
+                </Button>
+                {(pinPicking || pinError) ? <p role="status" className="text-sm text-muted-foreground">
+                  {pinError || "Tap the map to confirm where the driver should meet you."}
+                </p> : (fromAirport ? airportPin : place) && <p role="status" className="text-xs text-muted-foreground">Pickup pin set. Your assigned driver will see this pin.</p>}
+                <label className="text-sm font-medium">Pickup instructions
+                  <input name="pickupNote" className={input} maxLength={120} defaultValue={review?.pickupNote} placeholder="Optional, e.g. arrivals exit or hotel gate" />
+                </label>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <label className="min-w-0 text-sm font-medium">Pickup date<input name="date" type="date" min={nairobiToday()} required defaultValue={review?.date} className={input} /></label>
                 <label className="min-w-0 text-sm font-medium">Pickup time (EAT)<input name="time" type="time" required defaultValue={review?.time} className={input} /></label>

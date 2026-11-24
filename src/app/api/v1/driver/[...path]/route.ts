@@ -13,7 +13,7 @@ import {driverServiceStatus} from "@/lib/driver/readiness";
 import {reportDriverPosition} from "@/lib/driver/position";
 import {enforceRouteLimit, requestDestinationRoute, requestDriverRoute} from "@/lib/driver/navigation";
 import {amazonLocationConfigured, satelliteTile, searchDriverDestinations} from "@/lib/driver/amazon-location";
-import {acceptAirportTransfer, driverAirportTransfers, setDriverRideService, updateDriverAirportTransfer} from "@/lib/airport-transfers";
+import {acceptAirportTransfer, driverAirportTransfers, reportAirportTransferPosition, setDriverRideService, updateDriverAirportTransfer} from "@/lib/airport-transfers";
 
 import { driverProfilePhoto, maxProfilePhotoBytes, removeDriverProfilePhoto, saveDriverProfilePhoto } from "@/lib/driver/profile-photo";
 
@@ -66,6 +66,9 @@ async function handler(req:Request,context:Context) {
       const id = path.split("/")[1];
       const { action } = await json();
       result = action === "accept" ? await acceptAirportTransfer(driverId, id) : await updateDriverAirportTransfer(driverId, id, action);
+    }
+    else if(/^airport-transfers\/[^/]+\/position$/.test(path) && req.method==="POST"){
+      result=await reportAirportTransferPosition(driverId,path.split("/")[1],await json());
     }
     else if(path==="position" && req.method==="POST")result=await reportDriverPosition(driverId,await json());
     else if(path==="navigation/route" && req.method==="POST")result=await requestDriverRoute(driverId,await json());
