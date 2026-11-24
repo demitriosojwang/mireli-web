@@ -717,8 +717,10 @@ export default function Home() {
               if (stop) selectSgrStop(stop);
             }}
             routeOrigin={visibleAirportMap?.routeOrigin}
+            showOriginMarker={!airportMode}
+            showDrivingDirections={!airportMode || visibleAirportMap?.selectedStopId === "private-address"}
             reverse={airportMode ? visibleAirportMap?.reverse : direction === "TO_TERMINUS"}
-            caption={airportMode ? "Airport shuttle map" : "SGR ride map"}
+            caption={airportMode ? "Airport transfer map" : "SGR ride map"}
             detail={airportMode
               ? visibleAirportMap?.detail ?? "Search for an airport."
               : sgrPrivatePin?.name ?? selectedPoint?.point.name ?? "Tap a stop or search by name."}
@@ -727,7 +729,7 @@ export default function Home() {
         </div>
         <div className="relative z-10 -mt-3 min-w-0 space-y-4 rounded-t-3xl bg-background px-2 pt-5 lg:col-start-2 lg:row-start-1 lg:mt-0 lg:rounded-none lg:px-0 lg:pt-1">
         {airportMode ? (
-          <AirportsFlow openPrivateTransfer={searchParams.get("transfer") === "1"} onMapChange={setAirportMap} />
+          <AirportsFlow onMapChange={setAirportMap} />
         ) : <>
         <AnimatePresence mode="popLayout">
           <motion.div

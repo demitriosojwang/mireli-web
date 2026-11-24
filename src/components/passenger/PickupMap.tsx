@@ -46,6 +46,8 @@ type PickupMapProps = {
   fitStops?: boolean;
   reverse?: boolean;
   routeOrigin?: MapPoint;
+  showOriginMarker?: boolean;
+  showDrivingDirections?: boolean;
 };
 
 type LiveCabFix = {
@@ -83,6 +85,8 @@ export default function PickupMap({
   fitStops = false,
   reverse = false,
   routeOrigin,
+  showOriginMarker = true,
+  showDrivingDirections = true,
 }: PickupMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<import("maplibre-gl").Map | null>(null);
@@ -105,7 +109,7 @@ export default function PickupMap({
   const routeAnchor = routeOrigin ?? origin;
   const start = reverse ? endpoint : routeAnchor;
   const end = reverse ? routeAnchor : endpoint;
-  const routeKey = start && end ? `${start.lat},${start.lng}:${end.lat},${end.lng}` : "";
+  const routeKey = showDrivingDirections && start && end ? `${start.lat},${start.lng}:${end.lat},${end.lng}` : "";
   const [preview, setPreview] = useState<{ key: string; points?: [number, number][]; km?: number; minutes?: number; error?: string } | null>(null);
   const [pendingRoute, setPendingRoute] = useState("");
   const routeRequest = useRef<AbortController | null>(null);
@@ -386,11 +390,11 @@ export default function PickupMap({
     const maplibregl = maplibreRef.current;
     if (map && maplibregl && mapReadyRef.current && focusStop) {
       const bounds = new maplibregl.LngLatBounds();
-      bounds.extend([routeAnchor.lng, routeAnchor.lat]);
+      if (showDrivingDirections) bounds.extend([routeAnchor.lng, routeAnchor.lat]);
       bounds.extend([focusStop.lng, focusStop.lat]);
       map.fitBounds(bounds, { padding: 48, maxZoom: 13, duration: 400 });
     }
-  }, [focusStop, mapReady, routeAnchor.lng, routeAnchor.lat]);
+  }, [focusStop, mapReady, routeAnchor.lng, routeAnchor.lat, showDrivingDirections]);
 
   const routePoints = activePreview?.points;
   useEffect(() => {
@@ -448,7 +452,7 @@ export default function PickupMap({
     );
   }, []);
 
-  const directions = start && end ? new URLSearchParams({
+  const directions = showDrivingDirections && start && end ? new URLSearchParams({
     api: "1",
     travelmode: "driving",
     origin: `${start.lat},${start.lng}`,
@@ -461,7 +465,7 @@ export default function PickupMap({
       <div className="relative bg-muted">
         <div
           ref={containerRef}
-          className={`relative w-full overflow-hidden ${heightClassName}`}
+          className={`relative w-full overflow-hidden ${heightClassName}${showOriginMarker ? "" : " [&_.mireli-map-marker--origin]:hidden"}`}
           role={onSelectStop ? "region" : "img"}
           aria-label={`${caption}. ${stopLabel}.`}
         />

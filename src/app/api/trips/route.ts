@@ -19,9 +19,10 @@ export async function GET(req: NextRequest) {
   const trainId = searchParams.get("trainId");
   if (!date) return NextResponse.json({ error: "date required" }, { status: 400 });
 
-  if (!["FROM_TERMINUS", "TO_TERMINUS", "FROM_AIRPORT", "TO_AIRPORT"].includes(direction)) return NextResponse.json({ error: "Invalid direction" }, { status: 400 });
-  // trainId is the departure anchor key. Airport shuttles pass a synthetic
-  // anchor (`airport-<CODE>-<DIRECTION>`) that matches their scheduled trips.
+  if (direction === "FROM_AIRPORT" || direction === "TO_AIRPORT" || trainId?.startsWith("airport-")) {
+    return NextResponse.json({ error: "Airport rides use private transfers.", bookingPath: "/airport-transfers" }, { status: 409 });
+  }
+  if (!["FROM_TERMINUS", "TO_TERMINUS"].includes(direction)) return NextResponse.json({ error: "Invalid direction" }, { status: 400 });
   if (!trainId || trainId.length > 64) return NextResponse.json({ error: "Choose a departure" }, { status: 400 });
   if (routeId !== null && (routeId.length === 0 || routeId.length > 64)) {
     return NextResponse.json({ error: "Invalid route" }, { status: 400 });
@@ -48,18 +49,7 @@ export async function GET(req: NextRequest) {
     const trips = await db.trip.findMany({
       where: {
         ...(routeId ? { routeId } : {}),
-        // Airport shuttles pass a synthetic anchor key `airport-<CODE>-<DIRECTION>`
-        // that matches the shuttleSlot's airport + direction instead of a Train id.
-        ...(trainId.startsWith("airport-")
-          ? {
-              shuttleSlot: {
-                is: {
-                  airportCode: trainId.replace(/^airport-/, "").replace(/-(FROM|TO)_AIRPORT$/, ""),
-                  direction,
-                },
-              },
-            }
-          : { trainId }),
+        trainId,
         direction,
         driverId: { in: eligibleDriverIds },
         departureAt: { gte: dayStart, lt: dayEnd },
@@ -67,6 +57,7 @@ export async function GET(req: NextRequest) {
         route: {
           is: {
             active: true,
+            serviceKind: "sgr_feeder",
             stages: {
               some: {
                 order: { gt: 0 },
@@ -76,10 +67,8 @@ export async function GET(req: NextRequest) {
             },
           },
         },
-        // Airport trips have no Train row; the anchor filter must not exclude them.
-        ...(trainId.startsWith("airport-")
-          ? {}
-          : { OR: [{ train: { is: { active: true } } }, { shuttleSlotId: { not: null } }] }),
+        shuttleSlotId: null,
+        train: { is: { active: true } },
       },
       orderBy: { departureAt: "asc" },
       select: {
@@ -99,9 +88,6 @@ export async function GET(req: NextRequest) {
         },
         train: {
           select: { id: true, name: true, direction: true, originTime: true, destTime: true },
-        },
-        shuttleSlot: {
-          select: { id: true, airportCode: true, airportName: true, direction: true, departTime: true },
         },
         driver: {
           // Vehicle registrations are shared only after a booking is confirmed.
@@ -130,8 +116,7 @@ export async function GET(req: NextRequest) {
       const seatsLeft = Math.max(t.capacity - relevantBooked, 0);
       const vehicleCategory = vehicleCategoryFromCabType(t.driver?.cabType);
       const isFromTerminus = t.direction === "FROM_TERMINUS";
-      const isAirport = !!t.shuttleSlot;
-      const train = t.train && !isAirport
+      const train = t.train
         ? {
             id: t.train.id,
             name: t.train.name,
@@ -156,27 +141,15 @@ export async function GET(req: NextRequest) {
         // rule), so the train departs at departureAt + lead; the cab targets
         // arriving terminusArrivalBufferMinutes before that.
         // FROM_TERMINUS: departureAt itself is the terminus departure.
-        // Airport trips: departureAt is the shuttle departure; the arrival
-        // side is departure + route duration.
         terminusAt: isFromTerminus
           ? t.departureAt
-          : t.shuttleSlot
-            ? new Date(t.departureAt.getTime() + t.route.durationMinutes * 60 * 1000)
-            : t.train && t.train.direction === "MBA_TO_NBO"
+          : t.train && t.train.direction === "MBA_TO_NBO"
               ? new Date(
                   t.departureAt.getTime() +
                     (CAB_LEAD_MINUTES - cfg.terminusArrivalBufferMinutes) * 60 * 1000,
                 )
               : new Date(t.departureAt.getTime() + t.route.durationMinutes * 60 * 1000),
         train,
-        shuttle: t.shuttleSlot
-          ? {
-              id: t.shuttleSlot.id,
-              airportCode: t.shuttleSlot.airportCode,
-              airportName: t.shuttleSlot.airportName,
-              direction: t.shuttleSlot.direction,
-            }
-          : null,
         status: t.status,
         capacity: t.capacity,
         seatsLeft,
