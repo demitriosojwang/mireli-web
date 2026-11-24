@@ -23,7 +23,9 @@ export type MapCab = {
 export type RideMapSelection = {
   stops: MapPoint[];
   selectedStopId: string | null;
-  onSelectStop: (id: string) => void;
+  onSelectStop?: (id: string) => void;
+  cabs?: MapCab[];
+  onPickCoordinate?: (location: { lat: number; lng: number }) => void;
   detail: string;
   reverse?: boolean;
   routeOrigin?: MapPoint;
@@ -38,6 +40,7 @@ type PickupMapProps = {
   onSelectStop?: (id: string) => void;
   heightClassName?: string;
   caption?: string;
+  onPickCoordinate?: (location: { lat: number; lng: number }) => void;
   detail?: string;
   showLocation?: boolean;
   /** Poll the newest GPS fix of every active pooled cab and glide the markers to it. */
@@ -77,6 +80,7 @@ export default function PickupMap({
   cabCount = 0,
   selectedStopId = null,
   onSelectStop,
+  onPickCoordinate,
   heightClassName = "h-[220px]",
   caption = "Your pickup area",
   detail = "Mombasa Terminus · Miritini",
@@ -93,6 +97,8 @@ export default function PickupMap({
   const maplibreRef = useRef<typeof import("maplibre-gl") | null>(null);
   const locationMarkerRef = useRef<import("maplibre-gl").Marker | null>(null);
   const stopSelectionRef = useRef(onSelectStop);
+  const coordinateSelectionRef = useRef(onPickCoordinate);
+  const fitCabRef = useRef<MapCab | undefined>(undefined);
   const stopMarkersRef = useRef<Map<string, import("maplibre-gl").Marker>>(new Map());
   const liveLayerRef = useRef<
     Map<string, { marker: import("maplibre-gl").Marker; lng: number; lat: number; toLng: number; toLat: number }>
@@ -190,6 +196,7 @@ export default function PickupMap({
         });
         mapRef.current = map;
         map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+        map.on("click", ({ lngLat }) => coordinateSelectionRef.current?.({ lat: lngLat.lat, lng: lngLat.lng }));
         // The container can be laid out before the map measures it (iOS Safari
         // resizes mid-load); a late ResizeObserver-driven check keeps the canvas
         // from spilling over the footer controls.
@@ -215,16 +222,6 @@ export default function PickupMap({
             .setLngLat([origin.lng, origin.lat])
             .setPopup(new maplibregl.Popup({ offset: 12 }).setText(origin.name))
             .addTo(map));
-
-          for (const cab of cabs) {
-            const cabElement = document.createElement("div");
-            cabElement.className = "mireli-map-marker mireli-map-marker--cab";
-            cabElement.setAttribute("aria-hidden", "true");
-            markers.push(new maplibregl.Marker({ element: cabElement })
-              .setLngLat([cab.lng, cab.lat])
-              .setPopup(new maplibregl.Popup({ offset: 12 }).setText(cab.label || "Pooled cab"))
-              .addTo(map));
-          }
 
           setMapState("ready");
           mapReadyRef.current = true;
@@ -256,7 +253,7 @@ export default function PickupMap({
       mapRef.current?.remove();
       mapRef.current = null;
     };
-  }, [nearViewport, origin.id, origin.name, origin.lat, origin.lng, cabs, mapAttempt]);
+  }, [nearViewport, origin.id, origin.name, origin.lat, origin.lng, mapAttempt]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -328,6 +325,21 @@ export default function PickupMap({
     };
   }, [live, mapReady]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    const maplibregl = maplibreRef.current;
+    if (!map || !maplibregl || !mapReady || !mapReadyRef.current) return;
+    const markers = cabs.map((cab) => {
+      const element = document.createElement("div");
+      element.className = "mireli-map-marker mireli-map-marker--cab mireli-map-marker--live";
+      element.setAttribute("aria-hidden", "true");
+      return new maplibregl.Marker({ element }).setLngLat([cab.lng, cab.lat])
+        .setPopup(new maplibregl.Popup({ offset: 12 }).setText(cab.label ?? "Assigned driver")).addTo(map);
+    });
+    return () => { for (const marker of markers) marker.remove(); };
+  }, [cabs, mapReady]);
+
+  useEffect(() => { coordinateSelectionRef.current = onPickCoordinate; }, [onPickCoordinate]);
   useEffect(() => { stopSelectionRef.current = onSelectStop; }, [onSelectStop]);
 
   // Stop markers are synced in place. The map itself is created once, so the
@@ -357,8 +369,9 @@ export default function PickupMap({
         if (element instanceof HTMLButtonElement && onSelectStop) {
           element.type = "button";
           element.addEventListener("click", (event) => {
+            if (!stopSelectionRef.current) return;
             event.stopPropagation();
-            stopSelectionRef.current?.(stop.id);
+            stopSelectionRef.current(stop.id);
           });
         } else {
           element.setAttribute("aria-hidden", "true");
@@ -384,17 +397,22 @@ export default function PickupMap({
 
   }, [stops, selectedStopId, mapReady, onSelectStop]);
 
-  const focusStop = fitStops ? endpoint : null;
+  const focusLat = fitStops ? endpoint?.lat : undefined;
+  const focusLng = fitStops ? endpoint?.lng : undefined;
+  const trackedCabId = cabs[0]?.id;
+  useEffect(() => { fitCabRef.current = cabs[0]; }, [cabs]);
   useEffect(() => {
     const map = mapRef.current;
     const maplibregl = maplibreRef.current;
-    if (map && maplibregl && mapReadyRef.current && focusStop) {
+    if (map && maplibregl && mapReadyRef.current && focusLat !== undefined && focusLng !== undefined) {
       const bounds = new maplibregl.LngLatBounds();
       if (showDrivingDirections) bounds.extend([routeAnchor.lng, routeAnchor.lat]);
-      bounds.extend([focusStop.lng, focusStop.lat]);
+      bounds.extend([focusLng, focusLat]);
+      const cab = fitCabRef.current;
+      if (cab?.id === trackedCabId && cab) bounds.extend([cab.lng, cab.lat]);
       map.fitBounds(bounds, { padding: 48, maxZoom: 13, duration: 400 });
     }
-  }, [focusStop, mapReady, routeAnchor.lng, routeAnchor.lat, showDrivingDirections]);
+  }, [focusLat, focusLng, mapReady, routeAnchor.lng, routeAnchor.lat, showDrivingDirections, trackedCabId]);
 
   const routePoints = activePreview?.points;
   useEffect(() => {
@@ -461,11 +479,11 @@ export default function PickupMap({
   const stopLabel = live && stops.length > 0 ? `${stops.length} approved stop${stops.length > 1 ? "s" : ""} · ${detail}` : detail;
 
   return (
-    <section className="overflow-hidden rounded-2xl border bg-card" aria-label={caption}>
+    <section id="passenger-ride-map" className="scroll-mt-24 overflow-hidden rounded-2xl border bg-card" aria-label={caption}>
       <div className="relative bg-muted">
         <div
           ref={containerRef}
-          className={`relative w-full overflow-hidden ${heightClassName}${showOriginMarker ? "" : " [&_.mireli-map-marker--origin]:hidden"}`}
+          className={`relative w-full overflow-hidden ${heightClassName}${showOriginMarker ? "" : " [&_.mireli-map-marker--origin]:hidden"}${onPickCoordinate ? " [&_.maplibregl-canvas]:cursor-crosshair" : ""}`}
           role={onSelectStop ? "region" : "img"}
           aria-label={`${caption}. ${stopLabel}.`}
         />

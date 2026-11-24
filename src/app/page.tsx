@@ -708,17 +708,15 @@ export default function Home() {
             live={!airportMode}
             cabCount={eligibleDriverCount ?? 0}
             fitStops={airportMode ? Boolean(visibleAirportMap?.selectedStopId) : Boolean(selectedSgrPin)}
-            onSelectStop={(id) => {
-              if (airportMode) {
-                visibleAirportMap?.onSelectStop(id);
-                return;
-              }
+            onSelectStop={airportMode ? visibleAirportMap?.onSelectStop : (id) => {
               const stop = mapStops.find((point) => point.id === id);
               if (stop) selectSgrStop(stop);
             }}
             routeOrigin={visibleAirportMap?.routeOrigin}
+            cabs={visibleAirportMap?.cabs}
+            onPickCoordinate={visibleAirportMap?.onPickCoordinate}
             showOriginMarker={!airportMode}
-            showDrivingDirections={!airportMode || visibleAirportMap?.selectedStopId === "private-address"}
+            showDrivingDirections={!airportMode || Boolean(visibleAirportMap?.routeOrigin && visibleAirportMap?.selectedStopId)}
             reverse={airportMode ? visibleAirportMap?.reverse : direction === "TO_TERMINUS"}
             caption={airportMode ? "Airport transfer map" : "SGR ride map"}
             detail={airportMode

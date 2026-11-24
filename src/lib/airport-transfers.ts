@@ -5,12 +5,52 @@ import { evaluateDriverApplication } from "@/lib/driver/eligibility";
 import { AIRPORT_SERVICES, RIDE_SERVICES, airportConflict, airportWindow } from "@/lib/ride-service";
 import { nairobiDayRange, nairobiEventAt } from "@/lib/nairobi-time";
 import { normalizePhone } from "@/lib/session";
+import { getAirportByCode } from "@/lib/airport-catalogue";
+import { isTransferPin, nearAirport, type TransferPin } from "@/lib/airport-transfer-pins";
 import { getEligibleDriverIds } from "@/lib/driver/availability";
 
 const airportView = {
   id: true, airport: true, direction: true, address: true, pickupAt: true, passengers: true,
   flight: true, luggage: true, status: true,
 } as const;
+const navigationView = {
+  addressLat: true, addressLng: true, airportLat: true, airportLng: true,
+  pickupNote: true, arrivedAt: true,
+} as const;
+const trackingView = { driverLat: true, driverLng: true, driverSeenAt: true, etaSeconds: true } as const;
+const clearedTracking = { driverLat: null, driverLng: null, driverSeenAt: null, etaSeconds: null };
+const POSITION_INTERVAL_MS = 3_000;
+const POSITION_FRESHNESS_MS = 90_000;
+
+function optionalPin(value: unknown): TransferPin | null {
+  if (value == null) return null;
+  if (isTransferPin(value)) return value;
+  throw new DriverError(400, "INVALID_PIN", "Choose a valid pin on the Kenya coast.");
+}
+
+type TransferNavigationRecord = {
+  airport: string; direction: string; address: string;
+  addressLat: number | null; addressLng: number | null;
+  airportLat: number | null; airportLng: number | null;
+  pickupNote: string | null; arrivedAt: Date | null;
+};
+
+function navigationFor(ride: TransferNavigationRecord) {
+  const airport = getAirportByCode(ride.airport.toUpperCase());
+  const airportPin = {
+    name: airport?.name ?? "Airport",
+    lat: ride.airportLat ?? airport?.lat ?? null,
+    lng: ride.airportLng ?? airport?.lng ?? null,
+  };
+  const addressPin = { name: ride.address, lat: ride.addressLat, lng: ride.addressLng };
+  return {
+    pickup: ride.direction === "from" ? airportPin : addressPin,
+    dropoff: ride.direction === "from" ? addressPin : airportPin,
+    pickupNote: ride.pickupNote,
+    arrivedAt: ride.arrivedAt,
+  };
+}
+
 const bookedStatuses = ["awaiting_payment", "confirmed", "boarded"];
 const stale = () => new DriverError(409, "TRANSFER_CHANGED", "This transfer changed. Refresh and try again.");
 
@@ -55,7 +95,7 @@ export async function driverAirportTransfers(driverId: string) {
   const now = new Date();
   const assigned = eligible ? await db.airportTransfer.findMany({
     where: { driverId, status: { in: ["confirmed", "in_progress"] } },
-    select: { ...airportView, contactPhone: true },
+    select: { ...airportView, ...navigationView, contactPhone: true },
     take: 30, orderBy: { pickupAt: "asc" },
   }) : [];
   const requests = eligible && AIRPORT_SERVICES.includes(driver.rideService) ? await db.airportTransfer.findMany({
@@ -66,7 +106,9 @@ export async function driverAirportTransfers(driverId: string) {
     select: airportView,
     take: 30, orderBy: { pickupAt: "asc" },
   }) : [];
-  return { eligible, rideService: driver.rideService, assigned, requests };
+  return { eligible, rideService: driver.rideService, assigned: assigned.map((ride) => ({
+    ...ride, navigation: navigationFor(ride),
+  })), requests };
 }
 
 export async function setDriverRideService(driverId: string, value: unknown) {
@@ -99,6 +141,13 @@ export async function createAirportTransfer(passengerId: string, body: Record<st
   const optionalText = (value: unknown, label: string, max: number) => value ? text(value, label, 1, max) : null;
   const flight = optionalText(body.flight, "Flight number", 20);
   const luggage = optionalText(body.luggage, "Luggage", 100);
+  const pickupNote = optionalText(body.pickupNote, "Pickup instructions", 120);
+  const addressPin = optionalPin(body.addressPin);
+  const airportLocation = getAirportByCode(airport.toUpperCase())!;
+  const airportPin = optionalPin(body.airportPin) ?? airportLocation;
+  if (!nearAirport(airportPin, airportLocation)) {
+    throw new DriverError(400, "AIRPORT_PIN_OUTSIDE_AREA", "Choose an airport pin near the selected airport.");
+  }
   let pickupAt: Date;
   try {
     pickupAt = nairobiEventAt(nairobiDayRange(String(body.date)).start, 0, String(body.time));
@@ -127,7 +176,10 @@ export async function createAirportTransfer(passengerId: string, body: Record<st
     } });
     if (pending >= 5) throw new DriverError(429, "TRANSFER_LIMIT", "Resolve an existing transfer before sending another request.");
     return tx.airportTransfer.create({
-      data: { passengerId, requestKey, airport, direction, address, contactPhone, pickupAt, passengers, flight, luggage },
+      data: {
+        passengerId, requestKey, airport, direction, address, contactPhone, pickupAt, passengers, flight, luggage, pickupNote,
+        addressLat: addressPin?.lat, addressLng: addressPin?.lng, airportLat: airportPin.lat, airportLng: airportPin.lng,
+      },
       select: airportView,
     });
   });
@@ -136,12 +188,24 @@ export async function createAirportTransfer(passengerId: string, body: Record<st
 export async function passengerAirportTransfers(passengerId: string) {
   const requests = await db.airportTransfer.findMany({
     where: { passengerId },
-    select: { ...airportView, driver: { select: { name: true, phone: true, plate: true } } },
+    select: { ...airportView, ...navigationView, ...trackingView, driver: { select: { name: true, phone: true, plate: true } } },
     orderBy: { pickupAt: "desc" }, take: 30,
   });
-  return requests.map(({ driver, ...request }) => ({
-    ...request, driver: ["confirmed", "in_progress"].includes(request.status) ? driver : null,
-  }));
+  return requests.map(({ driver, driverLat, driverLng, driverSeenAt, etaSeconds, ...request }) => {
+    const active = request.status === "confirmed" || request.status === "in_progress";
+    const fresh = active && driverSeenAt && Date.now() - driverSeenAt.getTime() <= POSITION_FRESHNESS_MS;
+    const elapsedSeconds = driverSeenAt ? Math.max(0, Math.floor((Date.now() - driverSeenAt.getTime()) / 1000)) : 0;
+    return {
+      ...request,
+      navigation: navigationFor(request),
+      driver: active ? driver : null,
+      position: fresh && driverLat !== null && driverLng !== null
+        ? { lat: driverLat, lng: driverLng, seenAt: driverSeenAt,
+            etaSeconds: request.status === "confirmed" && request.arrivedAt ? null
+              : etaSeconds === null ? null : Math.max(0, etaSeconds - elapsedSeconds) }
+        : null,
+    };
+  });
 }
 
 export async function acceptAirportTransfer(driverId: string, id: string) {
@@ -184,8 +248,18 @@ export async function updateDriverAirportTransfer(driverId: string, id: string, 
   await db.$transaction(async tx => {
     await lockDriver(tx, driverId);
     const now = new Date();
-    const ride = await tx.airportTransfer.findFirst({ where: { id, driverId }, select: { status: true, pickupAt: true } });
+    const ride = await tx.airportTransfer.findFirst({ where: { id, driverId }, select: { status: true, pickupAt: true, arrivedAt: true } });
     if (!ride) throw stale();
+    if (action === "arrive" && ride.status === "confirmed" && now >= airportWindow(ride.pickupAt).start) {
+      if (!ride.arrivedAt) {
+        const result = await tx.airportTransfer.updateMany({
+          where: { id, driverId, status: "confirmed" },
+          data: { arrivedAt: now, etaSeconds: null },
+        });
+        if (!result.count) throw stale();
+      }
+      return;
+    }
     let status: string;
     if (action === "start" && ride.status === "confirmed" && now >= airportWindow(ride.pickupAt).start) {
       status = "in_progress";
@@ -196,9 +270,42 @@ export async function updateDriverAirportTransfer(driverId: string, id: string, 
     } else throw new DriverError(409, "INVALID_ACTION", "This action is unavailable for the current transfer.");
     const result = await tx.airportTransfer.updateMany({
       where: { id, driverId, status: ride.status },
-      data: { status },
+      data: { status, ...clearedTracking },
     });
     if (!result.count) throw stale();
   });
   return driverAirportTransfers(driverId);
+}
+
+
+export async function reportAirportTransferPosition(driverId: string, id: string, body: Record<string, unknown>) {
+  const { leg, recordedAt: sampledAt, etaSeconds: eta } = body;
+  const location = { lat: body.lat, lng: body.lng };
+  if (!isTransferPin(location) || (leg !== "pickup" && leg !== "dropoff")) {
+    throw new DriverError(400, "INVALID_POSITION", "The reported transfer position is invalid.");
+  }
+  const now = new Date();
+  const recordedAt = typeof sampledAt === "string" ? new Date(sampledAt) : new Date(NaN);
+  const age = now.getTime() - recordedAt.getTime();
+  if (!Number.isFinite(age) || age < -30_000 || age > POSITION_FRESHNESS_MS) {
+    throw new DriverError(400, "INVALID_POSITION", "The reported position is out of date.");
+  }
+  if (eta != null && (typeof eta !== "number" || !Number.isSafeInteger(eta) || eta < 0 || eta > 21_600)) {
+    throw new DriverError(400, "INVALID_ETA", "The reported ETA is invalid.");
+  }
+  const status = leg === "pickup" ? "confirmed" : "in_progress";
+  const ride = await db.airportTransfer.findFirst({
+    where: { id, driverId, status },
+    select: { pickupAt: true },
+  });
+  if (!ride) throw stale();
+  const window = airportWindow(ride.pickupAt);
+  if (now < window.start || (leg === "pickup" && now > window.end)) throw stale();
+  await db.airportTransfer.updateMany({
+    where: { id, driverId, status, OR: [
+      { driverSeenAt: null }, { driverSeenAt: { lte: new Date(recordedAt.getTime() - POSITION_INTERVAL_MS) } },
+    ] },
+    data: { driverLat: location.lat, driverLng: location.lng, driverSeenAt: recordedAt, etaSeconds: typeof eta === "number" ? eta : null },
+  });
+  return { ok: true };
 }
