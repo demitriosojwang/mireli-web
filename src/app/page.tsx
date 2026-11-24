@@ -35,7 +35,8 @@ import { VEHICLE_CATEGORIES, VEHICLE_CATEGORY_LABELS, vehicleCategoryFromCabType
 import { calculateVehicleBookingFee, getStageFareForVehicle, isPerRideVehicle } from "@/lib/vehicle-fares";
 import { getBookingPaymentPreflight } from "@/lib/booking-payment-preflight";
 import { MAX_STAGE_SEARCH_LENGTH, MIN_STAGE_SEARCH_LENGTH, isStageSearchReady } from "@/lib/stage-search";
-import PickupMap, { type MapPoint } from "@/components/passenger/PickupMap";
+import type { PassengerPlace } from "@/components/passenger/PassengerPlaceLookup";
+import PickupMap, { type MapPoint, type RideMapSelection } from "@/components/passenger/PickupMap";
 import {
   DatePicker,
   DotBadge,
@@ -141,7 +142,8 @@ export default function Home() {
   // availability refreshes it when the selected route is queried.
   const [hasEligibleDrivers, setHasEligibleDrivers] = useState<boolean | null>(null);
   const [eligibleDriverCount, setEligibleDriverCount] = useState<number | null>(null);
-  const [mapStops, setMapStops] = useState<MapPoint[]>([]);
+  const [mapStops, setMapStops] = useState<(MapPoint & PointSearchResult)[]>([]);
+  const [airportMap, setAirportMap] = useState<RideMapSelection | null>(null);
   const [timetable, setTimetable] = useState<TrainRow[]>([]);
   const [timetableStatus, setTimetableStatus] = useState<CatalogueStatus>("loading");
   const [catalogueRetry, setCatalogueRetry] = useState(0);
@@ -162,6 +164,7 @@ export default function Home() {
   const [scheduledTrainKey, setTrainKey] = useState<string | null>(null);
   const [selectedPoint, setSelectedPoint] = useState<SelectedPoint | null>(null);
   const [homePickup, setHomePickup] = useState(false);
+  const [sgrAddress, setSgrAddress] = useState<PassengerPlace | null>(null);
   const [charter, setCharter] = useState(false);
   const [vehicleChoice, setVehicleChoice] = useState<{ key: string; category: VehicleCategory } | null>(null);
   const [requestedSeats, setSeats] = useState(1);
@@ -289,7 +292,7 @@ export default function Home() {
           setEligibleDriverCount(null);
         }
       });
-    api<{ stops: MapPoint[] }>("/api/route-map", {
+    api<{ stops: (MapPoint & PointSearchResult)[] }>("/api/route-map", {
       signal: controller.signal,
       timeoutMs: CATALOGUE_TIMEOUT_MS,
     })
@@ -612,6 +615,21 @@ export default function Home() {
     };
   })();
 
+  function selectSgrStop(point: PointSearchResult) {
+    setBookingStartError(null);
+    setSgrAddress(null);
+    setHomePickup(false);
+    setSelectedPoint({ point, route: point.route, coast: coastOf(point.route.name) });
+    setJourneyCollapsed(Boolean(trainKey));
+    setPointPickerOpen(false);
+  }
+
+  const airportMode = destinationType === "airport";
+  const visibleAirportMap = airportMode ? airportMap : null;
+  const sgrPrivatePin = homePickup ? sgrAddress : null;
+  const selectedSgrPin = sgrPrivatePin ?? mapStops.find((stop) => stop.id === selectedPoint?.point.id);
+  const sgrMapPins = useMemo(() => sgrPrivatePin ? [...mapStops, sgrPrivatePin] : mapStops, [mapStops, sgrPrivatePin]);
+
   return (
     <div className="flex min-h-dvh flex-col bg-background">
       <SiteHeader />
@@ -682,19 +700,35 @@ export default function Home() {
       </div>
 
       <main className="mx-auto w-full max-w-md flex-1 px-4 pt-4 pb-6 sm:max-w-2xl sm:px-6 lg:max-w-5xl">
-        <div className={cn(destinationType === "sgr" && "lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-6")}>
-        <div className="min-w-0 space-y-4">
-        {destinationType === "airport" ? (
-          <AirportsFlow openPrivateTransfer={searchParams.get("transfer") === "1"} />
+        <div className="grid gap-y-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:items-start lg:gap-x-7">
+        <div className="lg:sticky lg:top-20 lg:col-start-1 lg:row-start-1 lg:row-span-2">
+          <PickupMap
+            stops={airportMode ? visibleAirportMap?.stops : sgrMapPins}
+            selectedStopId={airportMode ? visibleAirportMap?.selectedStopId : selectedSgrPin?.id}
+            live={!airportMode}
+            cabCount={eligibleDriverCount ?? 0}
+            fitStops={airportMode ? Boolean(visibleAirportMap?.selectedStopId) : Boolean(selectedSgrPin)}
+            onSelectStop={(id) => {
+              if (airportMode) {
+                visibleAirportMap?.onSelectStop(id);
+                return;
+              }
+              const stop = mapStops.find((point) => point.id === id);
+              if (stop) selectSgrStop(stop);
+            }}
+            routeOrigin={visibleAirportMap?.routeOrigin}
+            reverse={airportMode ? visibleAirportMap?.reverse : direction === "TO_TERMINUS"}
+            caption={airportMode ? "Airport shuttle map" : "SGR ride map"}
+            detail={airportMode
+              ? visibleAirportMap?.detail ?? "Search for an airport."
+              : sgrPrivatePin?.name ?? selectedPoint?.point.name ?? "Tap a stop or search by name."}
+            heightClassName="h-64 supports-[height:1svh]:h-[clamp(240px,42svh,420px)] lg:h-[min(62vh,540px)]"
+          />
+        </div>
+        <div className="relative z-10 -mt-3 min-w-0 space-y-4 rounded-t-3xl bg-background px-2 pt-5 lg:col-start-2 lg:row-start-1 lg:mt-0 lg:rounded-none lg:px-0 lg:pt-1">
+        {airportMode ? (
+          <AirportsFlow openPrivateTransfer={searchParams.get("transfer") === "1"} onMapChange={setAirportMap} />
         ) : <>
-        <PickupMap
-          stops={mapStops}
-          cabCount={eligibleDriverCount ?? 0}
-          selectedStopId={selectedPoint?.point.id ?? null}
-          caption="Your pickup area"
-          detail="Mombasa Terminus · Miritini"
-          heightClassName="h-[200px] sm:h-[240px]"
-        />
         <AnimatePresence mode="popLayout">
           <motion.div
             key={direction}
@@ -1023,23 +1057,7 @@ export default function Home() {
                                 <CommandItem
                                   key={point.id}
                                   value={`${coast} ${route.name} ${point.name}`}
-                                  onSelect={() => {
-                                    setBookingStartError(null);
-                                    setHomePickup(false);
-                                    setSelectedPoint({
-                                      point: {
-                                        id: point.id,
-                                        name: point.name,
-                                        order: point.order,
-                                        fare: point.fare,
-                                        homeSurcharge: point.homeSurcharge,
-                                      },
-                                      route,
-                                      coast,
-                                    });
-                                    setJourneyCollapsed(Boolean(trainKey));
-                                    setPointPickerOpen(false);
-                                  }}
+                                  onSelect={() => selectSgrStop(point)}
                                   className="min-h-11"
                                 >
                                   <Check className={cn("h-4 w-4", selectedPoint?.point.id === point.id ? "opacity-100" : "opacity-0")} />
@@ -1412,33 +1430,7 @@ export default function Home() {
         </>}
         </div>
 
-        {/* Desktop rail: timetable + guidance beside the booking column */}
-        {destinationType === "sgr" && <aside className="mt-6 hidden space-y-4 lg:sticky lg:top-24 lg:block">
-          <section className="border-b pb-4" aria-label="Madaraka Express timetable">
-            <h2 className="text-sm font-semibold">Madaraka Express times</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {direction === "FROM_TERMINUS" ? "Arrival at Mombasa Terminus" : "Departure from Mombasa Terminus"}  Kenya time
-            </p>
-            {timetableStatus === "loading" && <p role="status" className="mt-2 text-xs text-muted-foreground">Loading train times</p>}
-            {timetableStatus === "error" && (
-              <p role="alert" className="mt-2 text-xs text-muted-foreground">
-                Train times could not load. <button type="button" className="font-medium text-primary underline underline-offset-2" onClick={retryCatalogues}>Try again</button>
-              </p>
-            )}
-            {timetableStatus === "empty" && <p className="mt-2 text-xs text-muted-foreground">The timetable is being configured.</p>}
-            {timetableStatus === "ready" && trainOptions.length === 0 && <p className="mt-2 text-xs text-muted-foreground">No trains are listed for this date.</p>}
-            {trainOptions.length > 0 && (
-              <ul className="mt-2 grid grid-cols-3 gap-2">
-                {trainOptions.map((train) => (
-                  <li key={train.id} className="border-b px-2 py-2">
-                    <p className="text-[10px] font-medium text-muted-foreground">{train.name}</p>
-                    <p className="text-sm font-semibold tabular-nums">{train.time}</p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
+        {destinationType === "sgr" && <aside className="mt-6 hidden space-y-4 lg:col-start-2 lg:row-start-2 lg:block">
           <section className="border-b pb-4">
             <h2 className="text-sm font-semibold">How booking works</h2>
             <ol className="mt-2 space-y-2 text-xs leading-relaxed text-muted-foreground">
@@ -1464,6 +1456,7 @@ export default function Home() {
 
       <BookingSheet
         open={sheetOpen}
+        onAddressPreview={setSgrAddress}
         onClose={() => {
           setSheetOpen(false);
           refreshTrips();

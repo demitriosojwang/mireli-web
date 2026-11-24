@@ -72,7 +72,7 @@ describe("public stage point search", () => {
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         order: {gt: 0},
-        route: {is: {active: true}},
+        route: {is: {active: true, serviceKind: "sgr_feeder"}},
         name: {contains: "Mtwapa", mode: "insensitive"},
       }),
       take: 13,
@@ -103,7 +103,7 @@ describe("public stage point search", () => {
     }));
     expect(findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
       where: expect.objectContaining({
-        route: {is: {active: true, name: {contains: "North Coast", mode: "insensitive"}}},
+        route: {is: {active: true, serviceKind: "sgr_feeder", name: {contains: "North Coast", mode: "insensitive"}}},
       }),
     }));
   });

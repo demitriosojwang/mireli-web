@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
     // Suggestion mode: a stable, bounded slice of the published network.
     if (suggesting) {
       const suggestions = await db.routeStage.findMany({
-        where: { ...usableStop, route: { is: { active: true } } },
+        where: { ...usableStop, route: { is: { active: true, serviceKind: "sgr_feeder" } } },
         orderBy: [{ route: { name: "asc" } }, { order: "asc" }, { name: "asc" }],
         take: SEARCH_LIMIT,
         select,
@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
     const nameMatches = await db.routeStage.findMany({
       where: {
         ...usableStop,
-        route: { is: { active: true } },
+        route: { is: { active: true, serviceKind: "sgr_feeder" } },
         name: { contains: query, mode: "insensitive" },
       },
       orderBy: [{ route: { name: "asc" } }, { order: "asc" }, { name: "asc" }],
@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
     const matches = nameMatches.length > 0 ? nameMatches : await db.routeStage.findMany({
       where: {
         ...usableStop,
-        route: { is: { active: true, name: { contains: query, mode: "insensitive" } } },
+        route: { is: { active: true, serviceKind: "sgr_feeder", name: { contains: query, mode: "insensitive" } } },
       },
       orderBy: [{ route: { name: "asc" } }, { order: "asc" }, { name: "asc" }],
       take: SEARCH_LIMIT + 1,

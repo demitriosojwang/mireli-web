@@ -1,5 +1,7 @@
 "use client";
 
+import { PassengerPlaceLookup, type PassengerPlace } from "@/components/passenger/PassengerPlaceLookup";
+import { getAirportByCode } from "@/lib/airport-catalogue";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -33,10 +35,16 @@ const pickupFormat = new Intl.DateTimeFormat("en-KE", {
   hour: "2-digit", minute: "2-digit", hour12: false,
 });
 
-export default function AirportRequestForm() {
+export default function AirportRequestForm({ onPreview }: {
+  onPreview?: (place: PassengerPlace | null, airport: ReturnType<typeof getAirportByCode>, toAirport: boolean) => void;
+} = {}) {
   const { me, loading } = useMe();
   const passengerId = me?.passenger && !me.passenger.isGuest ? me.passenger.id : undefined;
   const [direction, setDirection] = useState<"from" | "to">("from");
+  const [airportCode, setAirportCode] = useState("");
+  const [address, setAddress] = useState("");
+  const [place, setPlace] = useState<PassengerPlace | null>(null);
+  const mapAirport = getAirportByCode(airportCode.toUpperCase());
   const [error, setError] = useState("");
   const [statusError, setStatusError] = useState("");
   const [requests, setRequests] = useState<AirportRequest[]>([]);
@@ -45,6 +53,16 @@ export default function AirportRequestForm() {
   const requestKey = useRef<string | null>(null);
   const requestRevision = useRef(0);
   const fromAirport = direction === "from";
+  const routeParams = place && mapAirport ? new URLSearchParams({
+    api: "1", travelmode: "driving",
+    origin: fromAirport ? `${mapAirport.lat},${mapAirport.lng}` : `${place.lat},${place.lng}`,
+    destination: fromAirport ? `${place.lat},${place.lng}` : `${mapAirport.lat},${mapAirport.lng}`,
+  }) : null;
+
+  useEffect(() => {
+    onPreview?.(place, mapAirport, !fromAirport);
+    return () => onPreview?.(null, null, false);
+  }, [place, mapAirport, fromAirport, onPreview]);
 
   const refreshRequests = useCallback(async (signal?: AbortSignal) => {
     const revision = requestRevision.current;
@@ -172,15 +190,23 @@ export default function AirportRequestForm() {
       </fieldset>
       <div className="text-sm font-medium">
         <label htmlFor="airport-select">Airport</label>
-        <select id="airport-select" name="airport" className={input} required>
+        <select id="airport-select" name="airport" className={input} value={airportCode} onChange={(event) => setAirportCode(event.target.value)} required>
           <option value="">Select an airport</option>
           {Object.entries(AIRPORTS).map(([code, label]) => <option key={code} value={code}>{label}</option>)}
         </select>
       </div>
       <label className="text-sm font-medium">
         {fromAirport ? "Drop-off hotel or address" : "Pickup hotel or address"}
-        <input name="address" className={input} required maxLength={160} placeholder="Hotel, estate or street address" />
+        <input name="address" className={input} required maxLength={160} value={address} onChange={(event) => {
+          setAddress(event.target.value);
+          setPlace(null);
+        }} placeholder="Hotel, estate or street address" />
       </label>
+      <PassengerPlaceLookup address={address} onSelect={(result) => {
+        setAddress(result.address);
+        setPlace(result);
+      }} />
+      {routeParams && <a className="text-sm font-semibold text-primary underline" target="_blank" rel="noreferrer" href={`https://www.google.com/maps/dir/?${routeParams}`}>Open directions</a>}
       <div className="grid grid-cols-2 gap-3">
         <label className="min-w-0 text-sm font-medium">Pickup date<input name="date" type="date" min={nairobiToday()} required className={input} /></label>
         <label className="min-w-0 text-sm font-medium">Pickup time (EAT)<input name="time" type="time" required className={input} /></label>

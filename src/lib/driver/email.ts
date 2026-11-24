@@ -94,7 +94,7 @@ export async function sendEmailCode(email:string,code:string,purpose:"driver"|"s
       to: email,
       senderName: staff ? "Mireli Staff" : "Mireli Driver",
       subject: `Your Mireli ${staff ? "staff sign-in" : "Driver verification"} code`,
-      textContent: `Your Mireli ${staff ? "staff sign-in" : "Driver verification"} code is ${code}.\n\nIt expires in 5 minutes. Do not share this code.\nIf you did not request it, you can ignore this email.`,
+      textContent: `Your Mireli ${staff ? "staff sign-in" : "Driver verification"} code\n\n${code}\n\nIt expires in 5 minutes. Do not share this code.\nIf you did not request it, you can ignore this email.`,
       htmlContent: mireliEmailShell({
         headerHtml: mireliEmailHeader(staff ? "Your staff sign-in code" : "Your driver sign-in code"),
         bodyHtml:
