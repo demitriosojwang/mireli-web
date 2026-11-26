@@ -3,7 +3,9 @@ export const MAP_PROXY_PATH = "/api/map-proxy";
 export const MAP_STYLE_URL = `${MAP_PROXY_PATH}/styles/liberty`;
 export const DEFAULT_PUBLIC_ORIGIN = "https://mireli.online";
 
-const ALLOWED_ROOTS = ["styles/", "planet", "fonts/", "sprites/", "natural_earth/"];
+// OpenFreeMap's current TileJSON endpoint is `backup_planet`; older styles
+// still point at `planet`. Keep both exact roots scoped to this tile provider.
+const ALLOWED_ROOTS = ["styles/", "planet", "backup_planet", "fonts/", "sprites/", "natural_earth/"];
 const MAX_PATH_LENGTH = 512;
 
 export function isAllowedMapAssetPath(path: string): boolean {

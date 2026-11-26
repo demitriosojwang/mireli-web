@@ -13,6 +13,8 @@ describe("map asset path validation", () => {
     expect(isAllowedMapAssetPath("styles/liberty")).toBe(true);
     expect(isAllowedMapAssetPath("planet")).toBe(true);
     expect(isAllowedMapAssetPath("planet/12/2305/1837.pbf")).toBe(true);
+    expect(isAllowedMapAssetPath("backup_planet")).toBe(true);
+    expect(isAllowedMapAssetPath("backup_planet/20261122_124456_pt/12/2305/1837.pbf")).toBe(true);
     expect(isAllowedMapAssetPath("fonts/Noto Sans Regular/0-255.pbf")).toBe(true);
     expect(isAllowedMapAssetPath("sprites/ofm_f384/ofm.json")).toBe(true);
     expect(isAllowedMapAssetPath("sprites/ofm_f384/ofm.png")).toBe(true);
@@ -30,6 +32,7 @@ describe("map asset path validation", () => {
     expect(isAllowedMapAssetPath("styles\\liberty")).toBe(false);
     expect(isAllowedMapAssetPath("admin/users")).toBe(false);
     expect(isAllowedMapAssetPath("planet.json")).toBe(false);
+    expect(isAllowedMapAssetPath("backup_planet.json")).toBe(false);
     expect(isAllowedMapAssetPath("styles/liberty")).toBe(true);
   });
 

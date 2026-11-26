@@ -21,7 +21,7 @@ describe("map proxy route", () => {
     const upstreamStyle = JSON.stringify({
       glyphs: "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
       sprite: "https://tiles.openfreemap.org/sprites/ofm_f384/ofm",
-      sources: { openmaptiles: { url: "https://tiles.openfreemap.org/planet" } },
+      sources: { openmaptiles: { url: "https://tiles.openfreemap.org/backup_planet" } },
     });
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -38,7 +38,7 @@ describe("map proxy route", () => {
     const body = await response.json();
     expect(body.glyphs).toBe("https://mireli.online/api/map-proxy/fonts/{fontstack}/{range}.pbf");
     expect(body.sprite).toBe("https://mireli.online/api/map-proxy/sprites/ofm_f384/ofm");
-    expect(body.sources.openmaptiles.url).toBe("https://mireli.online/api/map-proxy/planet");
+    expect(body.sources.openmaptiles.url).toBe("https://mireli.online/api/map-proxy/backup_planet");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0][0])).toBe("https://tiles.openfreemap.org/styles/liberty");
   });
@@ -62,6 +62,38 @@ describe("map proxy route", () => {
     expect(response.headers.get("content-type")).toBe("application/x-protobuf");
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(tile);
     expect(String(fetchMock.mock.calls[0][0])).toBe("https://tiles.openfreemap.org/planet/12/2498/2093.pbf");
+  });
+
+  it("proxies the current OpenFreeMap backup planet TileJSON and vector tiles", async () => {
+    const tileJson = JSON.stringify({ tiles: ["https://tiles.openfreemap.org/backup_planet/20261122_124456_pt/{z}/{x}/{y}.pbf"] });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "application/json" }),
+        text: async () => tileJson,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "application/x-protobuf" }),
+        body: new Uint8Array([1, 2, 3]),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const tileJsonResponse = await GET(request(["backup_planet"]), context(["backup_planet"]));
+    expect(tileJsonResponse.status).toBe(200);
+    expect(await tileJsonResponse.json()).toEqual({
+      tiles: ["https://mireli.online/api/map-proxy/backup_planet/20261122_124456_pt/{z}/{x}/{y}.pbf"],
+    });
+
+    const tileResponse = await GET(
+      request(["backup_planet", "20261122_124456_pt", "12", "2498", "2093.pbf"]),
+      context(["backup_planet", "20261122_124456_pt", "12", "2498", "2093.pbf"]),
+    );
+    expect(tileResponse.status).toBe(200);
+    expect(new Uint8Array(await tileResponse.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
+    expect(String(fetchMock.mock.calls[1][0])).toBe("https://tiles.openfreemap.org/backup_planet/20261122_124456_pt/12/2498/2093.pbf");
   });
 
   it("refuses paths outside the basemap tile root", async () => {
