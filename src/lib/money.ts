@@ -609,6 +609,7 @@ export async function dispatchInstantPayouts(driverId:string,tripId:string) {
 
 /** Uses durable, individually correlated transfer attempts; never treats provider acceptance as payment. */
 export async function runPayoutBatch(actor: {id:string;name:string;role:"passenger"|"admin"|"system"}) {
+  if((await getConfig()).payoutMode==="driver_self_service")return {drivers:0,completed:0,failed:0,processing:0,ambiguous:0,deferred:0};
   const records=await db.payoutRecord.findMany({where:{status:"queued"},take:100,orderBy:{initiatedAt:"asc"}});
   const drivers=new Set(records.map(p=>p.driverId));
   const counts={drivers:drivers.size,completed:0,failed:0,processing:0,ambiguous:0,deferred:0};
@@ -628,6 +629,8 @@ export async function runPayoutBatch(actor: {id:string;name:string;role:"passeng
 /** Is recovery work needed for after-trip payouts? Legacy batch modes remain migration-only. */
 export async function isPayoutBatchDue(): Promise<{ due: boolean; mode: string; note: string }> {
   const cfg = await getConfig();
+  if (cfg.payoutMode === "driver_self_service")
+    return { due:false,mode:cfg.payoutMode,note:"Drivers withdraw eligible earnings from the Driver app." };
   if (cfg.payoutMode === "instant_per_trip")
     return { due:await db.payoutRecord.count({where:{status:"queued"}})>0, mode:cfg.payoutMode,note:"Completion prompts transfer dispatch; sweeps recover queued records. Provider confirmation is still required." };
   const now = new Date();

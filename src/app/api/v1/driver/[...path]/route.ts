@@ -3,7 +3,7 @@ import {requireDriver, requestChallenge, requestEmailChallenge, verifyChallenge}
 import {DriverError, integer} from "@/lib/driver/errors";
 import {onboarding, saveProfile, submitApplication, uploadDocument, removePendingDocument, driverEligibility} from "@/lib/driver/onboarding";
 import {maxDocumentBytes} from "@/lib/driver/catalogue";
-import {driverEarnings} from "@/lib/driver/earnings";
+import {driverEarnings,requestDriverPayout} from "@/lib/driver/earnings";
 import {supportCases,createSupportCase} from "@/lib/driver/support";
 import {driverTrips,driverTripCommand} from "@/lib/driver/trips";
 import {requestPayoutDestination} from "@/lib/driver/beneficiary";
@@ -58,6 +58,7 @@ async function handler(req:Request,context:Context) {
     else if(path==="onboarding" && req.method==="PUT") result=await saveProfile(driverId,await json());
     else if(path==="onboarding/submissions" && req.method==="POST") result=await submitApplication(driverId,await json());
     else if(path==="earnings" && req.method==="GET") result=await driverEarnings(driverId,new URL(req.url));
+    else if(path==="payouts" && req.method==="POST") result=await requestDriverPayout(driverId,await json());
     else if(path==="payout-destination" && req.method==="POST")result=await requestPayoutDestination(driverId,await json());
     else if(path==="trips" && req.method==="GET")result=await driverTrips(driverId);
     else if(path==="airport-transfers" && req.method==="GET")result=await driverAirportTransfers(driverId);

@@ -291,15 +291,15 @@ function PayoutsTab() {
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
         <div>
           <p className="text-sm font-medium">
-            {data?.payoutMode === "instant_per_trip" ? "After-trip payout dispatch" : "Payout timing needs review"}
+            {data?.payoutMode === "driver_self_service" ? "Driver-initiated withdrawals" : "Scheduled payout dispatch"}
           </p>
           <p className="text-xs text-muted-foreground">
-            Dispatch begins when a trip completes. Provider confirmation is still required. {data?.batch.note}
+            {data?.batch.note}
           </p>
         </div>
-        <Button onClick={runBatch} disabled={busy || !data?.payouts.some((p) => p.status === "queued")}>
+        {data?.payoutMode !== "driver_self_service" && <Button onClick={runBatch} disabled={busy || !data?.payouts.some((p) => p.status === "queued")}>
           <Send className="h-4 w-4" /> Process queued payouts
-        </Button>
+        </Button>}
       </div>
 
       <div className="overflow-x-auto rounded-lg border">
