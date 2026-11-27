@@ -78,10 +78,10 @@ export async function PUT(req: NextRequest) {
     data.creditValidityDays = v;
   }
   if (body.payoutMode !== undefined) {
-    if (body.payoutMode !== "instant_per_trip") {
-      return NextResponse.json({ error: "Driver payouts are configured to start after each completed trip." }, { status: 400 });
+    if (body.payoutMode !== "instant_per_trip" && body.payoutMode !== "driver_self_service") {
+      return NextResponse.json({ error: "Choose automatic dispatch or driver-initiated withdrawals." }, { status: 400 });
     }
-    data.payoutMode = "instant_per_trip";
+    data.payoutMode = body.payoutMode;
   }
   if (body.payoutDay !== undefined) {
     const v = parseInt(body.payoutDay, 10);

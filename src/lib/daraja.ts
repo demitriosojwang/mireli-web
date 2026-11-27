@@ -29,6 +29,9 @@ import { db } from "@/lib/db";
  *   MPESA_CONSUMER_SECRET     Daraja app consumer secret
  *   MPESA_SHORTCODE           collection (head) shortcode — fares land here
  *   MPESA_PASSKEY             Lipa na M-Pesa Online passkey
+ *   MPESA_STK_TRANSACTION_TYPE  CustomerPayBillOnline (default) | CustomerBuyGoodsOnline
+ *   MPESA_STK_PARTY_B         receiving Till for Buy Goods, if different from the shortcode
+ *   MPESA_MANUAL_PAYBILL_ENABLED  false for STK-only checkout
  *   MPESA_CALLBACK_BASE_URL   public https base, e.g. https://mireli.co.ke
  *   MPESA_B2C_SHORTCODE       initiator shortcode for B2C/reversal (optional)
  *   MPESA_INITIATOR_NAME      API operator username for B2C/reversal
@@ -209,6 +212,7 @@ export async function getPublicPayOptions(): Promise<{
   methods: string[];
 }> {
   const creds = await resolveDaraja();
+  const stk = stkCollection(creds);
   if (!isLocalDemoEnabled()) {
     // STK availability includes the signed callback URL that Safaricom needs
     // to confirm a payment. Do not advertise a method that can only fail after
@@ -225,10 +229,22 @@ export async function getPublicPayOptions(): Promise<{
       throw new Error("M-Pesa callbacks require a public HTTPS origin.");
     }
   }
-  return {
-    paybill: creds.shortcode || null,
-    methods: ["mpesa_stk", ...(creds.shortcode ? ["mpesa_paybill"] : [])],
-  };
+  const paybill = stk.transactionType === "CustomerPayBillOnline" && process.env.MPESA_MANUAL_PAYBILL_ENABLED !== "false"
+    ? creds.shortcode || null : null;
+  return { paybill, methods: ["mpesa_stk", ...(paybill ? ["mpesa_paybill"] : [])] };
+}
+
+function stkCollection(creds: DarajaCredentials) {
+  const transactionType = process.env.MPESA_STK_TRANSACTION_TYPE?.trim() || "CustomerPayBillOnline";
+  if (transactionType !== "CustomerPayBillOnline" && transactionType !== "CustomerBuyGoodsOnline") {
+    throw new Error("Invalid M-Pesa Express transaction type.");
+  }
+  const partyB = transactionType === "CustomerBuyGoodsOnline"
+    ? process.env.MPESA_STK_PARTY_B?.trim() || creds.shortcode : creds.shortcode;
+  if (creds.mode === "live" && (!/^\d{5,7}$/.test(creds.shortcode) || !/^\d{5,7}$/.test(partyB))) {
+    throw new Error("Invalid M-Pesa Express shortcode or receiving Till.");
+  }
+  return { transactionType, partyB };
 }
 
 /** Daraja callback endpoints derived from the configured public base URL. */
@@ -406,6 +422,7 @@ export async function stkPush(phone: string, amount: number, ref: string, intent
     : urls.stkResult;
   const timestamp = mpesaTimestamp();
   try {
+    const { transactionType, partyB } = stkCollection(creds);
     const token = await getAccessToken(creds);
     const res = await darajaFetch(`${apiBase(creds)}/mpesa/stkpush/v1/processrequest`, {
       method: "POST",
@@ -414,10 +431,10 @@ export async function stkPush(phone: string, amount: number, ref: string, intent
         BusinessShortCode: creds.shortcode,
         Password: stkPassword(creds, timestamp),
         Timestamp: timestamp,
-        TransactionType: "CustomerPayBillOnline",
+        TransactionType: transactionType,
         Amount: Math.round(amount),
         PartyA: party,
-        PartyB: creds.shortcode,
+        PartyB: partyB,
         PhoneNumber: party,
         CallBackURL: stkResultUrl,
         AccountReference: ref.slice(0, 12),
@@ -700,9 +717,11 @@ export async function b2c(params: {
   resultUrl?: string;
   timeoutUrl?: string;
   originatorId?: string;
+  apiVersion?: "v1" | "v3";
 }): Promise<DarajaResultCode> {
   const creds = await resolveDaraja();
-  if (creds.mode !== "mock" && (!params.resultUrl || !params.timeoutUrl || !params.originatorId)) {
+  const apiVersion = params.apiVersion ?? "v3";
+  if (creds.mode !== "mock" && (!params.resultUrl || !params.timeoutUrl || (apiVersion === "v3" && !params.originatorId))) {
     throw new Error("B2C requires a durable settlement attempt and correlated callback endpoints.");
   }
   if (creds.mode === "mock") {
@@ -741,14 +760,13 @@ export async function b2c(params: {
       resultDesc: "B2C needs the initiator name + security credential (Admin → Payments)",
     };
   }
-  const urls = callbackUrls(creds);
   try {
     const token = await getAccessToken(creds);
-    const res = await darajaFetch(`${apiBase(creds)}/mpesa/b2c/v3/paymentrequest`, {
+    const res = await darajaFetch(`${apiBase(creds)}/mpesa/b2c/${apiVersion}/paymentrequest`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        OriginatorConversationID: params.originatorId,
+        ...(apiVersion === "v3" ? { OriginatorConversationID: params.originatorId } : {}),
         InitiatorName: creds.initiatorName,
         SecurityCredential: initiator,
         CommandID: "BusinessPayment",
@@ -773,7 +791,7 @@ export async function b2c(params: {
         resultDesc: data.ResponseDescription || "B2C accepted",
         settled: false,
         conversationId: data.ConversationID,
-        originatorId: data.OriginatorConversationID || params.originatorId,
+        originatorId: apiVersion === "v1" ? data.OriginatorConversationID : params.originatorId,
       };
     }
     return {
@@ -785,6 +803,17 @@ export async function b2c(params: {
       resultCode: RESULT_CODES.TIMEOUT,
       resultDesc: `Could not reach Daraja: ${e instanceof Error ? e.message : "network error"}`,
     };
+  }
+}
+
+export function driverPayoutProviderReady(creds: DarajaCredentials): boolean {
+  if (creds.mode === "mock") return isLocalDemoEnabled();
+  if (process.env.MPESA_LIVE_PAYOUTS_ENABLED !== "true" || creds.environment !== "production" ||
+    !/^\d{5,7}$/.test(creds.b2cShortcode) || !creds.initiatorName) return false;
+  try {
+    return new URL(creds.callbackBaseUrl).protocol === "https:" && Boolean(securityCredential(creds));
+  } catch {
+    return false;
   }
 }
 

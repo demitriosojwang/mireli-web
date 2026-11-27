@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { callbackUrls, getPublicPayOptions, stkPush, verifyCallbackToken, type DarajaCredentials } from "@/lib/daraja";
+import { b2c, callbackUrls, getPublicPayOptions, stkPush, verifyCallbackToken, type DarajaCredentials } from "@/lib/daraja";
 
 const mocks = vi.hoisted(() => ({ platformConfigFindUnique: vi.fn() }));
 vi.mock("@/lib/db", () => ({ db: { platformConfig: { findUnique: mocks.platformConfigFindUnique } } }));
@@ -65,6 +65,8 @@ describe("Daraja callback authorization", () => {
       paybill: "174379",
       methods: ["mpesa_stk", "mpesa_paybill"],
     });
+    vi.stubEnv("MPESA_MANUAL_PAYBILL_ENABLED", "false");
+    await expect(getPublicPayOptions()).resolves.toEqual({ paybill: null, methods: ["mpesa_stk"] });
   });
 
   it("signs each configured webhook URL for its own callback type", () => {
@@ -104,6 +106,8 @@ describe("Daraja callback authorization", () => {
     vi.stubEnv("MPESA_SHORTCODE", "174379");
     vi.stubEnv("MPESA_PASSKEY", "test-passkey");
     vi.stubEnv("MPESA_CALLBACK_BASE_URL", "https://mireli.example");
+    vi.stubEnv("MPESA_STK_TRANSACTION_TYPE", "CustomerBuyGoodsOnline");
+    vi.stubEnv("MPESA_STK_PARTY_B", "654321");
     mocks.platformConfigFindUnique.mockResolvedValue(null);
 
     const fetchMock = vi.fn()
@@ -112,12 +116,39 @@ describe("Daraja callback authorization", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await stkPush("+254712345678", 500, "MR-ABC123", "tx-123");
-    const payload = JSON.parse(fetchMock.mock.calls[1][1].body as string) as { CallBackURL: string; QueueTimeOutURL?: string };
+    const payload = JSON.parse(fetchMock.mock.calls[1][1].body as string);
     const callback = new URL(payload.CallBackURL);
 
     expect(result.ok).toBe(true);
+    expect(payload).toMatchObject({ BusinessShortCode: "174379", PartyB: "654321", TransactionType: "CustomerBuyGoodsOnline" });
     expect(callback.searchParams.get("intent")).toBe("tx-123");
     expect(verifyCallbackToken("stk", callback.searchParams.get("mireli_token"))).toBe(true);
     expect(payload.QueueTimeOutURL).toBeUndefined();
+  });
+
+  it("uses the provisioned B2C v1 endpoint and returns the provider-generated correlation IDs", async () => {
+    vi.stubEnv("MPESA_MODE", "");
+    vi.stubEnv("MPESA_ENVIRONMENT", "production");
+    vi.stubEnv("MPESA_CONSUMER_KEY", "test-b2c-key");
+    vi.stubEnv("MPESA_CONSUMER_SECRET", "test-b2c-secret");
+    vi.stubEnv("MPESA_SHORTCODE", "174379");
+    vi.stubEnv("MPESA_PASSKEY", "test-passkey");
+    vi.stubEnv("MPESA_B2C_SHORTCODE", "654321");
+    vi.stubEnv("MPESA_INITIATOR_NAME", "test-operator");
+    vi.stubEnv("MPESA_SECURITY_CREDENTIAL", "test-security-credential");
+    mocks.platformConfigFindUnique.mockResolvedValue(null);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: "token", expires_in: "3599" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ResponseCode: "0", ConversationID: "provider-conversation", OriginatorConversationID: "provider-originator" }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await b2c({ apiVersion: "v1", receiverPhone: "+254712345678", amount: 500,
+      resultUrl: "https://mireli.example/result", timeoutUrl: "https://mireli.example/timeout" });
+
+    expect(fetchMock.mock.calls[1][0]).toBe("https://api.safaricom.co.ke/mpesa/b2c/v1/paymentrequest");
+    const payload = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    expect(payload).toMatchObject({ Amount: 500, PartyA: "654321", PartyB: "254712345678", CommandID: "BusinessPayment" });
+    expect(payload.OriginatorConversationID).toBeUndefined();
+    expect(result).toMatchObject({ resultCode: "ACCEPTED", settled: false, conversationId: "provider-conversation", originatorId: "provider-originator" });
   });
 });

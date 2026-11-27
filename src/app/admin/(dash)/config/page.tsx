@@ -141,14 +141,17 @@ export default function AdminConfig() {
           <CardHeader>
             <CardTitle className="text-base">Payouts</CardTitle>
             <CardDescription>
-              Driver payout dispatch starts after the trip is completed. Only approved payout
-              destinations can receive money; provider confirmation is still required.
+              Earnings become eligible after the trip is completed. Payouts require an approved M-Pesa number and provider confirmation.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-1.5">
-              <Label>Payout timing</Label>
-              <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">After each completed trip</div>
+              <Label htmlFor="payout-mode">Payout timing</Label>
+              <select id="payout-mode" className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                value={form.payoutMode} onChange={(event) => setForm({ ...form, payoutMode: event.target.value })}>
+                <option value="instant_per_trip">Automatic after trip completion</option>
+                <option value="driver_self_service">Driver requests withdrawal</option>
+              </select>
               <p className="text-xs text-muted-foreground">Last payout activity: {data?.lastPayoutRunAt ? fmtDateTime(data.lastPayoutRunAt) : "none yet"}</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
